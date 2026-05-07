@@ -306,11 +306,28 @@ def run_script(name: str, *args: str, capture: bool = False, stream_stderr: bool
     argv = list(args)
 
     def _invoke() -> int:
+        # Inspect main() signature: scripts either accept argv as a list
+        # or take no args and read sys.argv directly.
+        import inspect
         try:
-            rc = main_fn(argv)
+            sig = inspect.signature(main_fn)
+            takes_argv = len(sig.parameters) >= 1
+        except (ValueError, TypeError):
+            takes_argv = True  # safer default
+
+        # Save and set sys.argv for scripts that read it directly.
+        saved_argv = sys.argv
+        sys.argv = [name, *argv]
+        try:
+            if takes_argv:
+                rc = main_fn(argv)
+            else:
+                rc = main_fn()
         except SystemExit as e:
+            sys.argv = saved_argv
             return int(e.code) if e.code is not None else 0
-        # main() may return None (treated as success) or an int exit code
+        finally:
+            sys.argv = saved_argv
         return int(rc) if rc is not None else 0
 
     if capture:
