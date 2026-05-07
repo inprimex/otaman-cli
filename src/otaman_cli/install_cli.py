@@ -30,9 +30,9 @@ import shutil
 import sys
 from pathlib import Path
 
-# Plugin root = parent of scripts/ directory.
-PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-CLI_DIR = PLUGIN_ROOT / "cli"
+# Layout (post-Step-1 carve): src/otaman_cli/install_cli.py
+# Walk up to otaman-cli/ root, then into cli/.
+CLI_DIR = Path(__file__).resolve().parent.parent.parent / "cli"
 POSIX_LAUNCHER = CLI_DIR / "maestro.sh"
 WINDOWS_LAUNCHER = CLI_DIR / "maestro.cmd"
 
