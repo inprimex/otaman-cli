@@ -155,17 +155,20 @@ class TestRegistryHelpers:
 # CLI subcommands
 
 
-@pytest.mark.skip(reason="Tests cli/maestro.py dispatcher; re-enable when Stage 4 of carve completes")
 class TestLauncherCli:
     """Run the actual CLI as a subprocess so the dispatch path is exercised."""
 
     @staticmethod
     def _run(args: list[str], registry: Path, **kwargs):
-        cli = REPO_ROOT / "cli" / "maestro.py"
+        cli_invoke = [sys.executable, "-m", "otaman_cli.main"]
         env = os.environ.copy()
         env["MAESTRO_LAUNCHERS_REGISTRY"] = str(registry)
+        repo_root = Path(__file__).resolve().parent.parent
+        bridge_src = str(repo_root / "src")
+        core_src = str(repo_root.parent / "otaman-core" / "src")
+        env["PYTHONPATH"] = os.pathsep.join([bridge_src, core_src, env.get("PYTHONPATH", "")])
         return subprocess.run(
-            [sys.executable, str(cli), *args],
+            cli_invoke + list(args),
             capture_output=True,
             text=True,
             env=env,
@@ -217,16 +220,19 @@ class TestLauncherCli:
 # maestro upgrade
 
 
-@pytest.mark.skip(reason="Tests cli/maestro.py dispatcher; re-enable when Stage 4 of carve completes")
 class TestMaestroUpgrade:
 
     @staticmethod
     def _run(args: list[str], registry: Path, **kwargs):
-        cli = REPO_ROOT / "cli" / "maestro.py"
+        cli_invoke = [sys.executable, "-m", "otaman_cli.main"]
         env = os.environ.copy()
         env["MAESTRO_LAUNCHERS_REGISTRY"] = str(registry)
+        repo_root = Path(__file__).resolve().parent.parent
+        bridge_src = str(repo_root / "src")
+        core_src = str(repo_root.parent / "otaman-core" / "src")
+        env["PYTHONPATH"] = os.pathsep.join([bridge_src, core_src, env.get("PYTHONPATH", "")])
         return subprocess.run(
-            [sys.executable, str(cli), *args],
+            cli_invoke + list(args),
             capture_output=True,
             text=True,
             env=env,

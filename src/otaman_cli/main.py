@@ -54,6 +54,19 @@ VERSION = "0.1.0"
 # multiple sibling repos via "python -m <module>". SCRIPT_MAP records the
 # legacy filename → new module name lookup; PYTHONPATH for the subprocess
 # is built from the dispatcher's own location.
+# SCRIPT_DIR transitional alias — for the few cmd_X functions that still use
+# direct script-path subprocess invocation. Points at otaman-plugin/scripts/
+# (where most legacy plugin scripts now live as bare-name modules).
+def _resolve_script_dir() -> Path:
+    here = Path(__file__).resolve()
+    # /home/romans/otaman/otaman-cli/src/otaman_cli/main.py → /home/romans/otaman/
+    project_parent = here.parent.parent.parent.parent
+    return project_parent / "otaman-plugin" / "scripts"
+
+
+SCRIPT_DIR = _resolve_script_dir()
+
+
 SCRIPT_MAP = {
     # otaman-core: validators
     "validate-platform.py": "otaman_core.validate_platform",
@@ -63,6 +76,13 @@ SCRIPT_MAP = {
     "cleanup-bus.py": "otaman_cli.cleanup_bus",
     "compliance-report.py": "otaman_cli.compliance_report",
     "status-report.py": "otaman_cli.status_report",
+    "models-report.py": "otaman_cli.models_report",
+    "accounts.py": "otaman_cli.accounts",
+    "install_cli.py": "otaman_cli.install_cli",
+    # otaman-bridge: server daemon scripts
+    "ping.py": "otaman_bridge.ping",
+    "afk.py": "otaman_bridge.afk",
+    "bridge/cli.py": "otaman_bridge.cli",
     # otaman-plugin: scripts/ on pythonpath, bare-name modules
     "actualize-tasks.py": "actualize_tasks",
     "clone-project.py": "clone_project",
@@ -1855,7 +1875,7 @@ def cmd_bridge(args: list[str]) -> int:
     configured transport.
     """
     UI.header("Maestro Bridge")
-    script = SCRIPT_DIR.parent / "bridge" / "cli.py"
+    # bridge cli now invoked as a package module
     if not script.exists():
         UI.error(f"bridge/cli.py not found at {script}")
         return 1
@@ -1884,9 +1904,8 @@ def cmd_git_host(args: list[str]) -> int:
     sub = (args[0] if args else "list").lower()
     rest = args[1:]
 
-    sys.path.insert(0, str(SCRIPT_DIR))
     try:
-        import git_host as gh  # type: ignore
+        from otaman_core import git_host as gh
     except ImportError as e:
         UI.error(f"Failed to import git_host module: {e}")
         return 1
@@ -2382,7 +2401,7 @@ def cmd_launcher(args: list[str]) -> int:
         if str(scripts_dir) not in sys.path:
             sys.path.insert(0, str(scripts_dir))
         try:
-            import _launchers_registry as reg  # type: ignore
+            from otaman_cli import _launchers_registry as reg  # type: ignore
         except ImportError as e:
             UI.error(f"Failed to load registry helper: {e}")
             return 1
@@ -2529,7 +2548,7 @@ def cmd_upgrade(args: list[str]) -> int:
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
     try:
-        import _launchers_registry as reg  # type: ignore
+        from otaman_cli import _launchers_registry as reg  # type: ignore
         import yaml  # type: ignore
     except ImportError as e:
         UI.error(f"Missing dependency: {e}")
