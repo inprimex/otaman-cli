@@ -54,19 +54,6 @@ VERSION = "0.1.0"
 # multiple sibling repos via "python -m <module>". SCRIPT_MAP records the
 # legacy filename → new module name lookup; PYTHONPATH for the subprocess
 # is built from the dispatcher's own location.
-# SCRIPT_DIR transitional alias — for the few cmd_X functions that still use
-# direct script-path subprocess invocation. Points at otaman-plugin/scripts/
-# (where most legacy plugin scripts now live as bare-name modules).
-def _resolve_script_dir() -> Path:
-    here = Path(__file__).resolve()
-    # /home/romans/otaman/otaman-cli/src/otaman_cli/main.py → /home/romans/otaman/
-    project_parent = here.parent.parent.parent.parent
-    return project_parent / "otaman-plugin" / "scripts"
-
-
-SCRIPT_DIR = _resolve_script_dir()
-
-
 SCRIPT_MAP = {
     # otaman-core: validators
     "validate-platform.py": "otaman_core.validate_platform",
@@ -94,23 +81,25 @@ SCRIPT_MAP = {
 }
 
 
-def _build_subprocess_env() -> dict:
-    """PYTHONPATH for sibling-repo lookup during run_script subprocesses."""
-    import os as _os
-    env = _os.environ.copy()
+def _ensure_sibling_paths() -> None:
+    """Add sibling otaman-* package paths to sys.path for in-process imports.
+
+    Idempotent — safe to call repeatedly. Only adds paths that exist on disk
+    (a missing sibling repo is silently skipped; downstream import will raise
+    ModuleNotFoundError with a clear message).
+    """
     here = Path(__file__).resolve()
-    # /home/romans/otaman/otaman-cli/src/otaman_cli/main.py
+    # /home/romans/otaman/otaman-cli/src/otaman_cli/main.py → /home/romans/otaman/
     project_parent = here.parent.parent.parent.parent
-    paths = [
-        str(project_parent / "otaman-core" / "src"),
-        str(project_parent / "otaman-cli" / "src"),
-        str(project_parent / "otaman-bridge" / "src"),
-        str(project_parent / "otaman-plugin" / "scripts"),
+    candidates = [
+        project_parent / "otaman-core" / "src",
+        project_parent / "otaman-bridge" / "src",
+        project_parent / "otaman-plugin" / "scripts",
     ]
-    env["PYTHONPATH"] = _os.pathsep.join(
-        paths + [env.get("PYTHONPATH", "")]
-    )
-    return env
+    for path in candidates:
+        s = str(path)
+        if path.is_dir() and s not in sys.path:
+            sys.path.insert(0, s)
 
 # Fix Windows console encoding for Unicode output
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -275,27 +264,63 @@ class UI:
 from otaman_cli.identity import find_project_root, resolve_agent_identity
 
 
-def run_script(name: str, *args: str, capture: bool = False, stream_stderr: bool = False) -> subprocess.CompletedProcess[str]:
-    """Run an otaman script via ``python -m <module>``.
+def run_script(name: str, *args: str, capture: bool = False, stream_stderr: bool = False):
+    """Run an otaman script via direct Python import (Roman option C).
 
-    SCRIPT_MAP records legacy filename → module name; PYTHONPATH for the
-    subprocess includes all sibling otaman-* repos (per Roman option B —
-    the dispatcher's run_script invokes scripts across the polyrepo).
+    SCRIPT_MAP records legacy filename → fully-qualified module name. The
+    target module is imported in-process; its main(argv) is called; the
+    return value is shaped to match subprocess.CompletedProcess so existing
+    call sites in this dispatcher don't need to change.
 
     Args:
         capture: Capture stdout (for JSON parsing).
-        stream_stderr: If True and capture=True, let stderr pass through to terminal.
+        stream_stderr: If True and capture=True, let stderr pass through.
+
+    Returns:
+        SimpleNamespace with .returncode, .stdout (str if capture else None),
+        .stderr (always None — pure imports don't separate stderr).
     """
     if name not in SCRIPT_MAP:
         UI.error(f"Script not in SCRIPT_MAP: {name}")
         sys.exit(2)
     module_name = SCRIPT_MAP[name]
-    cmd = [sys.executable, "-m", module_name, *args]
-    env = _build_subprocess_env()
+
+    _ensure_sibling_paths()
+
+    import importlib
+    import io
+    import contextlib
+    from types import SimpleNamespace
+
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError as e:
+        UI.error(f"Failed to import {module_name}: {e}")
+        return SimpleNamespace(returncode=2, stdout="", stderr=None)
+
+    main_fn = getattr(module, "main", None)
+    if main_fn is None:
+        UI.error(f"Module {module_name} has no main() entry point")
+        return SimpleNamespace(returncode=2, stdout="", stderr=None)
+
+    argv = list(args)
+
+    def _invoke() -> int:
+        try:
+            rc = main_fn(argv)
+        except SystemExit as e:
+            return int(e.code) if e.code is not None else 0
+        # main() may return None (treated as success) or an int exit code
+        return int(rc) if rc is not None else 0
+
     if capture:
-        stderr_target = None if stream_stderr else subprocess.PIPE
-        return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=stderr_target, text=True, env=env)
-    return subprocess.run(cmd, env=env)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = _invoke()
+        return SimpleNamespace(returncode=rc, stdout=buf.getvalue(), stderr=None)
+
+    rc = _invoke()
+    return SimpleNamespace(returncode=rc, stdout=None, stderr=None)
 
 
 
@@ -1793,17 +1818,11 @@ def cmd_migrate(args: list[str]) -> int:
 def cmd_models(args: list[str]) -> int:
     """Show model/effort defaults shipped with the plugin and diff vs platform.yaml overrides."""
     UI.header("Maestro Model/Effort Report")
-    script = SCRIPT_DIR / "models-report.py"
-    if not script.exists():
-        UI.error(f"models-report.py not found at {script}")
-        return 1
-    cmd = [sys.executable, str(script), *args]
     try:
-        result = subprocess.run(cmd, check=False)
+        result = run_script("models-report.py", *args)
         return result.returncode
-    except Exception as e:
-        UI.error(f"Failed to run models-report: {e}")
-        return 1
+    except SystemExit as e:
+        return int(e.code) if e.code is not None else 1
 
 
 def cmd_accounts(args: list[str]) -> int:
@@ -1813,17 +1832,11 @@ def cmd_accounts(args: list[str]) -> int:
     its own argparse-based arg handling.
     """
     UI.header("Maestro Accounts")
-    script = SCRIPT_DIR / "accounts.py"
-    if not script.exists():
-        UI.error(f"accounts.py not found at {script}")
-        return 1
-    cmd = [sys.executable, str(script), *args]
     try:
-        result = subprocess.run(cmd, check=False)
+        result = run_script("accounts.py", *args)
         return result.returncode
-    except Exception as e:
-        UI.error(f"Failed to run accounts: {e}")
-        return 1
+    except SystemExit as e:
+        return int(e.code) if e.code is not None else 1
 
 
 def cmd_ping(args: list[str]) -> int:
@@ -1834,17 +1847,11 @@ def cmd_ping(args: list[str]) -> int:
     and without debounce — it's an explicit user/agent-invoked call.
     """
     UI.header("Maestro Ping")
-    script = SCRIPT_DIR / "ping.py"
-    if not script.exists():
-        UI.error(f"ping.py not found at {script}")
-        return 1
-    cmd = [sys.executable, str(script), *args]
     try:
-        result = subprocess.run(cmd, check=False)
+        result = run_script("ping.py", *args)
         return result.returncode
-    except Exception as e:
-        UI.error(f"Failed to run ping: {e}")
-        return 1
+    except SystemExit as e:
+        return int(e.code) if e.code is not None else 1
 
 
 def cmd_afk(args: list[str]) -> int:
@@ -1853,17 +1860,11 @@ def cmd_afk(args: list[str]) -> int:
     Subcommands: on [DURATION], off, status. Forwards to scripts/afk.py.
     """
     UI.header("Maestro AFK")
-    script = SCRIPT_DIR / "afk.py"
-    if not script.exists():
-        UI.error(f"afk.py not found at {script}")
-        return 1
-    cmd = [sys.executable, str(script), *args]
     try:
-        result = subprocess.run(cmd, check=False)
+        result = run_script("afk.py", *args)
         return result.returncode
-    except Exception as e:
-        UI.error(f"Failed to run afk: {e}")
-        return 1
+    except SystemExit as e:
+        return int(e.code) if e.code is not None else 1
 
 
 def cmd_bridge(args: list[str]) -> int:
@@ -1875,20 +1876,13 @@ def cmd_bridge(args: list[str]) -> int:
     configured transport.
     """
     UI.header("Maestro Bridge")
-    # bridge cli now invoked as a package module
-    if not script.exists():
-        UI.error(f"bridge/cli.py not found at {script}")
-        return 1
-    cmd = [sys.executable, str(script), *args]
     try:
-        result = subprocess.run(cmd, check=False)
+        result = run_script("bridge/cli.py", *args)
         return result.returncode
     except KeyboardInterrupt:
-        # User Ctrl-C while the daemon was running — subprocess handles it.
         return 130
-    except Exception as e:
-        UI.error(f"Failed to run bridge: {e}")
-        return 1
+    except SystemExit as e:
+        return int(e.code) if e.code is not None else 1
 
 
 def cmd_git_host(args: list[str]) -> int:
@@ -2361,16 +2355,10 @@ def cmd_install_cli(args: list[str]) -> int:
     edit PATH / create the symlink.
     """
     UI.header("Maestro Install CLI")
-    script = SCRIPT_DIR / "install_cli.py"
-    if not script.exists():
-        UI.error(f"install_cli.py not found at {script}")
-        return 1
-    cmd = [sys.executable, str(script), *args]
     try:
-        return subprocess.run(cmd, check=False).returncode
-    except Exception as e:
-        UI.error(f"Failed to run install_cli: {e}")
-        return 1
+        return run_script("install_cli.py", *args).returncode
+    except SystemExit as e:
+        return int(e.code) if e.code is not None else 1
 
 
 def cmd_launcher(args: list[str]) -> int:
@@ -2397,9 +2385,6 @@ def cmd_launcher(args: list[str]) -> int:
 
     # Registry-management subcommands
     if sub in ("list", "add", "remove", "register"):
-        scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
-        if str(scripts_dir) not in sys.path:
-            sys.path.insert(0, str(scripts_dir))
         try:
             from otaman_cli import _launchers_registry as reg  # type: ignore
         except ImportError as e:
@@ -2462,17 +2447,11 @@ def cmd_launcher(args: list[str]) -> int:
 
     # Default: scaffold a new launcher folder.
     UI.header("Maestro Launcher Scaffold")
-    script = SCRIPT_DIR / "scaffold-launcher.py"
-    if not script.exists():
-        UI.error(f"scaffold-launcher.py not found at {script}")
-        return 1
-    cmd = [sys.executable, str(script), *args]
     try:
-        result = subprocess.run(cmd, check=False)
+        result = run_script("scaffold-launcher.py", *args)
         return result.returncode
-    except Exception as e:
-        UI.error(f"Failed to run scaffold-launcher: {e}")
-        return 1
+    except SystemExit as e:
+        return int(e.code) if e.code is not None else 1
 
 
 def _resolve_connection(
@@ -2544,9 +2523,6 @@ def cmd_upgrade(args: list[str]) -> int:
             return 1
         i += 1
 
-    scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
     try:
         from otaman_cli import _launchers_registry as reg  # type: ignore
         import yaml  # type: ignore
