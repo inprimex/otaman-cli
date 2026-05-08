@@ -701,7 +701,7 @@ def configure_telegram(
     )
     results.append(f"       {bot_token_env}=<your-bot-token-here>")
     results.append(f"       chmod 600 .maestro/secrets.env")
-    results.append("  2. `pip install -r requirements-bridge.txt`")
+    results.append("  2. `pip install otaman-bridge[telegram]` (or `uv pip install otaman-bridge[telegram]` — faster)")
     results.append(f"  3. `maestro bridge run --account {account}`")
     results.append("  4. `maestro afk on 30m`")
     results.append("  5. Trigger a Claude tool call and watch your phone.")

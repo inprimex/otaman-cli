@@ -32,16 +32,17 @@ else
     exit 127
 fi
 
-# Fail fast if PyYAML isn't importable by THIS python — the most common
-# footgun is `pip3 install pyyaml` landing in a different Python.
-if ! ${PY} -c "import yaml" 2>/dev/null; then
+# Fail fast if otaman_cli isn't importable by THIS python — the most common
+# footgun post-carve is "pip installed otaman-cli into a different Python".
+if ! ${PY} -c "import otaman_cli.main" 2>/dev/null; then
     PY_PATH="$(${PY} -c 'import sys; print(sys.executable)' 2>/dev/null || echo '<unknown>')"
-    echo "maestro: PyYAML is not importable by $PY ($PY_PATH)" >&2
+    echo "maestro: otaman_cli is not importable by $PY ($PY_PATH)" >&2
     echo "maestro: install into the SAME interpreter:" >&2
-    echo "           ${PY} -m pip install --user -r $PLUGIN_ROOT/requirements.txt" >&2
+    echo "           ${PY} -m pip install otaman-cli" >&2
+    echo "maestro:   or (faster):  uv pip install otaman-cli" >&2
     echo "maestro:   (add --break-system-packages on PEP 668 / Ubuntu 23.04+)" >&2
-    echo "maestro: or set MAESTRO_PYTHON to an interpreter that has PyYAML" >&2
+    echo "maestro:   or set MAESTRO_PYTHON to an interpreter that has otaman-cli" >&2
     exit 1
 fi
 
-exec ${PY} "$SCRIPT_DIR/maestro.py" "$@"
+exec ${PY} -m otaman_cli.main "$@"

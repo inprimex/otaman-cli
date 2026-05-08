@@ -15,10 +15,12 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=7"]
 
-# Entry point: `otaman` script. Body lands when the dispatcher migrates
-# in Stage 2J. Today this is a stub package with one extracted function.
-# [project.scripts]
-# otaman = "otaman_cli.main:cli_main"
+# Entry point: `otaman` script — created by pip/uv on install. After
+# `pip install otaman-cli` the user gets `otaman` on PATH directly;
+# no wrapper script needed.
+[project.scripts]
+otaman = "otaman_cli.main:main"
+maestro = "otaman_cli.main:main"  # legacy alias during transition
 
 [build-system]
 requires = ["hatchling"]
