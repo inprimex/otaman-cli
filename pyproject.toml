@@ -7,6 +7,8 @@ authors = [{ name = "Otaman platform" }]
 license = { text = "UNLICENSED" }
 dependencies = [
     "otaman-core",
+    "otaman-bridge",
+    "otaman-plugin",
     "pyyaml>=6",
 ]
 
@@ -29,4 +31,4 @@ packages = ["src/otaman_cli"]
 testpaths = ["tests"]
 # Until uv workspace + editable install lands (Stage 1E), tests find
 # otaman-core via a sibling-checkout path. Workspace setup will replace this.
-pythonpath = ["src", "../otaman-core/src"]
+pythonpath = ["src", "../otaman-core/src", "../otaman-bridge/src", "../otaman-plugin/src"]

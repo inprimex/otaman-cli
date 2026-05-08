@@ -70,36 +70,19 @@ SCRIPT_MAP = {
     "ping.py": "otaman_bridge.ping",
     "afk.py": "otaman_bridge.afk",
     "bridge/cli.py": "otaman_bridge.cli",
-    # otaman-plugin: scripts/ on pythonpath, bare-name modules
-    "actualize-tasks.py": "actualize_tasks",
-    "clone-project.py": "clone_project",
-    "discover-repos.py": "discover_repos",
-    "generate-agent-config.py": "generate_agent_config",
-    "init-presale.py": "init_presale",
-    "map-tasks.py": "map_tasks",
-    "scaffold-launcher.py": "scaffold_launcher",
+    # otaman-plugin: proper Python package
+    "actualize-tasks.py": "otaman_plugin.actualize_tasks",
+    "clone-project.py": "otaman_plugin.clone_project",
+    "discover-repos.py": "otaman_plugin.discover_repos",
+    "generate-agent-config.py": "otaman_plugin.generate_agent_config",
+    "init-presale.py": "otaman_plugin.init_presale",
+    "map-tasks.py": "otaman_plugin.map_tasks",
+    "scaffold-launcher.py": "otaman_plugin.scaffold_launcher",
 }
 
 
-def _ensure_sibling_paths() -> None:
-    """Add sibling otaman-* package paths to sys.path for in-process imports.
-
-    Idempotent — safe to call repeatedly. Only adds paths that exist on disk
-    (a missing sibling repo is silently skipped; downstream import will raise
-    ModuleNotFoundError with a clear message).
-    """
-    here = Path(__file__).resolve()
-    # /home/romans/otaman/otaman-cli/src/otaman_cli/main.py → /home/romans/otaman/
-    project_parent = here.parent.parent.parent.parent
-    candidates = [
-        project_parent / "otaman-core" / "src",
-        project_parent / "otaman-bridge" / "src",
-        project_parent / "otaman-plugin" / "scripts",
-    ]
-    for path in candidates:
-        s = str(path)
-        if path.is_dir() and s not in sys.path:
-            sys.path.insert(0, s)
+# _ensure_sibling_paths removed: cross-repo imports now use proper package resolution
+# (otaman-cli depends on otaman-core, otaman-bridge, otaman-plugin via pyproject deps)
 
 # Fix Windows console encoding for Unicode output
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -284,8 +267,6 @@ def run_script(name: str, *args: str, capture: bool = False, stream_stderr: bool
         UI.error(f"Script not in SCRIPT_MAP: {name}")
         sys.exit(2)
     module_name = SCRIPT_MAP[name]
-
-    _ensure_sibling_paths()
 
     import importlib
     import io
