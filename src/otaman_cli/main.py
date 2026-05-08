@@ -849,6 +849,83 @@ def _get_agent_ack_status(msg_stem: str, agent: str, acks_dir: Path) -> str:
     return "pending"
 
 
+def cmd_send(args: list[str]) -> int:
+    """Send a bus message to another agent (mirrors otaman_send MCP tool).
+
+    Usage:
+      otaman send <to> --subject "..." --body "..." [--type TYPE] [--priority P]
+
+    `to` is the recipient agent name, "all" for broadcast, or "human".
+    """
+    import argparse
+    parser = argparse.ArgumentParser(prog="otaman send", add_help=False)
+    parser.add_argument("to", nargs="?")
+    parser.add_argument("--subject", required=False)
+    parser.add_argument("--body", required=False)
+    parser.add_argument("--type", dest="msg_type", default="info")
+    parser.add_argument("--priority", default="normal")
+    parser.add_argument("--from", dest="explicit_from")
+    try:
+        ns = parser.parse_args(args)
+    except SystemExit:
+        UI.muted("Usage: otaman send <to> --subject \"...\" --body \"...\" "
+                 "[--type info|question|task-assignment|...] [--priority low|normal|high|urgent]")
+        return 2
+
+    if not ns.to or not ns.subject or not ns.body:
+        UI.error("send requires <to>, --subject, and --body")
+        UI.muted("Usage: otaman send <to> --subject \"...\" --body \"...\" "
+                 "[--type ...] [--priority ...]")
+        return 2
+
+    root = find_project_root()
+    if not root:
+        UI.error("Not in an otaman project")
+        return 1
+
+    agent = resolve_agent_identity(root, explicit=ns.explicit_from)
+    if not agent:
+        UI.error("Agent identity could not be resolved from cwd or .agents/current-agent")
+        UI.muted("Tip: run from inside a managed repo, or pass --from <agent>")
+        return 1
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    ts = now.strftime("%Y%m%dT%H%M%S")
+    ts_iso = now.isoformat()
+    slug = re.sub(r"[^a-z0-9]+", "-", ns.subject.lower())[:40].strip("-")
+    filename = f"{ts}-{agent}-to-{ns.to}-{slug}.md"
+
+    content = (
+        f"---\n"
+        f"id: {ts}-{agent[:8]}\n"
+        f"from: {agent}\n"
+        f"to: {ns.to}\n"
+        f"priority: {ns.priority}\n"
+        f"type: {ns.msg_type}\n"
+        f"timestamp: {ts_iso}\n"
+        f"status: pending\n"
+        f"---\n"
+        f"\n"
+        f"## Subject: {ns.subject}\n"
+        f"\n"
+        f"{ns.body}\n"
+    )
+
+    active_dir, _acks_dir = _resolve_bus_paths(root)
+    active_dir.mkdir(parents=True, exist_ok=True)
+    msg_path = active_dir / filename
+    msg_path.write_text(content, encoding="utf-8")
+
+    UI.ok(f"Sent: {filename}")
+    UI.kv("  From", agent)
+    UI.kv("  To", ns.to)
+    UI.kv("  Type", ns.msg_type)
+    UI.kv("  Priority", ns.priority)
+    UI.muted(f"  Path: {msg_path.relative_to(root)}")
+    return 0
+
+
 def cmd_check(args: list[str]) -> int:
     """Check messages for an agent."""
     root = find_project_root()
@@ -3064,6 +3141,7 @@ def cmd_help() -> int:
 {C.BOLD}Bus & messages:{C.RESET}
   {C.GREEN}status{C.RESET} [repo]                 Cross-repo status dashboard (commits, messages, reviews)
   {C.GREEN}check{C.RESET} [agent]                 Check pending messages for an agent (auto-detects from cwd)
+  {C.GREEN}send{C.RESET} <to> --subject S --body B  Send a bus message ([--type T] [--priority P])
   {C.GREEN}ack{C.RESET} <msg> [--read|--resolved]   Acknowledge a bus message (resolved is default)
   {C.GREEN}cleanup{C.RESET} [--dry-run]            Archive old, fully-acked bus messages
   {C.GREEN}set-agent{C.RESET} <name>              Set current agent identity (.agents/current-agent)
@@ -3215,6 +3293,7 @@ def main() -> int:
         "doctor": lambda: cmd_doctor(positional),
         "status": lambda: cmd_status(positional),
         "check": lambda: cmd_check(positional),
+        "send": lambda: cmd_send(rest),
         "ack": lambda: cmd_ack(positional, ack_status),
         "cleanup": lambda: cmd_cleanup(positional, dry_run),
         "propose": lambda: cmd_propose(positional, desc),
