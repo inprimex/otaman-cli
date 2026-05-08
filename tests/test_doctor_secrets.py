@@ -32,7 +32,7 @@ def maestro_git_repo(tmp_path):
     """Git-initialized maestro folder with .maestro/ subdir."""
     root = tmp_path / "my-maestro"
     root.mkdir()
-    (root / ".maestro").mkdir()
+    (root / ".otaman").mkdir()
     (root / "platform.yaml").write_text("project: test\n", encoding="utf-8")
     _git(root, "init", "-q", "-b", "main")
     _git(root, "add", ".")
@@ -57,12 +57,12 @@ class TestGitignoreCheck:
         root.mkdir()
         (root / ".gitignore").write_text(".agents/bus/\n", encoding="utf-8")
         result = doctor.check_secrets_leaks(root)
-        assert any(".maestro/secrets.env" in i["issue"] for i in result.get("issues", []))
+        assert any(".otaman/secrets.env" in i["issue"] for i in result.get("issues", []))
 
     def test_gitignore_with_entry_ok(self, tmp_path):
         root = tmp_path / "good-gi"
         root.mkdir()
-        (root / ".gitignore").write_text(".maestro/secrets.env\n", encoding="utf-8")
+        (root / ".gitignore").write_text(".otaman/secrets.env\n", encoding="utf-8")
         result = doctor.check_secrets_leaks(root)
         # No gitignore issue
         for i in result.get("issues", []):
@@ -72,11 +72,11 @@ class TestGitignoreCheck:
 class TestGitHistoryCheck:
     def test_untracked_secrets_env_ok(self, maestro_git_repo):
         """secrets.env not in git at all → no leak issue."""
-        (maestro_git_repo / ".maestro" / "secrets.env").write_text(
+        (maestro_git_repo / ".otaman" / "secrets.env").write_text(
             "SECRET=value\n", encoding="utf-8",
         )
         (maestro_git_repo / ".gitignore").write_text(
-            ".maestro/secrets.env\n", encoding="utf-8",
+            ".otaman/secrets.env\n", encoding="utf-8",
         )
         result = doctor.check_secrets_leaks(maestro_git_repo)
         for i in result.get("issues", []):
@@ -86,10 +86,10 @@ class TestGitHistoryCheck:
 
     def test_tracked_secrets_env_flagged_critical(self, maestro_git_repo):
         """If secrets.env is currently tracked, flag critical."""
-        secrets = maestro_git_repo / ".maestro" / "secrets.env"
+        secrets = maestro_git_repo / ".otaman" / "secrets.env"
         secrets.write_text("LEAKED=token\n", encoding="utf-8")
         # Intentionally add + commit (simulating the mistake)
-        _git(maestro_git_repo, "add", ".maestro/secrets.env")
+        _git(maestro_git_repo, "add", ".otaman/secrets.env")
         _git(maestro_git_repo, "commit", "-q", "-m", "oops")
 
         result = doctor.check_secrets_leaks(maestro_git_repo)
@@ -100,11 +100,11 @@ class TestGitHistoryCheck:
 
     def test_historic_secrets_env_flagged_critical(self, maestro_git_repo):
         """Even if removed, history retention triggers critical."""
-        secrets = maestro_git_repo / ".maestro" / "secrets.env"
+        secrets = maestro_git_repo / ".otaman" / "secrets.env"
         secrets.write_text("LEAKED=token\n", encoding="utf-8")
-        _git(maestro_git_repo, "add", ".maestro/secrets.env")
+        _git(maestro_git_repo, "add", ".otaman/secrets.env")
         _git(maestro_git_repo, "commit", "-q", "-m", "oops")
-        _git(maestro_git_repo, "rm", "-q", ".maestro/secrets.env")
+        _git(maestro_git_repo, "rm", "-q", ".otaman/secrets.env")
         _git(maestro_git_repo, "commit", "-q", "-m", "remove")
 
         result = doctor.check_secrets_leaks(maestro_git_repo)
@@ -123,9 +123,9 @@ class TestPermissionsCheck:
     def test_loose_mode_flagged_medium(self, tmp_path):
         root = tmp_path / "mode-check"
         root.mkdir()
-        (root / ".maestro").mkdir()
-        (root / ".gitignore").write_text(".maestro/secrets.env\n", encoding="utf-8")
-        secrets = root / ".maestro" / "secrets.env"
+        (root / ".otaman").mkdir()
+        (root / ".gitignore").write_text(".otaman/secrets.env\n", encoding="utf-8")
+        secrets = root / ".otaman" / "secrets.env"
         secrets.write_text("FOO=bar\n", encoding="utf-8")
         os.chmod(secrets, 0o644)
 
@@ -141,9 +141,9 @@ class TestPermissionsCheck:
     def test_600_mode_ok(self, tmp_path):
         root = tmp_path / "good-mode"
         root.mkdir()
-        (root / ".maestro").mkdir()
-        (root / ".gitignore").write_text(".maestro/secrets.env\n", encoding="utf-8")
-        secrets = root / ".maestro" / "secrets.env"
+        (root / ".otaman").mkdir()
+        (root / ".gitignore").write_text(".otaman/secrets.env\n", encoding="utf-8")
+        secrets = root / ".otaman" / "secrets.env"
         secrets.write_text("FOO=bar\n", encoding="utf-8")
         os.chmod(secrets, 0o600)
 
@@ -155,7 +155,7 @@ class TestPermissionsCheck:
 class TestStatusAggregation:
     def test_clean_repo_returns_ok(self, maestro_git_repo):
         (maestro_git_repo / ".gitignore").write_text(
-            ".maestro/secrets.env\n", encoding="utf-8",
+            ".otaman/secrets.env\n", encoding="utf-8",
         )
         result = doctor.check_secrets_leaks(maestro_git_repo)
         assert result["status"] == "ok"
@@ -169,9 +169,9 @@ class TestStatusAggregation:
         assert result["status"] == "warn"
 
     def test_fail_when_critical_present(self, maestro_git_repo):
-        secrets = maestro_git_repo / ".maestro" / "secrets.env"
+        secrets = maestro_git_repo / ".otaman" / "secrets.env"
         secrets.write_text("LEAKED=token\n", encoding="utf-8")
-        _git(maestro_git_repo, "add", ".maestro/secrets.env")
+        _git(maestro_git_repo, "add", ".otaman/secrets.env")
         _git(maestro_git_repo, "commit", "-q", "-m", "oops")
         result = doctor.check_secrets_leaks(maestro_git_repo)
         assert result["status"] == "fail"

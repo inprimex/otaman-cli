@@ -649,12 +649,12 @@ def check_maestro_plugin(project_root: Path) -> dict[str, Any]:
 
 
 def check_secrets_leaks(project_root: Path) -> dict[str, Any]:
-    """Check that .maestro/secrets.env has never been committed and is gitignored.
+    """Check that .otaman/secrets.env has never been committed and is gitignored.
 
     Three things can go wrong:
       1. File is committed to HEAD (currently tracked).
       2. File appears anywhere in git history (past commit with secrets).
-      3. .gitignore doesn't list .maestro/secrets.env.
+      3. .gitignore doesn't list .otaman/secrets.env.
       4. File mode is looser than 0600 on POSIX.
 
     Severity levels:
@@ -669,7 +669,7 @@ def check_secrets_leaks(project_root: Path) -> dict[str, Any]:
     }
     issues: list[dict[str, Any]] = []
 
-    secrets_path = project_root / ".maestro" / "secrets.env"
+    secrets_path = project_root / ".otaman" / "secrets.env"
     result["details"]["secrets_env_present"] = secrets_path.is_file()
 
     # Only run git checks if the folder is a git repo.
@@ -680,17 +680,17 @@ def check_secrets_leaks(project_root: Path) -> dict[str, Any]:
         # 1. Tracked in HEAD?
         rc, out, _ = _run(
             ["git", "-C", str(project_root), "ls-files", "--error-unmatch",
-             ".maestro/secrets.env"],
+             ".otaman/secrets.env"],
             timeout=10,
         )
         tracked = rc == 0
         result["details"]["tracked_in_head"] = tracked
         if tracked:
             issues.append({
-                "issue": ".maestro/secrets.env is tracked in git — secrets may leak on push",
+                "issue": ".otaman/secrets.env is tracked in git — secrets may leak on push",
                 "fix": (
                     "Rotate any tokens stored here, then:\n"
-                    "  git -C <maestro> rm --cached .maestro/secrets.env\n"
+                    "  git -C <maestro> rm --cached .otaman/secrets.env\n"
                     "  git -C <maestro> commit -m 'untrack secrets.env'\n"
                     "  (see: https://github.com/newren/git-filter-repo to purge from history)"
                 ),
@@ -700,7 +700,7 @@ def check_secrets_leaks(project_root: Path) -> dict[str, Any]:
         # 2. Appears anywhere in history?
         rc, out, _ = _run(
             ["git", "-C", str(project_root), "log", "--all", "--pretty=format:%H",
-             "--", ".maestro/secrets.env"],
+             "--", ".otaman/secrets.env"],
             timeout=15,
         )
         in_history = bool(out.strip())
@@ -710,12 +710,12 @@ def check_secrets_leaks(project_root: Path) -> dict[str, Any]:
             commit_count = len([l for l in out.splitlines() if l.strip()])
             issues.append({
                 "issue": (
-                    f".maestro/secrets.env appears in {commit_count} past commit(s) — "
+                    f".otaman/secrets.env appears in {commit_count} past commit(s) — "
                     f"secrets may still be exposed in history"
                 ),
                 "fix": (
                     "Rotate any tokens that may have been committed, then purge:\n"
-                    "  git filter-repo --path .maestro/secrets.env --invert-paths\n"
+                    "  git filter-repo --path .otaman/secrets.env --invert-paths\n"
                     "  (or: git filter-branch ... --force-push afterwards)"
                 ),
                 "severity": "critical",
@@ -726,7 +726,7 @@ def check_secrets_leaks(project_root: Path) -> dict[str, Any]:
 
     # 3. Gitignore entry present?
     gitignore = project_root / ".gitignore"
-    required_entries = (".maestro/secrets.env",)
+    required_entries = (".otaman/secrets.env",)
     missing_gi: list[str] = []
     if gitignore.exists():
         content = gitignore.read_text(encoding="utf-8")
@@ -750,7 +750,7 @@ def check_secrets_leaks(project_root: Path) -> dict[str, Any]:
             "fix": (
                 f"Run `maestro init` from the maestro folder ({project_root}) to regenerate, "
                 f"or add manually:\n"
-                f"  echo '.maestro/secrets.env' >> {gi_display}"
+                f"  echo '.otaman/secrets.env' >> {gi_display}"
             ),
             "severity": "high",
         })
@@ -762,7 +762,7 @@ def check_secrets_leaks(project_root: Path) -> dict[str, Any]:
             result["details"]["mode"] = f"{mode:o}"
             if mode not in (0o600, 0o400):
                 issues.append({
-                    "issue": f".maestro/secrets.env mode is {mode:o} (should be 600 or 400)",
+                    "issue": f".otaman/secrets.env mode is {mode:o} (should be 600 or 400)",
                     "fix": f"chmod 600 {secrets_path}",
                     "severity": "medium",
                 })
@@ -866,7 +866,7 @@ def check_git_host(project_root: Path) -> dict[str, Any]:
                 "issue": "git_host token not resolvable from configured sources",
                 "fix": (
                     "Set the env var named in platform.yaml's git_host.token "
-                    "sources, or add it to .maestro/secrets.env."
+                    "sources, or add it to .otaman/secrets.env."
                 ),
                 "severity": "high",
             })
@@ -875,7 +875,7 @@ def check_git_host(project_root: Path) -> dict[str, Any]:
                 "issue": f"git_host token rejected by provider: {err}",
                 "fix": (
                     "Token may have expired or been revoked. Regenerate a "
-                    "PAT and re-add to .maestro/secrets.env."
+                    "PAT and re-add to .otaman/secrets.env."
                 ),
                 "severity": "high",
             })

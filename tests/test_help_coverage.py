@@ -102,7 +102,7 @@ def test_dispatcher_extraction_finds_known_commands() -> None:
 def test_help_runs_cleanly() -> None:
     """maestro help should exit 0 and produce non-trivial output."""
     output = _help_output()
-    assert "Maestro" in output
+    assert "Otaman" in output
     assert len(output) > 200
 
 

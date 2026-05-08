@@ -13,7 +13,7 @@ Usage:
     maestro doctor                     Check environment readiness
     maestro status [<repo>]            Cross-repo status dashboard
     maestro check [<agent>]            Check messages for an agent
-    maestro ack <msg> [--read|--resolved]  Acknowledge a bus message
+    otaman ack <msg> [--read|--resolved]   Acknowledge a bus message
     maestro cleanup [--dry-run]        Archive old bus messages
     maestro propose <title> [-d desc]  Propose a spec change (pending approval)
     maestro complete <change> --tasks T  Report task completion, update tasks.md
@@ -26,7 +26,7 @@ Usage:
     maestro set-agent <name>           Set current agent identity
     maestro presale [name domain client]  Initialize pre-sale estimation project
     maestro retrospective [project-code]  Post-project retrospective
-    maestro help                       Show this help
+    otaman help                        Show this help
 
 Options:
     -h, --help       Show help
@@ -332,7 +332,7 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
     resolved = Path(scan_path).resolve()
 
     if update:
-        UI.header("Maestro Scan --update")
+        UI.header("Otaman Scan --update")
         # In update mode, look for platform.yaml in maestro dir or scan dir
         search = Path(maestro_dir).resolve() if maestro_dir else resolved
         if not (search / "platform.yaml").exists():
@@ -341,7 +341,7 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
             return 1
         print(f"Re-scanning {C.BOLD}{resolved}{C.RESET} and merging with existing config...\n")
     else:
-        UI.header("Maestro Scan")
+        UI.header("Otaman Scan")
         print(f"Scanning {C.BOLD}{resolved}{C.RESET} ...\n")
 
     # Determine maestro folder
@@ -354,7 +354,7 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
         maestro_path = resolved / f"{project_name}-maestro"
 
     if not update:
-        print(f"Maestro folder: {C.BOLD}{maestro_path}{C.RESET}\n")
+        print(f"Otaman folder: {C.BOLD}{maestro_path}{C.RESET}\n")
 
         # Create maestro folder + git init
         maestro_path.mkdir(parents=True, exist_ok=True)
@@ -492,7 +492,7 @@ def cmd_init(args: list[str]) -> int:
         UI.muted("Run 'maestro scan' first to generate a config, or copy the template.")
         return 2
 
-    UI.header("Maestro Init")
+    UI.header("Otaman Init")
 
     # Validate first
     print(f"Validating {config_path.name}...")
@@ -524,7 +524,7 @@ def cmd_clone(args: list[str], target: str = "") -> int:
         UI.muted("  maestro clone /local/path/to/platform.yaml")
         return 1
 
-    UI.header("Maestro Clone")
+    UI.header("Otaman Clone")
 
     source = args[0]
     UI.kv("Source", source)
@@ -578,7 +578,7 @@ def cmd_clone(args: list[str], target: str = "") -> int:
 
     maestro_dir = report.get("maestro_dir", "")
     print()
-    UI.kv("Maestro folder", maestro_dir)
+    UI.kv("Otaman folder", maestro_dir)
     UI.muted("Next: launch agents or run maestro doctor for full environment check")
 
     return 1 if failed else 0
@@ -629,7 +629,7 @@ def cmd_doctor(args: list[str]) -> int:
         "ssh_keys": "SSH Keys",
         "mcp_dependencies": "MCP Dependencies",
         "tmux": "tmux (connection resilience)",
-        "maestro_plugin": "Maestro Setup",
+        "maestro_plugin": "Otaman Setup",
         "secrets_leaks": "Secrets Hygiene",
         "git_host": "Git Host PAT",
     }
@@ -734,7 +734,7 @@ def cmd_status(args: list[str]) -> int:
         UI.error(report['error'])
         return 1
 
-    UI.header(f"Maestro Status: {report.get('project', '?')}")
+    UI.header(f"Otaman Status: {report.get('project', '?')}")
 
     # Repos table
     repos = report.get("repos", [])
@@ -989,7 +989,7 @@ def cmd_check(args: list[str]) -> int:
 
     UI.kv("Summary", f"{total.get('pending', 0)} pending | {total.get('read', 0)} read | {total.get('resolved', 0)} resolved")
     if pending:
-        UI.muted("Use 'maestro ack <msg-stem>' to acknowledge a message")
+        UI.muted("Use 'otaman ack <msg-stem>' to acknowledge a message")
     return 0
 
 
@@ -997,7 +997,7 @@ def cmd_ack(args: list[str], status: str = "resolved") -> int:
     """Acknowledge a bus message for the current agent."""
     if not args:
         UI.error("Message identifier required")
-        UI.muted("Usage: maestro ack <msg-stem-or-partial> [--read | --resolved]")
+        UI.muted("Usage: otaman ack <msg-stem-or-partial> [--read | --resolved]")
         UI.muted("  msg-stem: filename without .md (shown in 'maestro check' output)")
         UI.muted("  --read: mark as read (will still show in pending-ish view)")
         UI.muted("  --resolved: mark as resolved (default)")
@@ -1031,7 +1031,7 @@ def cmd_ack(args: list[str], status: str = "resolved") -> int:
 
     if len(matches) > 5:
         UI.warn(f"{len(matches)} messages match '{pattern}'.")
-        UI.muted("Be more specific, or use 'maestro ack --all' to ack all pending.")
+        UI.muted("Be more specific, or use 'otaman ack --all' to ack all pending.")
         return 1
 
     for msg_file in matches:
@@ -1049,7 +1049,7 @@ def cmd_cleanup(args: list[str], dry_run: bool = False) -> int:
         UI.error("Not in a maestro project")
         return 1
 
-    UI.header("Maestro Bus Cleanup")
+    UI.header("Otaman Bus Cleanup")
 
     result = run_script("cleanup-bus.py", str(root), *( ["--dry-run"] if dry_run else []),
                         capture=True)
@@ -1658,7 +1658,7 @@ def cmd_validate_messages(args: list[str]) -> int:
 
 def cmd_migrate(args: list[str]) -> int:
     """Migrate existing maestro deployment to a dedicated maestro folder."""
-    UI.header("Maestro Migrate")
+    UI.header("Otaman Migrate")
 
     # Find existing project root (old layout: platform.yaml in a non-git parent)
     root = find_project_root()
@@ -3047,7 +3047,7 @@ def cmd_gate(args: list[str]) -> int:
 def cmd_help() -> int:
     """Show help."""
     print(f"""
-{C.BOLD}{C.CYAN}Maestro{C.RESET} - Multi-Repo Agent Orchestration (v{VERSION})
+{C.BOLD}{C.CYAN}Otaman{C.RESET} - Multi-Repo Agent Orchestration (v{VERSION})
 
 {C.BOLD}Setup & maintenance:{C.RESET}
   {C.GREEN}scan{C.RESET} [path] [--maestro-dir D]   Scan repos, create maestro folder with draft config
@@ -3247,7 +3247,7 @@ def main() -> int:
 
     if command not in commands:
         UI.error(f"Unknown command: {command}")
-        UI.muted("Run 'maestro help' for available commands")
+        UI.muted("Run 'otaman help' for available commands")
         return 1
 
     return commands[command]()
