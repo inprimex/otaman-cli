@@ -105,7 +105,7 @@ def resolve(
         settings = _load_yaml(settings_path)
 
     connections = settings.get("connections") or {}
-    accounts = settings.get("accounts") or {}
+    accounts = settings.get("routing") or settings.get("accounts") or {}
     active_from_file = settings.get("active_connection")
 
     effective_conn_name = connection_name or active_from_file or ""
@@ -123,7 +123,7 @@ def resolve(
             warnings.append(str(e))
 
     connection_type = conn_resolved.get("type", "")
-    account_name = conn_resolved.get("account", "")
+    account_name = conn_resolved.get("routing") or conn_resolved.get("account", "")
 
     config_dir_raw = ""
     config_dir_expanded = ""

@@ -3163,8 +3163,8 @@ def cmd_help() -> int:
   {C.GREEN}retrospective{C.RESET} [project-code]   Post-project retrospective (updates benchmarks library)
 
 {C.BOLD}Accounts, launcher & models:{C.RESET}
-  {C.GREEN}profile{C.RESET} [list|...]            Manage launcher profiles (multi-subscription routing)
-  {C.DIM}accounts{C.RESET} [list|...]           {C.DIM}deprecated alias of `profile` (sunset at otaman-core 1.0){C.RESET}
+  {C.GREEN}routing{C.RESET} [list|...]            Manage launcher routing (multi-subscription identities)
+  {C.DIM}accounts{C.RESET} [list|...]           {C.DIM}deprecated alias of `routing` (sunset at otaman-core 1.0){C.RESET}
   {C.GREEN}launcher{C.RESET} <subcommand>         Launcher folder management:
                                   list, add, remove, register, <target> (scaffold)
   {C.GREEN}models{C.RESET} [show|set-default|...]   Inspect / manage model + effort tier overrides
@@ -3307,7 +3307,7 @@ def main() -> int:
         "compliance": lambda: cmd_compliance(positional, fmt),
         "migrate": lambda: cmd_migrate(positional),
         "accounts": lambda: cmd_accounts(rest),
-        "profile": lambda: cmd_accounts(rest),
+        "routing": lambda: cmd_accounts(rest),
         "afk": lambda: cmd_afk(rest),
         "bridge": lambda: cmd_bridge(rest),
         "ping": lambda: cmd_ping(rest),
