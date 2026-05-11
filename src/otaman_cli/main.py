@@ -849,6 +849,116 @@ def _get_agent_ack_status(msg_stem: str, agent: str, acks_dir: Path) -> str:
     return "pending"
 
 
+def cmd_whoami(args: list[str]) -> int:
+    """Print current agent identity + project + routing + bus state.
+
+    Usage:
+      otaman whoami [--json]
+
+    Useful for confirming which agent / project / routing identity is
+    loaded in this tab, especially when terminal tab titles get
+    overwritten by claude or tmux.
+    """
+    import json
+    import os
+    import yaml
+    from datetime import datetime, timezone
+
+    json_mode = "--json" in args
+
+    root = find_project_root()
+    agent = resolve_agent_identity(root) if root else None
+
+    # Routing: read via the same env-var chain the hooks use.
+    try:
+        from otaman_core._resolve import active_routing_env
+        routing = active_routing_env()
+    except ImportError:
+        routing = (os.environ.get("OTAMAN_ACTIVE_ROUTING")
+                   or os.environ.get("OTAMAN_ACTIVE_ACCOUNT")
+                   or os.environ.get("MAESTRO_ACTIVE_ACCOUNT"))
+
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or "<default ~/.claude>"
+    tmux_env = os.environ.get("TMUX", "")
+    # TMUX env is "/path/to/socket,pid,session-id"; session name needs `tmux display`,
+    # but the env var alone is enough to flag "yes, inside tmux".
+    in_tmux = bool(tmux_env)
+    tmux_session = None
+    if in_tmux:
+        try:
+            import subprocess
+            res = subprocess.run(
+                ["tmux", "display-message", "-p", "#S"],
+                capture_output=True, text=True, timeout=3, check=False,
+            )
+            if res.returncode == 0:
+                tmux_session = res.stdout.strip() or None
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+    project_name = None
+    if root and (root / "platform.yaml").is_file():
+        try:
+            cfg = yaml.safe_load((root / "platform.yaml").read_text(encoding="utf-8")) or {}
+            project_name = cfg.get("project")
+        except (yaml.YAMLError, OSError):
+            pass
+
+    # Bus state: pending/read/resolved counts for this agent.
+    counts = {"pending": 0, "read": 0, "resolved": 0}
+    if root and agent:
+        active_dir, acks_dir = _resolve_bus_paths(root)
+        if active_dir.is_dir():
+            import re
+            for f in sorted(active_dir.glob("*.md")):
+                try:
+                    content = f.read_text(encoding="utf-8")
+                    m = re.match(r"^---\n(.+?)\n---", content, re.DOTALL)
+                    if not m:
+                        continue
+                    fm = yaml.safe_load(m.group(1))
+                    if not isinstance(fm, dict):
+                        continue
+                    to = fm.get("to", "")
+                    if to != agent and to != "all":
+                        continue
+                    status = _get_agent_ack_status(f.stem, agent, acks_dir)
+                    counts[status] = counts.get(status, 0) + 1
+                except (OSError, yaml.YAMLError):
+                    continue
+
+    if json_mode:
+        print(json.dumps({
+            "agent": agent,
+            "project": project_name,
+            "project_root": str(root) if root else None,
+            "cwd": str(Path.cwd()),
+            "routing": routing,
+            "config_dir": config_dir,
+            "in_tmux": in_tmux,
+            "tmux_session": tmux_session,
+            "bus_counts": counts,
+        }, indent=2))
+        return 0
+
+    # Pretty output
+    UI.header(f"Otaman: {agent or '<unknown agent>'}")
+    if project_name:
+        UI.kv("  Project", project_name)
+    if root:
+        UI.kv("  Project root", str(root))
+    else:
+        UI.muted("  (not inside a maestro/otaman project)")
+    UI.kv("  Cwd", str(Path.cwd()))
+    UI.kv("  Routing", routing or "<not set>")
+    UI.kv("  Config dir", config_dir)
+    if in_tmux:
+        UI.kv("  Tmux", tmux_session or "<unknown session>")
+    if root and agent:
+        UI.kv("  Bus", f"{counts['pending']} pending | {counts['read']} read | {counts['resolved']} resolved")
+    return 0
+
+
 def cmd_send(args: list[str]) -> int:
     """Send a bus message to another agent (mirrors otaman_send MCP tool).
 
@@ -3140,6 +3250,7 @@ def cmd_help() -> int:
 
 {C.BOLD}Bus & messages:{C.RESET}
   {C.GREEN}status{C.RESET} [repo]                 Cross-repo status dashboard (commits, messages, reviews)
+  {C.GREEN}whoami{C.RESET}, {C.GREEN}iam{C.RESET}                   Show agent identity + project + routing + bus state ([--json])
   {C.GREEN}check{C.RESET} [agent]                 Check pending messages for an agent (auto-detects from cwd)
   {C.GREEN}send{C.RESET} <to> --subject S --body B  Send a bus message ([--type T] [--priority P])
   {C.GREEN}ack{C.RESET} <msg> [--read|--resolved]   Acknowledge a bus message (resolved is default)
@@ -3295,6 +3406,8 @@ def main() -> int:
         "status": lambda: cmd_status(positional),
         "check": lambda: cmd_check(positional),
         "send": lambda: cmd_send(rest),
+        "whoami": lambda: cmd_whoami(rest),
+        "iam": lambda: cmd_whoami(rest),
         "ack": lambda: cmd_ack(positional, ack_status),
         "cleanup": lambda: cmd_cleanup(positional, dry_run),
         "propose": lambda: cmd_propose(positional, desc),
