@@ -2909,22 +2909,30 @@ def cmd_set_agent(args: list[str]) -> int:
     return 0
 
 
+def _find_presale_dir(start: Path) -> Path | None:
+    """Locate a presale directory walking up from ``start``.
+
+    Prefers ``.otaman-presale/`` (current name). Falls back to legacy
+    ``.maestro-presale/`` for one release window (sunset at otaman-core 1.0).
+    Returns absolute Path or None.
+    """
+    for d in [start] + list(start.parents):
+        new = d / ".otaman-presale"
+        if new.is_dir():
+            return new
+        legacy = d / ".maestro-presale"
+        if legacy.is_dir():
+            return legacy
+    return None
+
+
 def cmd_presale(args: list[str]) -> int:
     """Initialize a pre-sale estimation project."""
     UI.header("Maestro Pre-Sale")
 
     # Check for existing presale
     cwd = Path.cwd()
-    presale_dir = None
-    d = cwd
-    for _ in range(10):
-        if (d / ".maestro-presale").is_dir():
-            presale_dir = d / ".maestro-presale"
-            break
-        parent = d.parent
-        if parent == d:
-            break
-        d = parent
+    presale_dir = _find_presale_dir(cwd)
 
     if presale_dir:
         meta_path = presale_dir / "project-meta.yaml"
@@ -2978,7 +2986,7 @@ def cmd_presale(args: list[str]) -> int:
     UI.ok("Pre-sale project initialized.")
     UI.kv("Code", project_code, C.BOLD)
     UI.kv("Domain", domain)
-    UI.kv("Dir", ".maestro-presale/")
+    UI.kv("Dir", ".otaman-presale/")
     print()
     UI.action(f"Run {C.GREEN}/otaman:presale{C.RESET} in Claude Code to start Gate 0 estimation.")
     UI.muted("The SA agent will guide you through the full estimation workflow.")
@@ -2991,16 +2999,7 @@ def cmd_retrospective(args: list[str]) -> int:
 
     # Find project meta
     cwd = Path.cwd()
-    presale_dir = None
-    d = cwd
-    for _ in range(10):
-        if (d / ".maestro-presale").is_dir():
-            presale_dir = d / ".maestro-presale"
-            break
-        parent = d.parent
-        if parent == d:
-            break
-        d = parent
+    presale_dir = _find_presale_dir(cwd)
 
     project_code = args[0] if args else None
     meta = None
@@ -3018,7 +3017,7 @@ def cmd_retrospective(args: list[str]) -> int:
     if not project_code:
         UI.error("No project code found.")
         UI.muted("Usage: maestro retrospective [project-code]")
-        UI.muted("Or run from a directory with .maestro-presale/project-meta.yaml")
+        UI.muted("Or run from a directory with .otaman-presale/project-meta.yaml (or legacy .maestro-presale/)")
         return 1
 
     UI.kv("Project", project_code, C.BOLD)
@@ -3046,6 +3045,10 @@ def cmd_discovery_phase(args: list[str]) -> int:
     d = Path.cwd()
     presale_dir = None
     for _ in range(10):
+        new_ = d / ".otaman-presale"
+        if new_.is_dir():
+            presale_dir = new_
+            break
         if (d / ".maestro-presale").is_dir():
             presale_dir = d / ".maestro-presale"
             break
@@ -3055,7 +3058,7 @@ def cmd_discovery_phase(args: list[str]) -> int:
         d = parent
 
     if not presale_dir:
-        UI.error("No .maestro-presale/ directory found.")
+        UI.error("No .otaman-presale/ (or legacy .maestro-presale/) directory found.")
         UI.muted("Run 'maestro presale' first to initialize a pre-sale project.")
         return 1
 
@@ -3100,6 +3103,10 @@ def cmd_handoff(args: list[str]) -> int:
     d = Path.cwd()
     presale_dir = None
     for _ in range(10):
+        new_ = d / ".otaman-presale"
+        if new_.is_dir():
+            presale_dir = new_
+            break
         if (d / ".maestro-presale").is_dir():
             presale_dir = d / ".maestro-presale"
             break
@@ -3109,7 +3116,7 @@ def cmd_handoff(args: list[str]) -> int:
         d = parent
 
     if not presale_dir:
-        UI.error("No .maestro-presale/ directory found.")
+        UI.error("No .otaman-presale/ (or legacy .maestro-presale/) directory found.")
         return 1
 
     UI.kv("Presale dir", str(presale_dir))
@@ -3135,7 +3142,7 @@ def cmd_audit_knowledge(args: list[str]) -> int:
     UI.header("Maestro Knowledge Audit")
 
     # Check multiple locations for audit file
-    for candidate in [".maestro-presale/knowledge-audit.yaml", ".agents/knowledge-audit.yaml"]:
+    for candidate in [".otaman-presale/knowledge-audit.yaml", ".maestro-presale/knowledge-audit.yaml", ".agents/knowledge-audit.yaml"]:
         p = Path(candidate)
         if p.exists():
             try:
@@ -3199,7 +3206,7 @@ def cmd_gate(args: list[str]) -> int:
     transition = args[0] if args else None
 
     # Determine current phase
-    for meta_loc in [".maestro-presale/project-meta.yaml", ".agents/project-meta.yaml"]:
+    for meta_loc in [".otaman-presale/project-meta.yaml", ".maestro-presale/project-meta.yaml", ".agents/project-meta.yaml"]:
         p = Path(meta_loc) if not root else root / meta_loc
         if p.exists():
             try:
