@@ -1369,7 +1369,7 @@ TODO: Concrete suggestions for what the spec should say.
     UI.blocked("STOP: Do NOT implement features that depend on this spec change.")
     UI.action(f"Switch to other tasks. Run {C.BOLD}maestro check{C.RESET} to poll for approval.")
     print()
-    UI.muted("A human must review and approve this via: maestro approve")
+    UI.muted("A human must review and approve this via: otaman approve")
     UI.muted("Edit the message file to fill in details if needed.")
     return 0
 
@@ -1574,8 +1574,8 @@ def cmd_approve(args: list[str], action: str = "list", comment: str = "") -> int
             print(f"    {p['subject']}")
             UI.muted(f"{fm.get('timestamp', '')} | {p['stem']}")
             print()
-        UI.muted("To approve: maestro approve approve <stem-or-partial>")
-        UI.muted("To reject:  maestro approve reject <stem-or-partial> [-d \"reason\"]")
+        UI.muted("To approve: otaman approve approve <stem-or-partial>")
+        UI.muted("To reject:  otaman approve reject <stem-or-partial> [-d \"reason\"]")
         return 0
 
     # APPROVE or REJECT — need a target
