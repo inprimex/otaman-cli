@@ -4,7 +4,8 @@ version = "0.1.0"
 description = "Otaman standalone CLI: subcommand dispatch, local + remote operations, account management"
 requires-python = ">=3.10"
 authors = [{ name = "Otaman platform" }]
-license = { text = "UNLICENSED" }
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
 dependencies = [
     "otaman-core",
     "otaman-bridge",
