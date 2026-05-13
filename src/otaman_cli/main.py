@@ -445,14 +445,18 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
         script_args.append("--dry-run")
 
     result = run_script("discover-repos.py", *script_args, capture=True, stream_stderr=True)
-    if result.returncode != 0:
-        UI.error(result.stderr or result.stdout)
-        return result.returncode
 
+    # Try to parse stdout as JSON regardless of returncode — discover_repos
+    # returns rc=1 for no-repos (legitimate empty result), and we want to
+    # surface friendly hints rather than the raw JSON dump.
+    import json
     try:
-        import json
         report = json.loads(result.stdout)
-    except (json.JSONDecodeError, ImportError):
+    except (json.JSONDecodeError, ValueError):
+        # Stdout was NOT valid JSON — real error from the subprocess
+        if result.returncode != 0:
+            UI.error(result.stderr or result.stdout)
+            return result.returncode
         print(result.stdout)
         return 0
 
@@ -461,6 +465,14 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
     if not repos:
         for w in report.get("warnings", []):
             UI.warn(w)
+        UI.muted("")
+        UI.muted("No git repositories found under the scan path. Common causes:")
+        UI.muted("  - Wrong directory? Try: otaman scan /path/to/your/project")
+        UI.muted("  - Repos not yet cloned locally? Clone them as siblings first.")
+        UI.muted("  - Repos behind a non-default depth? Scan walks 2 levels by default.")
+        UI.muted("  - All git repos got skipped as maestro/otaman folders? They are.")
+        UI.muted("")
+        UI.muted("If your project IS already an otaman project, use --update to re-scan.")
         return 1
 
     print(f"Found {C.BOLD}{len(repos)}{C.RESET} repositories:\n")
@@ -483,6 +495,16 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
         flag_str = ", ".join(flags) if flags else ""
         rows.append([UI.repo(name), tech, UI.agent(owner), flag_str])
     UI.table(headers, rows, col_widths=[25, 30, 20, 15])
+
+    # Monorepo hint: surface advice if any repo flagged as such
+    monorepo_repos = [r for r in repos if r.get("is_monorepo")]
+    if monorepo_repos:
+        print()
+        UI.warn(f"{len(monorepo_repos)} repo(s) detected as monorepos (multiple package.json/pyproject at nested depths).")
+        UI.muted("  Options for monorepos:")
+        UI.muted("  - Treat each as one otaman repo with multiple tech tags (current default).")
+        UI.muted("  - OR split into separate sub-repos before running otaman init (cleaner ownership).")
+        UI.muted("  - See: https://github.com/inprimex/otaman-meta (polyrepo-structure.md) for guidance.")
 
     # OpenSpec detection
     openspec = report.get("openspec")
