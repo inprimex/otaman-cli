@@ -1694,9 +1694,24 @@ def cmd_approve(args: list[str], action: str = "list", comment: str = "") -> int
             return 1
     else:
         pattern = args[0]
+        # Tier 1: substring match on file stem
         matches = [p for p in pending if pattern in p["stem"]]
+        # Tier 2: token-based fallback (covers logical reconstruction stems)
+        if not matches and "-" in pattern:
+            import fnmatch
+            tokens = [tok for tok in pattern.split("-") if tok]
+            if len(tokens) >= 2:
+                glob_pat = "*" + "*".join(tokens) + "*"
+                matches = [p for p in pending if fnmatch.fnmatch(p["stem"], glob_pat)]
+        # Tier 3: frontmatter id field match (agents copy from top line of check)
+        if not matches:
+            for p_ in pending:
+                fm_id = str(p_.get("fm", {}).get("id", ""))
+                if fm_id and (fm_id == pattern or pattern in fm_id):
+                    matches.append(p_)
         if not matches:
             UI.error(f"No pending request matching '{pattern}'")
+            UI.muted("Tip: paste either the full file stem OR the frontmatter id: value from `otaman approve list`.")
             return 1
         if len(matches) > 1:
             UI.error(f"Multiple matches for '{pattern}':")
