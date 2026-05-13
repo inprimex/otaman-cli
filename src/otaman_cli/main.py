@@ -365,7 +365,7 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
         search = Path(maestro_dir).resolve() if maestro_dir else resolved
         if not (search / "platform.yaml").exists():
             UI.error(f"No platform.yaml found at {search}")
-            UI.muted("Run 'maestro scan' first (without --update) to create one.")
+            UI.muted("Run 'otaman scan' first (without --update) to create one.")
             return 1
         print(f"Re-scanning {C.BOLD}{resolved}{C.RESET} and merging with existing config...\n")
     else:
@@ -409,7 +409,7 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
             if not maestro_path.exists():
                 UI.muted(f"  [dry-run] would mkdir {maestro_path}/")
             else:
-                UI.muted(f"  [dry-run] maestro folder already exists at {maestro_path}/")
+                UI.muted(f"  [dry-run] otaman folder already exists at {maestro_path}/")
             if not (maestro_path / ".git").exists():
                 UI.muted(f"  [dry-run] would `git init` in {maestro_path.name}/")
             if not (maestro_path / ".gitignore").exists():
@@ -547,7 +547,7 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
             UI.ok(f"Updated config written to: {out}")
             UI.muted("Review the changes, then:")
             UI.muted("  mv platform.yaml.updated platform.yaml")
-            UI.muted("  maestro init")
+            UI.muted("  otaman init")
     else:
         draft = report.get("draft_path", "")
         if draft and dry_run:
@@ -561,10 +561,10 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
                 UI.muted(f"  1. cd {m_dir}")
                 UI.muted("  2. Review platform.yaml.draft, adjust owner assignments")
                 UI.muted("  3. mv platform.yaml.draft platform.yaml")
-                UI.muted("  4. maestro init")
+                UI.muted("  4. otaman init")
             else:
                 UI.muted("Review the draft, adjust owner assignments, then rename to platform.yaml")
-                UI.muted("and run: maestro init")
+                UI.muted("and run: otaman init")
 
     return 0
 
@@ -576,7 +576,7 @@ def cmd_init(args: list[str]) -> int:
 
     if not config_path.exists():
         UI.error(f"Config not found: {config_path}")
-        UI.muted("Run 'maestro scan' first to generate a config, or copy the template.")
+        UI.muted("Run 'otaman scan' first to generate a config, or copy the template.")
         return 2
 
     UI.header("Otaman Init")
