@@ -2,7 +2,7 @@
 """Otaman CLI - human-facing wrapper for multi-repo agent orchestration.
 
 Usage:
-    maestro scan [<path>] [--dry-run]   Scan repos, create maestro folder with draft config
+    maestro scan [<path>] [--dry-run] [--name N] [--otaman-dir P]   Scan repos + create otaman folder
     maestro init [<config>]            Initialize .agents/ from platform.yaml
     maestro migrate [<name>]           Migrate to dedicated maestro folder
     maestro launcher <target>          Scaffold a launcher folder with connection profiles
@@ -350,7 +350,7 @@ def _find_existing_otaman_project(scan_root: Path) -> Path | None:
     return None
 
 
-def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = None, dry_run: bool = False) -> int:
+def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = None, dry_run: bool = False, project_name_override: str | None = None) -> int:
     """Scan repos and generate draft platform.yaml in a dedicated maestro folder."""
     scan_path = args[0] if args else "."
     resolved = Path(scan_path).resolve()
@@ -390,10 +390,16 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
     if maestro_dir:
         maestro_path = Path(maestro_dir).resolve()
     else:
-        # Default: {project-name}-maestro as sibling inside scanned dir
-        project_name = resolved.name.lower().replace(" ", "-").replace("_", "-")
-        project_name = "".join(c for c in project_name if c.isalnum() or c == "-") or "my-platform"
-        maestro_path = resolved / f"{project_name}-maestro"
+        # Project name: --name override, else sanitised scan-folder basename
+        if project_name_override:
+            project_name = project_name_override.lower().replace(" ", "-").replace("_", "-")
+            project_name = "".join(c for c in project_name if c.isalnum() or c == "-") or "my-platform"
+        else:
+            project_name = resolved.name.lower().replace(" ", "-").replace("_", "-")
+            project_name = "".join(c for c in project_name if c.isalnum() or c == "-") or "my-platform"
+        # Default folder name: {project}-otaman/ (was {project}-maestro/ pre-rebrand;
+        # back-compat handled by 2B.1-B existing-project detection).
+        maestro_path = resolved / f"{project_name}-otaman"
 
     if not update:
         print(f"Otaman folder: {C.BOLD}{maestro_path}{C.RESET}\n")
@@ -3542,6 +3548,7 @@ def main() -> int:
     complete_tasks = ""
     complete_all = False
     maestro_dir: str | None = None
+    project_name_override: str | None = None
     positional: list[str] = []
 
     i = 0
@@ -3573,8 +3580,11 @@ def main() -> int:
         elif rest[i] == "--resolved":
             ack_status = "resolved"
             i += 1
-        elif rest[i] in ("--maestro-dir", "--target") and i + 1 < len(rest):
+        elif rest[i] in ("--maestro-dir", "--otaman-dir", "--target") and i + 1 < len(rest):
             maestro_dir = rest[i + 1]
+            i += 2
+        elif rest[i] == "--name" and i + 1 < len(rest):
+            project_name_override = rest[i + 1]
             i += 2
         elif rest[i].startswith("-"):
             i += 1  # skip unknown flags
@@ -3583,7 +3593,7 @@ def main() -> int:
             i += 1
 
     commands = {
-        "scan": lambda: cmd_scan(positional, update=update, maestro_dir=maestro_dir, dry_run=dry_run),
+        "scan": lambda: cmd_scan(positional, update=update, maestro_dir=maestro_dir, dry_run=dry_run, project_name_override=project_name_override),
         "init": lambda: cmd_init(positional),
         "clone": lambda: cmd_clone(positional, target=maestro_dir or ""),
         "doctor": lambda: cmd_doctor(positional),
