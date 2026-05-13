@@ -1067,6 +1067,15 @@ def cmd_read(args: list[str]) -> int:
     else:
         # 2. Substring match in active/
         matches = list(active_dir.glob(f"*{stem}*.md"))
+        if not matches:
+            # 2b. Token-based fallback: agents sometimes pass partial stems
+            # like "20260426T15164601-tasks-gitlab-cicd-pipeline" when the
+            # real file has -maestro-to-backend-agent- in the middle. Match
+            # each dash-separated token with wildcards between them.
+            tokens = [tok for tok in stem.split("-") if tok]
+            if len(tokens) >= 2:
+                pattern = "*" + "*".join(tokens) + "*.md"
+                matches = list(active_dir.glob(pattern))
         if len(matches) == 1:
             msg_file = matches[0]
         elif len(matches) > 1:
