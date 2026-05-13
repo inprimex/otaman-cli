@@ -3,7 +3,7 @@
 
 Usage:
     maestro scan [<path>] [--dry-run] [--name N] [--otaman-dir P]   Scan repos + create otaman folder
-    maestro init [<config>]            Initialize .agents/ from platform.yaml
+    maestro init [<config>] [--dry-run]   Initialize .agents/ from platform.yaml
     maestro migrate [<name>]           Migrate to dedicated maestro folder
     maestro launcher <target>          Scaffold a launcher folder with connection profiles
     maestro install-cli [--apply]      Put `maestro` on PATH (symlink on POSIX, setx on Windows)
@@ -569,7 +569,7 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
     return 0
 
 
-def cmd_init(args: list[str]) -> int:
+def cmd_init(args: list[str], dry_run: bool = False) -> int:
     """Initialize .agents/ from platform.yaml."""
     config = args[0] if args else "platform.yaml"
     config_path = Path(config).resolve()
@@ -579,22 +579,36 @@ def cmd_init(args: list[str]) -> int:
         UI.muted("Run 'otaman scan' first to generate a config, or copy the template.")
         return 2
 
-    UI.header("Otaman Init")
+    if dry_run:
+        UI.header("Otaman Init (dry-run)")
+    else:
+        UI.header("Otaman Init")
 
     # Validate first
     print(f"Validating {config_path.name}...")
     result = run_script("validate-platform.py", str(config_path), capture=True)
     if result.returncode != 0:
-        UI.error(result.stdout + result.stderr)
+        UI.error((result.stdout or "") + (result.stderr or "") or "validate failed (no output)")
         return result.returncode
     UI.ok("Valid")
     print()
 
     # Generate
-    print("Generating agent infrastructure...")
-    result = run_script("generate-agent-config.py", str(config_path))
+    if dry_run:
+        print("Generating agent infrastructure [dry-run]...")
+    else:
+        print("Generating agent infrastructure...")
+    script_args = [str(config_path)]
+    if dry_run:
+        script_args.append("--dry-run")
+    result = run_script("generate-agent-config.py", *script_args)
     if result.returncode != 0:
         return result.returncode
+
+    if dry_run:
+        print()
+        UI.muted("[dry-run] No files written. Re-run without --dry-run to apply.")
+        return 0
 
     # Run doctor check
     print()
@@ -3616,7 +3630,7 @@ def main() -> int:
 
     commands = {
         "scan": lambda: cmd_scan(positional, update=update, maestro_dir=maestro_dir, dry_run=dry_run, project_name_override=project_name_override),
-        "init": lambda: cmd_init(positional),
+        "init": lambda: cmd_init(positional, dry_run=dry_run),
         "clone": lambda: cmd_clone(positional, target=maestro_dir or ""),
         "doctor": lambda: cmd_doctor(positional),
         "status": lambda: cmd_status(positional),
