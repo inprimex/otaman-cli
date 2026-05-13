@@ -2,7 +2,7 @@
 """Otaman CLI - human-facing wrapper for multi-repo agent orchestration.
 
 Usage:
-    maestro scan [<path>]              Scan repos, create maestro folder with draft config
+    maestro scan [<path>] [--dry-run]   Scan repos, create maestro folder with draft config
     maestro init [<config>]            Initialize .agents/ from platform.yaml
     maestro migrate [<name>]           Migrate to dedicated maestro folder
     maestro launcher <target>          Scaffold a launcher folder with connection profiles
@@ -326,12 +326,16 @@ def run_script(name: str, *args: str, capture: bool = False, stream_stderr: bool
 # Commands
 # ---------------------------------------------------------------------------
 
-def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = None) -> int:
+def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = None, dry_run: bool = False) -> int:
     """Scan repos and generate draft platform.yaml in a dedicated maestro folder."""
     scan_path = args[0] if args else "."
     resolved = Path(scan_path).resolve()
 
-    if update:
+    if dry_run and update:
+        UI.header("Otaman Scan --update (dry-run)")
+    elif dry_run:
+        UI.header("Otaman Scan (dry-run)")
+    elif update:
         UI.header("Otaman Scan --update")
         # In update mode, look for platform.yaml in maestro dir or scan dir
         search = Path(maestro_dir).resolve() if maestro_dir else resolved
@@ -356,31 +360,45 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
     if not update:
         print(f"Otaman folder: {C.BOLD}{maestro_path}{C.RESET}\n")
 
-        # Create maestro folder + git init
-        maestro_path.mkdir(parents=True, exist_ok=True)
-        git_dir = maestro_path / ".git"
-        if not git_dir.exists():
-            subprocess.run(["git", "init", str(maestro_path)], capture_output=True)
-            UI.ok(f"Created {maestro_path.name}/ with git init")
-
-        # Generate .gitignore
-        gitignore_path = maestro_path / ".gitignore"
-        if not gitignore_path.exists():
-            gitignore_path.write_text(
-                "# Runtime artifacts (not versioned)\n"
-                ".agents/bus/\n"
-                ".agents/blocked/\n"
-                ".agents/queue/\n"
-                ".agents/sessions/\n"
-                ".agents/current-agent\n",
-                encoding="utf-8",
-            )
-            UI.ok("Created .gitignore")
+        if dry_run:
+            # Report what WOULD happen, no mutations
+            if not maestro_path.exists():
+                UI.muted(f"  [dry-run] would mkdir {maestro_path}/")
+            else:
+                UI.muted(f"  [dry-run] maestro folder already exists at {maestro_path}/")
+            if not (maestro_path / ".git").exists():
+                UI.muted(f"  [dry-run] would `git init` in {maestro_path.name}/")
+            if not (maestro_path / ".gitignore").exists():
+                UI.muted(f"  [dry-run] would create .gitignore (.agents/bus,blocked,queue,sessions,current-agent)")
             print()
+        else:
+            # Create maestro folder + git init
+            maestro_path.mkdir(parents=True, exist_ok=True)
+            git_dir = maestro_path / ".git"
+            if not git_dir.exists():
+                subprocess.run(["git", "init", str(maestro_path)], capture_output=True)
+                UI.ok(f"Created {maestro_path.name}/ with git init")
+
+            # Generate .gitignore
+            gitignore_path = maestro_path / ".gitignore"
+            if not gitignore_path.exists():
+                gitignore_path.write_text(
+                    "# Runtime artifacts (not versioned)\n"
+                    ".agents/bus/\n"
+                    ".agents/blocked/\n"
+                    ".agents/queue/\n"
+                    ".agents/sessions/\n"
+                    ".agents/current-agent\n",
+                    encoding="utf-8",
+                )
+                UI.ok("Created .gitignore")
+                print()
 
     script_args = [scan_path, "--maestro-dir", str(maestro_path)]
     if update:
         script_args.append("--update")
+    if dry_run:
+        script_args.append("--dry-run")
 
     result = run_script("discover-repos.py", *script_args, capture=True, stream_stderr=True)
     if result.returncode != 0:
@@ -466,7 +484,10 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
             UI.muted("  maestro init")
     else:
         draft = report.get("draft_path", "")
-        if draft:
+        if draft and dry_run:
+            UI.muted(f"[dry-run] would write draft config to: {draft}")
+            UI.muted("Re-run without --dry-run to apply.")
+        elif draft:
             UI.ok(f"Draft config written to: {draft}")
             m_dir = report.get("maestro_dir", "")
             if m_dir:
@@ -3524,7 +3545,7 @@ def main() -> int:
             i += 1
 
     commands = {
-        "scan": lambda: cmd_scan(positional, update=update, maestro_dir=maestro_dir),
+        "scan": lambda: cmd_scan(positional, update=update, maestro_dir=maestro_dir, dry_run=dry_run),
         "init": lambda: cmd_init(positional),
         "clone": lambda: cmd_clone(positional, target=maestro_dir or ""),
         "doctor": lambda: cmd_doctor(positional),
