@@ -3,7 +3,7 @@
 
 Usage:
     maestro scan [<path>] [--dry-run] [--name N] [--otaman-dir P]   Scan repos + create otaman folder
-    maestro init [<config>] [--dry-run]   Initialize .agents/ from platform.yaml
+    maestro init [<config>] [--dry-run] [--skip-doctor]   Initialize .agents/ from platform.yaml
     maestro migrate [<name>]           Migrate to dedicated maestro folder
     maestro launcher <target>          Scaffold a launcher folder with connection profiles
     maestro install-cli [--apply]      Put `maestro` on PATH (symlink on POSIX, setx on Windows)
@@ -569,7 +569,7 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
     return 0
 
 
-def cmd_init(args: list[str], dry_run: bool = False) -> int:
+def cmd_init(args: list[str], dry_run: bool = False, skip_doctor: bool = False) -> int:
     """Initialize .agents/ from platform.yaml."""
     config = args[0] if args else "platform.yaml"
     config_path = Path(config).resolve()
@@ -608,6 +608,11 @@ def cmd_init(args: list[str], dry_run: bool = False) -> int:
     if dry_run:
         print()
         UI.muted("[dry-run] No files written. Re-run without --dry-run to apply.")
+        return 0
+
+    if skip_doctor:
+        print()
+        UI.muted("Skipped doctor check (--skip-doctor). Run `otaman doctor` to verify environment.")
         return 0
 
     # Run doctor check
@@ -3579,6 +3584,7 @@ def main() -> int:
     desc = ""
     update = False
     dry_run = False
+    skip_doctor = False
     ack_status = "resolved"
     approve_action = "list"
     complete_tasks = ""
@@ -3603,6 +3609,9 @@ def main() -> int:
             i += 1
         elif rest[i] == "--dry-run":
             dry_run = True
+            i += 1
+        elif rest[i] == "--skip-doctor":
+            skip_doctor = True
             i += 1
         elif rest[i] == "--tasks" and i + 1 < len(rest):
             complete_tasks = rest[i + 1]
@@ -3630,7 +3639,7 @@ def main() -> int:
 
     commands = {
         "scan": lambda: cmd_scan(positional, update=update, maestro_dir=maestro_dir, dry_run=dry_run, project_name_override=project_name_override),
-        "init": lambda: cmd_init(positional, dry_run=dry_run),
+        "init": lambda: cmd_init(positional, dry_run=dry_run, skip_doctor=skip_doctor),
         "clone": lambda: cmd_clone(positional, target=maestro_dir or ""),
         "doctor": lambda: cmd_doctor(positional),
         "status": lambda: cmd_status(positional),
