@@ -1036,6 +1036,70 @@ def cmd_send(args: list[str]) -> int:
     return 0
 
 
+def cmd_read(args: list[str]) -> int:
+    """Read the full content of a specific bus message.
+
+    Usage:
+      otaman read <message-stem>
+
+    The <message-stem> is the filename without .md (as shown in
+    `otaman check` output). Substring match accepted when unambiguous.
+    Searches active/ first, then archive/YYYY-MM/.
+    """
+    if not args:
+        UI.error("read requires a message stem")
+        UI.muted("Usage: otaman read <message-stem>")
+        UI.muted("Tip: get the stem from `otaman check` output")
+        return 2
+
+    stem = args[0]
+    root = find_project_root()
+    if not root:
+        UI.error("Not in an otaman project")
+        return 1
+
+    active_dir, _acks_dir = _resolve_bus_paths(root)
+
+    # 1. Exact match in active/
+    candidate = active_dir / f"{stem}.md"
+    if candidate.is_file():
+        msg_file = candidate
+    else:
+        # 2. Substring match in active/
+        matches = list(active_dir.glob(f"*{stem}*.md"))
+        if len(matches) == 1:
+            msg_file = matches[0]
+        elif len(matches) > 1:
+            UI.error(f"Ambiguous stem '{stem}'. Matches:")
+            for m in matches[:5]:
+                UI.muted(f"  - {m.stem}")
+            if len(matches) > 5:
+                UI.muted(f"  ... and {len(matches) - 5} more")
+            return 1
+        else:
+            # 3. Try archive/YYYY-MM/
+            archive_root = active_dir.parent / "archive"
+            archive_matches: list[Path] = []
+            if archive_root.is_dir():
+                for month_dir in archive_root.iterdir():
+                    if month_dir.is_dir():
+                        archive_matches.extend(month_dir.glob(f"*{stem}*.md"))
+            if len(archive_matches) == 1:
+                msg_file = archive_matches[0]
+                UI.muted(f"  (found in archive: {msg_file.parent.name})")
+            elif len(archive_matches) > 1:
+                UI.error(f"Ambiguous in archive: {[m.stem for m in archive_matches[:5]]}")
+                return 1
+            else:
+                UI.error(f"Message not found: {stem}")
+                UI.muted(f"  Searched: {active_dir.relative_to(root)} + archive/*/")
+                return 1
+
+    # Print the full message content as-is (frontmatter + body)
+    print(msg_file.read_text(encoding="utf-8"))
+    return 0
+
+
 def cmd_check(args: list[str]) -> int:
     """Check messages for an agent."""
     root = find_project_root()
@@ -1176,7 +1240,8 @@ def cmd_check(args: list[str]) -> int:
 
     UI.kv("Summary", f"{total.get('pending', 0)} pending | {total.get('read', 0)} read | {total.get('resolved', 0)} resolved")
     if pending:
-        UI.muted("Use 'otaman ack <msg-stem>' to acknowledge a message")
+        UI.muted("Use `otaman read <msg-stem>` to read a message")
+        UI.muted("Use `otaman ack <msg-stem>` to acknowledge a message")
     return 0
 
 
@@ -3259,6 +3324,7 @@ def cmd_help() -> int:
   {C.GREEN}status{C.RESET} [repo]                 Cross-repo status dashboard (commits, messages, reviews)
   {C.GREEN}whoami{C.RESET}, {C.GREEN}iam{C.RESET}                   Show agent identity + project + routing + bus state ([--json])
   {C.GREEN}check{C.RESET} [agent]                 Check pending messages for an agent (auto-detects from cwd)
+  {C.GREEN}read{C.RESET} <message-stem>           Read full content of a bus message (substring match OK)
   {C.GREEN}send{C.RESET} <to> --subject S --body B  Send a bus message ([--type T] [--priority P])
   {C.GREEN}ack{C.RESET} <msg> [--read|--resolved]   Acknowledge a bus message (resolved is default)
   {C.GREEN}cleanup{C.RESET} [--dry-run]            Archive old, fully-acked bus messages
@@ -3412,6 +3478,7 @@ def main() -> int:
         "doctor": lambda: cmd_doctor(positional),
         "status": lambda: cmd_status(positional),
         "check": lambda: cmd_check(positional),
+        "read": lambda: cmd_read(positional),
         "send": lambda: cmd_send(rest),
         "whoami": lambda: cmd_whoami(rest),
         "iam": lambda: cmd_whoami(rest),
