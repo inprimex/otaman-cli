@@ -1286,8 +1286,36 @@ def cmd_ack(args: list[str], status: str = "resolved") -> int:
             if pattern in f.stem or pattern == f.stem:
                 matches.append(f)
 
+    # Token-based fallback: split input by dashes and glob between tokens.
+    # Handles the "logical reconstruction" stem form
+    # (e.g. "20260426T15164601-tasks-gitlab-cicd-pipeline" when the real
+    # filename has "-maestro-to-backend-agent-" in the middle).
+    if not matches and "-" in pattern and active_dir.is_dir():
+        tokens = [tok for tok in pattern.split("-") if tok]
+        if len(tokens) >= 2:
+            glob_pattern = "*" + "*".join(tokens) + "*.md"
+            matches = list(active_dir.glob(glob_pattern))
+
+    # Frontmatter-id fallback: scan every .md file's YAML frontmatter and
+    # match against the `id:` field. The id field is what's shown at the
+    # top of each `otaman check` entry, so agents that copy from there
+    # arrive with this form (e.g. "20260409T224058-3aeed02" where 3aeed02
+    # is a short hash that doesn't appear in the filename).
+    if not matches and active_dir.is_dir():
+        import re as _re
+        for f in active_dir.glob("*.md"):
+            try:
+                head = f.read_text(encoding="utf-8")[:512]
+                fm_id_match = _re.search(r"^id:\s*(\S+)", head, _re.MULTILINE)
+                if fm_id_match and (fm_id_match.group(1) == pattern or pattern in fm_id_match.group(1)):
+                    matches.append(f)
+            except (OSError, UnicodeDecodeError):
+                continue
+
     if not matches:
         UI.error(f"No message matching '{pattern}' in active bus")
+        UI.muted("Tip: paste the full file stem from the bottom line of each `otaman check` entry,")
+        UI.muted("     OR the frontmatter `id:` value from the top line.")
         return 1
 
     if len(matches) > 5:
