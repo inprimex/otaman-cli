@@ -326,6 +326,30 @@ def run_script(name: str, *args: str, capture: bool = False, stream_stderr: bool
 # Commands
 # ---------------------------------------------------------------------------
 
+def _find_existing_otaman_project(scan_root: Path) -> Path | None:
+    """Detect if scan_root is already an otaman/maestro project.
+
+    Returns the existing maestro folder Path if found, else None.
+
+    Checks in order:
+      1. scan_root itself has platform.yaml (flat layout)
+      2. Any child folder matching *-otaman/ or *-maestro/ with platform.yaml
+      3. scan_root has .agents/ (legacy at-root layout)
+    """
+    if (scan_root / "platform.yaml").is_file():
+        return scan_root
+    if scan_root.is_dir():
+        for child in scan_root.iterdir():
+            if not child.is_dir():
+                continue
+            if child.name.endswith("-otaman") or child.name.endswith("-maestro"):
+                if (child / "platform.yaml").is_file():
+                    return child
+    if (scan_root / ".agents").is_dir():
+        return scan_root
+    return None
+
+
 def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = None, dry_run: bool = False) -> int:
     """Scan repos and generate draft platform.yaml in a dedicated maestro folder."""
     scan_path = args[0] if args else "."
@@ -347,6 +371,20 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
     else:
         UI.header("Otaman Scan")
         print(f"Scanning {C.BOLD}{resolved}{C.RESET} ...\n")
+
+    # Detect already-scanned project (skip when --update opted in)
+    if not update:
+        existing = _find_existing_otaman_project(resolved)
+        if existing:
+            UI.warn(f"This directory already looks like an otaman project: {existing}")
+            UI.muted("Existing platform.yaml found. Options:")
+            UI.muted(f"  otaman scan {scan_path} --update --maestro-dir {existing}    # re-scan + merge")
+            if dry_run:
+                UI.muted("Continuing in dry-run mode for inspection only — no changes will be written.")
+                print()
+            else:
+                UI.muted("  otaman scan {0} --update --dry-run --maestro-dir {1}    # preview a merge".format(scan_path, existing))
+                return 1
 
     # Determine maestro folder
     if maestro_dir:
