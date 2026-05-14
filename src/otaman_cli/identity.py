@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from otaman_core._resolve import find_maestro_root
+from otaman_core._resolve import find_maestro_root, resolve_worktree_main
 
 
 def find_project_root(start: Path | None = None) -> Path | None:
@@ -42,6 +42,13 @@ def resolve_agent_identity(
     if cwd is None:
         cwd = Path.cwd()
     cwd = cwd.resolve()
+    # If cwd is inside a linked git worktree, also try matching against the
+    # main repo's working tree — ownership lives on the main repo path that
+    # platform.yaml declares, not on the per-feature worktree directory.
+    try:
+        worktree_main = resolve_worktree_main(cwd)
+    except Exception:
+        worktree_main = None
     # 2. CWD → repo → owner
     platform_yaml = root / "platform.yaml"
     if platform_yaml.is_file():
@@ -67,6 +74,10 @@ def resolve_agent_identity(
                 except (OSError, ValueError):
                     continue
                 if cwd == resolved or cwd.is_relative_to(resolved):
+                    return str(owner).strip()
+                if worktree_main is not None and (
+                    worktree_main == resolved or worktree_main.is_relative_to(resolved)
+                ):
                     return str(owner).strip()
     # 3. Project-global fallback
     agent_file = root / ".agents" / "current-agent"
