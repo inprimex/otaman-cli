@@ -26,6 +26,7 @@ Usage:
     maestro set-agent <name>           Set current agent identity
     maestro presale [name domain client]  Initialize pre-sale estimation project
     maestro retrospective [project-code]  Post-project retrospective
+    otaman onboard <sub> [args]        Onboard users / projects (add-user, list-users, whoami, doctor)
     otaman help                        Show this help
 
 Options:
@@ -3497,6 +3498,10 @@ def cmd_help() -> int:
   {C.GREEN}team{C.RESET} <feature> [-d desc]       Orchestrate a cross-repo feature (decompose + assign)
   {C.GREEN}gate{C.RESET} [transition]             Check phase transition readiness (e.g. pre-sale → dev)
 
+{C.BOLD}Team onboarding:{C.RESET}
+  {C.GREEN}onboard{C.RESET} <sub> [args]            User / project provisioning:
+                                  add-user, list-users, whoami, doctor
+
 {C.BOLD}Pre-sale & estimation:{C.RESET}
   {C.GREEN}presale{C.RESET} [name domain client]   Initialize pre-sale estimation project
   {C.GREEN}discovery{C.RESET}                     Show discovery phase status
@@ -3559,6 +3564,17 @@ def cmd_help() -> int:
   Use 'python3' on Linux/macOS/WSL, 'py' on Windows.
 """)
     return 0
+
+
+def cmd_onboard(args: list[str]) -> int:
+    """Dispatch to the otaman onboard CLI subcommands.
+
+    The onboard package owns its own argparse; we pass through ``args``
+    (everything after ``onboard``) verbatim and return its exit code.
+    """
+    from otaman_cli.onboard.cli import main as _onboard_main
+    return _onboard_main(args)
+
 
 
 # ---------------------------------------------------------------------------
@@ -3677,6 +3693,7 @@ def main() -> int:
         "audit-knowledge": lambda: cmd_audit_knowledge(positional),
         "gate": lambda: cmd_gate(positional),
         "team": lambda: cmd_team(positional, desc),
+        "onboard": lambda: cmd_onboard(rest),
     }
 
     if command not in commands:
