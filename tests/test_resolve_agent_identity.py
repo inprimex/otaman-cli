@@ -179,3 +179,86 @@ repos:
     )
     backend_cwd = project.parent / "auth-service"
     assert resolve_agent_identity(project, backend_cwd) == "backend-agent"
+
+
+# ---------------------------------------------------------------------------
+# Worktree-aware identity — added 2026-05-14 (Spec C: Claude Code interop)
+# ---------------------------------------------------------------------------
+#
+# When an agent works in a linked worktree of a managed repo, the worktree
+# directory is OUTSIDE the repo path declared in platform.yaml. The old
+# resolver walked cwd → repo paths and missed the match, so ownership
+# rules silently fell through to the project-global current-agent
+# fallback. The fix: resolve_agent_identity now also tries matching the
+# worktree's main-repo path before falling through.
+#
+# Anthropic explicitly recommends worktrees for parallel sessions; without
+# this, otaman's PreToolUse ownership hook denies legitimate writes from
+# any worktree.
+
+
+def _make_worktree(main_repo: Path, name: str, sibling_dir: Path) -> Path:
+    """Create a linked worktree pointing into ``main_repo``.
+
+    Returns the worktree's working-tree path (where the agent would cwd).
+    """
+    gitdir = main_repo / ".git" / "worktrees" / name
+    gitdir.mkdir(parents=True, exist_ok=True)
+    worktree = sibling_dir / f"{main_repo.name}-{name}"
+    worktree.mkdir()
+    (worktree / ".git").write_text(f"gitdir: {gitdir}\n", encoding="utf-8")
+    return worktree
+
+
+def test_cwd_in_worktree_of_owned_repo_resolves_owner(project: Path) -> None:
+    """CWD in a worktree of auth-service should resolve to backend-agent."""
+    # Stale global identity must NOT win over worktree-aware match.
+    (project / ".agents" / "current-agent").write_text("stale-frontend-agent\n")
+    # Mark auth-service as a git repo so the worktree marker can point in.
+    auth_main = project.parent / "auth-service"
+    (auth_main / ".git").mkdir()
+    worktree = _make_worktree(auth_main, "feature-login", project.parent)
+    assert resolve_agent_identity(project, worktree) == "backend-agent"
+
+
+def test_cwd_nested_in_worktree_resolves_owner(project: Path) -> None:
+    """CWD in a subdir of a worktree should still resolve to the main owner."""
+    auth_main = project.parent / "auth-service"
+    (auth_main / ".git").mkdir()
+    worktree = _make_worktree(auth_main, "feature-2fa", project.parent)
+    nested = worktree / "src" / "auth"
+    nested.mkdir(parents=True)
+    assert resolve_agent_identity(project, nested) == "backend-agent"
+
+
+def test_worktrees_of_different_repos_resolve_to_different_owners(project: Path) -> None:
+    """Two worktrees, two repos — each must get its own owner."""
+    auth_main = project.parent / "auth-service"
+    web_main = project.parent / "web-app"
+    (auth_main / ".git").mkdir()
+    (web_main / ".git").mkdir()
+    auth_wt = _make_worktree(auth_main, "feat-a", project.parent)
+    web_wt = _make_worktree(web_main, "feat-b", project.parent)
+    assert resolve_agent_identity(project, auth_wt) == "backend-agent"
+    assert resolve_agent_identity(project, web_wt) == "frontend-agent"
+
+
+def test_cwd_in_orphan_worktree_falls_back_to_current_agent(project: Path) -> None:
+    """Worktree of a repo NOT in platform.yaml → falls through to current-agent."""
+    (project / ".agents" / "current-agent").write_text("orphan-agent\n")
+    unmanaged = project.parent / "unmanaged-repo"
+    unmanaged.mkdir()
+    (unmanaged / ".git").mkdir()
+    worktree = _make_worktree(unmanaged, "feature-z", project.parent)
+    assert resolve_agent_identity(project, worktree) == "orphan-agent"
+
+
+def test_direct_cwd_match_still_preferred_over_worktree_logic(project: Path) -> None:
+    """When cwd IS the managed repo directly, no worktree lookup is needed.
+
+    Regression guard: make sure the worktree path didn't accidentally
+    override the original cwd-match path for the normal (non-worktree) case.
+    """
+    (project / ".agents" / "current-agent").write_text("stale-agent\n")
+    backend_cwd = project.parent / "auth-service"
+    assert resolve_agent_identity(project, backend_cwd) == "backend-agent"

@@ -163,6 +163,8 @@ def test_help_doesnt_list_obviously_phantom_commands() -> None:
         "msg", "stem", "list", "add", "remove", "register", "run", "show",
         "set", "set-default", "set-repo", "set-agent", "install", "uninstall",
         "on", "off", "status", "approve", "reject", "detect", "check", "pr",
+        # onboard sub-subcommand names (otaman onboard <sub>)
+        "add-user", "list-users",
         "post-review",
         # Top-level binary name (appears in Quick start examples).
         "maestro",
