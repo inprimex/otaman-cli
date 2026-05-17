@@ -27,6 +27,8 @@ Usage:
     maestro presale [name domain client]  Initialize pre-sale estimation project
     maestro retrospective [project-code]  Post-project retrospective
     otaman onboard <sub> [args]        Onboard users / projects (add-user, list-users, whoami, doctor)
+    otaman mcp-config --bridge-url URL  Emit Claude Code .mcp.json for the bridge
+    otaman session spawn --agent A --repo R  Spawn a session under the logged-in user
     otaman help                        Show this help
 
 Options:
@@ -2294,6 +2296,47 @@ def cmd_bridge(args: list[str]) -> int:
         return int(e.code) if e.code is not None else 1
 
 
+def cmd_mcp_config(args: list[str]) -> int:
+    """Emit a Claude Code .mcp.json snippet pointing at the bridge.
+
+    Forwards to otaman_cli.mcp_config. Reads the cached OIDC token
+    from `otaman login` and prints (or writes) the JSON block Claude
+    Code needs to connect to the bridge's MCP endpoint with the right
+    bearer auth.
+    """
+    UI.header("Maestro MCP Config")
+    try:
+        from otaman_cli.mcp_config import main as mcp_main
+        return mcp_main(args)
+    except SystemExit as e:
+        return int(e.code) if e.code is not None else 1
+
+
+def cmd_session(args: list[str]) -> int:
+    """Manage otaman sessions: spawn (more to come).
+
+    Subcommands:
+        spawn   Spawn a session via the local runner under the
+                logged-in user's identity (reads token from
+                `otaman login` cache).
+    """
+    UI.header("Maestro Session")
+    if not args:
+        UI.error("Missing subcommand")
+        UI.muted("Usage: otaman session <spawn> [args...]")
+        return 1
+    sub, rest = args[0], args[1:]
+    try:
+        if sub == "spawn":
+            from otaman_cli.session_spawn import main as spawn_main
+            return spawn_main(rest)
+        UI.error(f"Unknown session subcommand: {sub}")
+        UI.muted("Usage: otaman session <spawn> [args...]")
+        return 1
+    except SystemExit as e:
+        return int(e.code) if e.code is not None else 1
+
+
 def cmd_git_host(args: list[str]) -> int:
     """Manage git host (GitHub / GitLab / Bitbucket / Azure DevOps) integration.
 
@@ -3502,6 +3545,11 @@ def cmd_help() -> int:
   {C.GREEN}onboard{C.RESET} <sub> [args]            User / project provisioning:
                                   add-user, list-users, whoami, doctor
 
+{C.BOLD}Auth & tokens (multi-user):{C.RESET}
+  {C.GREEN}login{C.RESET}                         Authenticate via OIDC device flow; cache token
+  {C.GREEN}logout{C.RESET}                        Remove cached token
+  {C.GREEN}token{C.RESET} [--token-path PATH]     Show cached-token metadata (no secrets)
+
 {C.BOLD}Pre-sale & estimation:{C.RESET}
   {C.GREEN}presale{C.RESET} [name domain client]   Initialize pre-sale estimation project
   {C.GREEN}discovery{C.RESET}                     Show discovery phase status
@@ -3574,6 +3622,19 @@ def cmd_onboard(args: list[str]) -> int:
     """
     from otaman_cli.onboard.cli import main as _onboard_main
     return _onboard_main(args)
+
+
+
+def cmd_login(args: list[str]) -> int:
+    """Dispatch to the otaman login / auth subcommands.
+
+    Implements OAuth 2.0 Device Authorization Grant. Subcommands:
+      login   — initiate device-flow auth (default if no subcommand)
+      logout  — remove cached token
+      show    — print cached-token metadata (no secrets)
+    """
+    from otaman_cli.auth.login import main as _login_main
+    return _login_main(args)
 
 
 
@@ -3679,6 +3740,8 @@ def main() -> int:
         "routing": lambda: cmd_accounts(rest),
         "afk": lambda: cmd_afk(rest),
         "bridge": lambda: cmd_bridge(rest),
+        "mcp-config": lambda: cmd_mcp_config(rest),
+        "session": lambda: cmd_session(rest),
         "ping": lambda: cmd_ping(rest),
         "launcher": lambda: cmd_launcher(rest),
         "upgrade": lambda: cmd_upgrade(rest),
@@ -3693,6 +3756,9 @@ def main() -> int:
         "audit-knowledge": lambda: cmd_audit_knowledge(positional),
         "gate": lambda: cmd_gate(positional),
         "team": lambda: cmd_team(positional, desc),
+        "login": lambda: cmd_login(["login"] + rest),
+        "logout": lambda: cmd_login(["logout"] + rest),
+        "token": lambda: cmd_login(["show"] + rest),
         "onboard": lambda: cmd_onboard(rest),
     }
 
