@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a compliance audit report for a maestro-managed project.
+"""Generate a compliance audit report for an otaman-managed project.
 
 Produces a structured report covering:
 - Ownership enforcement status
@@ -18,7 +18,7 @@ Output:
 
 Exit codes:
     0 — success
-    1 — not a maestro project
+    1 — not an otaman project
     2 — error
 """
 
@@ -78,12 +78,12 @@ def audit_ownership(project_root: Path, config: dict[str, Any]) -> dict[str, Any
         }
 
         if repo_path.is_dir():
-            # Check if CLAUDE.md has maestro rules
+            # Check if CLAUDE.md has otaman rules
             claude_md = repo_path / "CLAUDE.md"
             repo_info["has_claude_md"] = claude_md.exists()
             if claude_md.exists():
                 content = claude_md.read_text(encoding="utf-8")
-                repo_info["has_maestro_rules"] = "<!-- maestro:begin -->" in content
+                repo_info["has_maestro_rules"] = "<!-- maestro:begin -->" in content  # legacy: marker string
             else:
                 repo_info["has_maestro_rules"] = False
 
@@ -276,7 +276,7 @@ def format_markdown(report: dict[str, Any]) -> str:
     """Format the report as markdown."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = [
-        f"# Maestro Compliance Audit Report",
+        f"# Otaman Compliance Audit Report",
         f"",
         f"**Project**: {report['project']}",
         f"**Generated**: {now}",
@@ -290,7 +290,7 @@ def format_markdown(report: dict[str, Any]) -> str:
     ]
 
     if report["ownership"]["repos"]:
-        lines.append("| Repo | Owner | Exists | CLAUDE.md | Maestro Rules |")
+        lines.append("| Repo | Owner | Exists | CLAUDE.md | Otaman Rules |")
         lines.append("|------|-------|--------|-----------|---------------|")
         for r in report["ownership"]["repos"]:
             exists = "Yes" if r.get("exists") else "NO"
@@ -365,7 +365,7 @@ def main() -> int:
 
     agents_dir = project_root / ".agents"
     if not agents_dir.is_dir():
-        print("ERROR: Not a maestro project — .agents/ not found", file=sys.stderr)
+        print("ERROR: Not an otaman project — .agents/ not found", file=sys.stderr)
         return 1
 
     config_path = project_root / "platform.yaml"

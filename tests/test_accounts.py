@@ -653,5 +653,5 @@ class TestConfigureTelegram:
         full = "\n".join(msgs).lower()
         assert "next steps" in full
         assert "secrets.env" in full
-        assert "maestro bridge run" in full
-        assert "maestro afk on" in full
+        assert "otaman bridge run" in full
+        assert "otaman afk on" in full

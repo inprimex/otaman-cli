@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""maestro install-cli — put the ``maestro`` command on your PATH.
+"""otaman install-cli — put the ``otaman`` command on your PATH.
 
-The plugin ships ``cli/maestro.cmd`` (Windows) and ``cli/maestro.sh``
+The plugin ships ``cli/maestro.cmd`` (Windows) and ``cli/maestro.sh``  # legacy: launcher filenames
 (POSIX) as launchers, but unless those are on PATH users have to call
 them by absolute path. This command diagnoses the current state and
 either prints the exact command the user should run to fix it
@@ -10,8 +10,8 @@ passed.
 
 Behavior by platform:
 
-* **POSIX** (Linux, macOS, WSL) — creates ``~/.local/bin/maestro`` as a
-  symlink to ``cli/maestro.sh``. If ``~/.local/bin`` isn't on PATH we
+* **POSIX** (Linux, macOS, WSL) — creates ``~/.local/bin/otaman`` as a
+  symlink to ``cli/maestro.sh``  # legacy: launcher filename. If ``~/.local/bin`` isn't on PATH we
   additionally emit (or print) a shell-rc line the user can append.
 * **Windows** — appends the plugin's ``cli\\`` directory to the user's
   PATH via ``setx`` (does NOT require admin). The user must open a new
@@ -33,6 +33,7 @@ from pathlib import Path
 # Layout (post-Step-1 carve): src/otaman_cli/install_cli.py
 # Walk up to otaman-cli/ root, then into cli/.
 CLI_DIR = Path(__file__).resolve().parent.parent.parent / "cli"
+# legacy: launcher shell scripts still use maestro.sh / maestro.cmd filename in plugin repo
 POSIX_LAUNCHER = CLI_DIR / "maestro.sh"
 WINDOWS_LAUNCHER = CLI_DIR / "maestro.cmd"
 
@@ -63,7 +64,7 @@ def posix_install(
     out=sys.stdout,
 ) -> int:
     bin_dir = bin_dir or default_posix_bin()
-    target = bin_dir / "maestro"
+    target = bin_dir / "otaman"
 
     if not POSIX_LAUNCHER.exists():
         print(f"ERROR: launcher missing: {POSIX_LAUNCHER}", file=sys.stderr)
@@ -82,14 +83,14 @@ def posix_install(
         )
         if not apply:
             print(
-                f"\nTo replace it: maestro install-cli --apply",
+                f"\nTo replace it: otaman install-cli --apply",
                 file=out,
             )
             return 0
     elif target.exists():
         print(
             f"WARNING: {target} already exists and is NOT a symlink.\n"
-            f"Remove it manually if you want to install the maestro "
+            f"Remove it manually if you want to install the otaman "
             f"launcher there.",
             file=out,
         )
@@ -129,7 +130,7 @@ def posix_uninstall(
     out=sys.stdout,
 ) -> int:
     bin_dir = bin_dir or default_posix_bin()
-    target = bin_dir / "maestro"
+    target = bin_dir / "otaman"
     if not target.exists() and not target.is_symlink():
         print(f"Nothing to do: {target} does not exist.", file=out)
         return 0
@@ -228,7 +229,7 @@ def windows_install(
 
     # Apply: use setx so the change survives reboots. Append to the
     # existing User PATH value — we prepend the plugin cli so a conda /
-    # asdf / other wrapper-shadowed `maestro` doesn't win.
+    # asdf / other wrapper-shadowed `otaman` doesn't win.
     new_path = (
         cli_dir_str + ";" + user_path if user_path else cli_dir_str
     )
@@ -298,8 +299,8 @@ def windows_uninstall(*, apply: bool = False, out=sys.stdout) -> int:
 
 def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="maestro install-cli",
-        description="Put `maestro` on your PATH.",
+        prog="otaman install-cli",
+        description="Put `otaman` on your PATH.",
     )
     parser.add_argument(
         "--apply", action="store_true",
@@ -308,7 +309,7 @@ def run(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--uninstall", action="store_true",
-        help="Remove the maestro launcher from PATH (POSIX) or print "
+        help="Remove the otaman launcher from PATH (POSIX) or print "
              "the command to remove it (Windows).",
     )
     parser.add_argument(

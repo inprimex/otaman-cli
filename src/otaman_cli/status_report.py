@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate cross-repo status report for a maestro-managed project.
+"""Generate cross-repo status report for an otaman-managed project.
 
 Usage:
     python status-report.py [project-root] [repo-filter]
@@ -9,7 +9,7 @@ Output:
 
 Exit codes:
     0 — success
-    1 — not a maestro project (no .agents/)
+    1 — not an otaman project (no .agents/)
     2 — error
 """
 
@@ -230,7 +230,7 @@ def main() -> int:
 
     agents_dir = project_root / ".agents"
     if not agents_dir.is_dir():
-        print(json.dumps({"error": "Not a maestro project — .agents/ directory not found"}))
+        print(json.dumps({"error": "Not an otaman project — .agents/ directory not found"}))
         return 1
 
     # Load config

@@ -9,7 +9,7 @@ All YAML parsing stays on the Python side where ``accounts.py``,
 Usage::
 
     launch-resolve.py --connection <name> [--shell bash|ssh|zsh|fish]
-                      [--maestro-root PATH]
+                      [--otaman-root PATH]
 
 Outputs (on stdout) shell-safe export statements:
 
@@ -235,8 +235,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Target shell for path expansion (default: bash)",
     )
     parser.add_argument(
-        "--maestro-root",
-        help="Maestro folder path (default: auto-resolve from cwd)",
+        "--otaman-root",
+        help="Otaman folder path (default: auto-resolve from cwd)",
     )
     # Model/effort resolution inputs — lets the launcher pass per-repo /
     # per-agent context so resolve_tier picks the right rule.
@@ -264,8 +264,8 @@ def main(argv: list[str] | None = None) -> int:
         root = find_maestro_root()
         if root is None:
             print(
-                "ERROR: no maestro folder found (run from inside a managed repo, "
-                "pass --maestro-root, or set MAESTRO_ROOT)",
+                "ERROR: no otaman folder found (run from inside a managed repo, "
+                "pass --otaman-root, or set MAESTRO_ROOT)",
                 file=sys.stderr,
             )
             return 1

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Report on model/effort frontmatter across maestro commands and agents.
+"""Report on model/effort frontmatter across otaman commands and agents.
 
 Reads the shipped frontmatter from the plugin's commands/*.md and agents/*.md,
 optionally compares against user preferences in platform.yaml's `models:` block,
@@ -29,7 +29,7 @@ def _find_plugin_root() -> Path:
     Resolution chain (transitional during Stages 2-3 of the carve):
     1. OTAMAN_PLUGIN_ROOT env var (operator override)
     2. Sibling otaman-plugin checkout (post-Stage 4)
-    3. Sibling maestro-plugin legacy checkout
+    3. Sibling otaman-plugin (or legacy maestro-plugin) checkout
     4. Fallback: this package's parent dir (empty report if no commands/agents)
 
     Stage 4 simplifies this when otaman-plugin owns commands/ + agents/.
@@ -43,7 +43,7 @@ def _find_plugin_root() -> Path:
             base = here.parents[parent_levels]
         except IndexError:
             continue
-        for name in ("otaman-plugin", "maestro-plugin"):
+        for name in ("otaman-plugin", "maestro-plugin"):  # legacy: also scan old plugin dir name
             cand = base / name
             if (cand / "commands").is_dir() and (cand / "agents").is_dir():
                 return cand
@@ -161,8 +161,8 @@ def print_diff(commands: list[dict], agents: list[dict], overrides: dict) -> Non
         nonlocal any_diff
         header_printed = False
         for e in entries:
-            # Match by "/maestro:name" (preferred) or bare name
-            key_full = f"/maestro:{e['name']}" if label == "Commands" else e["name"]
+            # Match by "/otaman:name" (preferred) or "/maestro:name" (legacy) or bare name
+            key_full = f"/otaman:{e['name']}" if label == "Commands" else e["name"]
             override = overrides_map.get(key_full) or overrides_map.get(e["name"])
             if not override:
                 continue
@@ -193,7 +193,7 @@ def print_suggestions(commands: list[dict], overrides: dict) -> None:
         print("""
   models:
     commands:
-      "/maestro:propose":
+      "/otaman:propose":  # legacy: also matches /maestro: prefix
         model: opus
         effort: xhigh
 """)
@@ -232,15 +232,15 @@ def _load_config_dict(target: str = "auto") -> tuple[Path | None, dict]:
           - ``"platform"``     — always write to platform.yaml (legacy default)
           - ``"launch-settings"`` — always write to launch-settings.yaml
             (launcher-local; useful when the launcher folder is decoupled
-            from the maestro folder)
+            from the otaman folder)
           - ``"auto"``         — auto-detect: if launch-settings.yaml
-            exists in the cwd/maestro-root AND looks like a launcher file
+            exists in the cwd/otaman-root AND looks like a launcher file
             (has ``connections:`` or ``accounts:``), write there; else
             platform.yaml.
     """
     root = find_project_root()
     if not root:
-        # No maestro / launcher folder discoverable — check cwd directly
+        # No otaman / launcher folder discoverable — check cwd directly
         root = Path.cwd()
     try:
         import yaml  # type: ignore
@@ -523,7 +523,7 @@ def main(argv: list[str]) -> int:
     # New subcommand form.
     import argparse
     parser = argparse.ArgumentParser(
-        prog="maestro models",
+        prog="otaman models",
         description="Inspect and configure session model/effort tiers",
     )
     subs = parser.add_subparsers(dest="subcommand", required=True)
@@ -564,13 +564,13 @@ def main(argv: list[str]) -> int:
             const="launch-settings",
             help="Write to launch-settings.yaml (launcher-local, "
                  "useful when the launcher folder is separate from the "
-                 "maestro folder)",
+                 "otaman folder)",
         )
         g.add_argument(
             "--platform", dest="target", action="store_const",
             const="platform",
             help="Write to platform.yaml (project-wide; default when in "
-                 "a maestro folder)",
+                 "an otaman folder)",
         )
         p.set_defaults(target="auto")
 

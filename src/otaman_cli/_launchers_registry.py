@@ -1,17 +1,17 @@
 """Per-user, per-host registry of known launcher folders.
 
-Tracked in ``~/.maestro/launchers.yaml``. Used by ``maestro upgrade`` to
+Tracked in ``~/.otaman/launchers.yaml`` (was ``~/.maestro/launchers.yaml`` pre-rebrand). Used by ``otaman upgrade`` to
 walk every launcher this user has on this machine and refresh it
-(``git pull`` on the plugin checkout + ``maestro init`` on the maestro
+(``git pull`` on the plugin checkout + ``otaman init`` on the otaman
 folder each launcher targets).
 
 Auto-maintained: the launcher scripts call ``register_launcher`` on
 every successful launch, so the registry fills up as a side-effect
-of normal usage. Manual management via ``maestro launcher add/remove``
+of normal usage. Manual management via ``otaman launcher add/remove``
 covers first-time bootstrap and cleanup.
 
 Why this module is separate: the launchers are PowerShell + Bash, but
-they call out to Python for YAML parsing (Bash) or shell out to ``maestro
+they call out to Python for YAML parsing (Bash) or shell out to ``otaman
 launcher register`` (both). Centralising the file format here keeps the
 two launcher implementations consistent.
 
@@ -36,13 +36,13 @@ REGISTRY_FILENAME = "launchers.yaml"
 
 def registry_path() -> Path:
     """Return the registry file path. Honours ``MAESTRO_LAUNCHERS_REGISTRY``
-    for tests, otherwise defaults to ``~/.maestro/launchers.yaml``.
+    for tests, otherwise defaults to ``~/.otaman/launchers.yaml``.
     """
     override = os.environ.get("MAESTRO_LAUNCHERS_REGISTRY")
     if override:
         return Path(override)
     home = Path(os.path.expanduser("~"))
-    return home / ".maestro" / REGISTRY_FILENAME
+    return home / ".otaman" / REGISTRY_FILENAME  # legacy: was ~/.maestro/ pre-rebrand
 
 
 def _now() -> str:
@@ -61,7 +61,7 @@ def _normalise(path: str | Path) -> str:
     except OSError:
         # Don't fail on paths that no longer exist — keep them in the
         # registry until the user explicitly removes them; that lets
-        # ``maestro launcher list`` surface stale entries.
+        # ``otaman launcher list`` surface stale entries.
         p = p.absolute()
     return str(p)
 

@@ -1,20 +1,22 @@
 """Coverage guard: every command wired into the dispatcher must appear in
-``maestro help``.
+``otaman help``.
 
 Recurring failure mode (this came up 2026-05-02): commands ship over time,
 get wired into the dispatcher, but the help text only gets touched in big
 periodic refreshes. End result: 9 commands shipped over the last several
 phases (`accounts`, `afk`, `bridge`, `ping`, `launcher`, `upgrade`,
 `install-cli`, `git-host`, `models`) were callable but never showed up in
-``maestro --help``, so users had to read CLAUDE.md or commit messages to
+``otaman --help``, so users had to read CLAUDE.md or commit messages to
 discover them.
 
 This test pins the contract:
 
-  - Every entry in the dispatcher dict in ``cli/maestro.py`` must have its
+  - Every entry in the dispatcher dict in ``main.py`` must have its
     name appear somewhere in ``cmd_help`` output.
   - Conversely (best-effort), the help shouldn't list a phantom command
     that has no dispatcher entry.
+  - The help output must NOT contain bare-word "maestro" (regression guard
+    for the finish-maestro-to-otaman-migration rebrand).
 
 Doesn't enforce wording or grouping — just presence. Catches the drift
 class. Future help refreshes are still a judgement call.
@@ -100,10 +102,27 @@ def test_dispatcher_extraction_finds_known_commands() -> None:
 
 
 def test_help_runs_cleanly() -> None:
-    """maestro help should exit 0 and produce non-trivial output."""
+    """otaman help should exit 0 and produce non-trivial output."""
     output = _help_output()
     assert "Otaman" in output
     assert len(output) > 200
+
+
+def test_help_contains_no_bare_maestro() -> None:
+    """Regression guard: user-visible help must not contain the legacy brand name.
+
+    This catches future accidental reintroductions of bare-word "maestro" in
+    cmd_help() or any output emitted before cmd_help() returns.
+    """
+    import re
+    output = _help_output()
+    matches = re.findall(r'\bmaestro\b', output, re.IGNORECASE)
+    assert not matches, (
+        f"User-visible help output contains {len(matches)} bare-word 'maestro' occurrence(s): "
+        f"{matches[:5]!r}\n"
+        "Rename to 'otaman' in cmd_help() or add a 'legacy:' annotation in the source "
+        "to suppress the audit gate."
+    )
 
 
 def test_every_dispatcher_command_appears_in_help() -> None:
@@ -166,8 +185,8 @@ def test_help_doesnt_list_obviously_phantom_commands() -> None:
         # onboard sub-subcommand names (otaman onboard <sub>)
         "add-user", "list-users",
         "post-review",
-        # Top-level binary name (appears in Quick start examples).
-        "maestro",
+        # "otaman" appears as the top-level binary name in Quick start examples.
+        "otaman",
         # `help` is dispatched specially before the dict lookup (see main()
         # ``if args[0] in ("-h", "--help", "help"): return cmd_help()``),
         # so it's a legitimate top-level command without a dispatcher entry.

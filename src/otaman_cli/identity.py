@@ -1,4 +1,4 @@
-"""Per-tab agent identity resolution (carved from legacy cli/maestro.py).
+"""Per-tab agent identity resolution (carved from legacy cli/maestro.py).  # legacy: filename
 
 Resolution priority (the 2026-04-29 cross-tab identity-leak fix):
 1. ``explicit`` arg from the command line
@@ -18,10 +18,10 @@ from otaman_core._resolve import find_maestro_root, resolve_worktree_main
 
 
 def find_project_root(start: Path | None = None) -> Path | None:
-    """Find the maestro root directory.
+    """Find the otaman root directory.
 
     Resolution chain:
-    1. .maestro marker file (contains relative path to maestro folder)
+    1. .otaman marker file (or legacy .maestro) — contains relative path to otaman folder
     2. MAESTRO_ROOT environment variable
     3. Walk-up fallback (legacy: platform.yaml or .agents/ in parent)
 

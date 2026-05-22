@@ -155,7 +155,7 @@ def main(argv=None) -> int:
     )
     ap.add_argument("--agent", required=True, help="Agent identity (e.g. backend-agent)")
     ap.add_argument("--repo", required=True, help="Repo name from platform.yaml or absolute path")
-    ap.add_argument("--project-root", required=True, help="Absolute path to maestro folder")
+    ap.add_argument("--project-root", required=True, help="Absolute path to otaman folder")
     ap.add_argument("--mode", default="interactive", choices=["interactive", "headless"])
     ap.add_argument("--harness", default="claude-code")
     ap.add_argument("--account", help="CLAUDE_CONFIG_DIR profile name")

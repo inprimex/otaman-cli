@@ -2,30 +2,30 @@
 """Otaman CLI - human-facing wrapper for multi-repo agent orchestration.
 
 Usage:
-    maestro scan [<path>] [--dry-run] [--name N] [--otaman-dir P]   Scan repos + create otaman folder
-    maestro init [<config>] [--dry-run] [--skip-doctor]   Initialize .agents/ from platform.yaml
-    maestro migrate [<name>]           Migrate to dedicated maestro folder
-    maestro launcher <target>          Scaffold a launcher folder with connection profiles
-    maestro install-cli [--apply]      Put `maestro` on PATH (symlink on POSIX, setx on Windows)
-    maestro git-host [detect|list|check|add|pr|post-review]  Git host integration (PRs, comments)
-    maestro models [--diff|--suggest]  Show model/effort defaults; --diff vs platform.yaml overrides
-    maestro clone <source>             Clone all repos + init + doctor
-    maestro doctor                     Check environment readiness
-    maestro status [<repo>]            Cross-repo status dashboard
-    maestro check [<agent>]            Check messages for an agent
+    otaman scan [<path>] [--dry-run] [--name N] [--otaman-dir P]   Scan repos + create otaman folder
+    otaman init [<config>] [--dry-run] [--skip-doctor]   Initialize .agents/ from platform.yaml
+    otaman migrate [<name>]           Migrate to dedicated otaman folder
+    otaman launcher <target>          Scaffold a launcher folder with connection profiles
+    otaman install-cli [--apply]      Put `otaman` on PATH (symlink on POSIX, setx on Windows)
+    otaman git-host [detect|list|check|add|pr|post-review]  Git host integration (PRs, comments)
+    otaman models [--diff|--suggest]  Show model/effort defaults; --diff vs platform.yaml overrides
+    otaman clone <source>             Clone all repos + init + doctor
+    otaman doctor                     Check environment readiness
+    otaman status [<repo>]            Cross-repo status dashboard
+    otaman check [<agent>]            Check messages for an agent
     otaman ack <msg> [--read|--resolved]   Acknowledge a bus message
-    maestro cleanup [--dry-run]        Archive old bus messages
-    maestro propose <title> [-d desc]  Propose a spec change (pending approval)
-    maestro complete <change> --tasks T  Report task completion, update tasks.md
-    maestro approve [list|approve|reject] [<id>]  Review/approve spec-change-requests
-    maestro assign [<tasks.md>]        Map OpenSpec tasks to repo owners
-    maestro review [--reviewer R]      Trigger observer review
-    maestro validate [<config>]        Validate platform.yaml
-    maestro validate-messages [<file>] Validate bus message files
-    maestro compliance [--format F]    Generate compliance audit report
-    maestro set-agent <name>           Set current agent identity
-    maestro presale [name domain client]  Initialize pre-sale estimation project
-    maestro retrospective [project-code]  Post-project retrospective
+    otaman cleanup [--dry-run]        Archive old bus messages
+    otaman propose <title> [-d desc]  Propose a spec change (pending approval)
+    otaman complete <change> --tasks T  Report task completion, update tasks.md
+    otaman approve [list|approve|reject] [<id>]  Review/approve spec-change-requests
+    otaman assign [<tasks.md>]        Map OpenSpec tasks to repo owners
+    otaman review [--reviewer R]      Trigger observer review
+    otaman validate [<config>]        Validate platform.yaml
+    otaman validate-messages [<file>] Validate bus message files
+    otaman compliance [--format F]    Generate compliance audit report
+    otaman set-agent <name>           Set current agent identity
+    otaman presale [name domain client]  Initialize pre-sale estimation project
+    otaman retrospective [project-code]  Post-project retrospective
     otaman onboard <sub> [args]        Onboard users / projects (add-user, list-users, whoami, doctor)
     otaman mcp-config --bridge-url URL  Emit Claude Code .mcp.json for the bridge
     otaman session spawn --agent A --repo R  Spawn a session under the logged-in user
@@ -122,7 +122,7 @@ if not sys.stdout.isatty() or (sys.platform == "win32" and "WT_SESSION" not in o
 # ---------------------------------------------------------------------------
 
 class UI:
-    """Consistent output formatting for all maestro CLI commands.
+    """Consistent output formatting for all otaman CLI commands.
 
     Semantic methods:
         error/warn/ok/info/muted — status messages
@@ -330,13 +330,13 @@ def run_script(name: str, *args: str, capture: bool = False, stream_stderr: bool
 # ---------------------------------------------------------------------------
 
 def _find_existing_otaman_project(scan_root: Path) -> Path | None:
-    """Detect if scan_root is already an otaman/maestro project.
+    """Detect if scan_root is already an otaman project.
 
-    Returns the existing maestro folder Path if found, else None.
+    Returns the existing otaman folder Path if found, else None.
 
     Checks in order:
       1. scan_root itself has platform.yaml (flat layout)
-      2. Any child folder matching *-otaman/ or *-maestro/ with platform.yaml
+      2. Any child folder matching *-otaman/ or legacy *-maestro/ with platform.yaml
       3. scan_root has .agents/ (legacy at-root layout)
     """
     if (scan_root / "platform.yaml").is_file():
@@ -345,6 +345,7 @@ def _find_existing_otaman_project(scan_root: Path) -> Path | None:
         for child in scan_root.iterdir():
             if not child.is_dir():
                 continue
+            # legacy: allow -maestro suffix in folder detection until otaman-core 1.0
             if child.name.endswith("-otaman") or child.name.endswith("-maestro"):
                 if (child / "platform.yaml").is_file():
                     return child
@@ -354,7 +355,7 @@ def _find_existing_otaman_project(scan_root: Path) -> Path | None:
 
 
 def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = None, dry_run: bool = False, project_name_override: str | None = None) -> int:
-    """Scan repos and generate draft platform.yaml in a dedicated maestro folder."""
+    """Scan repos and generate draft platform.yaml in a dedicated otaman folder."""
     scan_path = args[0] if args else "."
     resolved = Path(scan_path).resolve()
 
@@ -364,7 +365,7 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
         UI.header("Otaman Scan (dry-run)")
     elif update:
         UI.header("Otaman Scan --update")
-        # In update mode, look for platform.yaml in maestro dir or scan dir
+        # In update mode, look for platform.yaml in otaman dir or scan dir
         search = Path(maestro_dir).resolve() if maestro_dir else resolved
         if not (search / "platform.yaml").exists():
             UI.error(f"No platform.yaml found at {search}")
@@ -381,15 +382,15 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
         if existing:
             UI.warn(f"This directory already looks like an otaman project: {existing}")
             UI.muted("Existing platform.yaml found. Options:")
-            UI.muted(f"  otaman scan {scan_path} --update --maestro-dir {existing}    # re-scan + merge")
+            UI.muted(f"  otaman scan {scan_path} --update --otaman-dir {existing}    # re-scan + merge")
             if dry_run:
                 UI.muted("Continuing in dry-run mode for inspection only — no changes will be written.")
                 print()
             else:
-                UI.muted("  otaman scan {0} --update --dry-run --maestro-dir {1}    # preview a merge".format(scan_path, existing))
+                UI.muted("  otaman scan {0} --update --dry-run --otaman-dir {1}    # preview a merge".format(scan_path, existing))
                 return 1
 
-    # Determine maestro folder
+    # Determine otaman folder
     if maestro_dir:
         maestro_path = Path(maestro_dir).resolve()
     else:
@@ -419,7 +420,7 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
                 UI.muted(f"  [dry-run] would create .gitignore (.agents/bus,blocked,queue,sessions,current-agent)")
             print()
         else:
-            # Create maestro folder + git init
+            # Create otaman folder + git init
             maestro_path.mkdir(parents=True, exist_ok=True)
             git_dir = maestro_path / ".git"
             if not git_dir.exists():
@@ -473,7 +474,7 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
         UI.muted("  - Wrong directory? Try: otaman scan /path/to/your/project")
         UI.muted("  - Repos not yet cloned locally? Clone them as siblings first.")
         UI.muted("  - Repos behind a non-default depth? Scan walks 2 levels by default.")
-        UI.muted("  - All git repos got skipped as maestro/otaman folders? They are.")
+        UI.muted("  - All git repos got skipped as otaman folders? They are.")
         UI.muted("")
         UI.muted("If your project IS already an otaman project, use --update to re-scan.")
         return 1
@@ -624,13 +625,13 @@ def cmd_init(args: list[str], dry_run: bool = False, skip_doctor: bool = False) 
 
 
 def cmd_clone(args: list[str], target: str = "") -> int:
-    """Clone all project repos from a maestro configuration."""
+    """Clone all project repos from a otaman configuration."""
     if not args:
         UI.error("Source required (local path, git URL, or user@host:path)")
-        UI.muted("Usage: maestro clone <source> [--target <dir>]")
-        UI.muted("  maestro clone git@github.com:org/project-maestro.git")
-        UI.muted("  maestro clone user@server:/path/to/maestro/")
-        UI.muted("  maestro clone /local/path/to/platform.yaml")
+        UI.muted("Usage: otaman clone <source> [--target <dir>]")
+        UI.muted("  otaman clone git@github.com:org/project-otaman.git")
+        UI.muted("  otaman clone user@server:/path/to/otaman/")
+        UI.muted("  otaman clone /local/path/to/platform.yaml")
         return 1
 
     UI.header("Otaman Clone")
@@ -683,12 +684,12 @@ def cmd_clone(args: list[str], target: str = "") -> int:
         if f_ == 0:
             UI.ok(f"Environment: {p} checks passed, {w} warnings")
         else:
-            UI.warn(f"Environment: {p} passed, {w} warnings, {f_} failed — run maestro doctor for details")
+            UI.warn(f"Environment: {p} passed, {w} warnings, {f_} failed — run otaman doctor for details")
 
     maestro_dir = report.get("maestro_dir", "")
     print()
     UI.kv("Otaman folder", maestro_dir)
-    UI.muted("Next: launch agents or run maestro doctor for full environment check")
+    UI.muted("Next: launch agents or run otaman doctor for full environment check")
 
     return 1 if failed else 0
 
@@ -697,7 +698,7 @@ def cmd_doctor(args: list[str]) -> int:
     """Check environment readiness — git, runtimes, CLI tools, MCP."""
     root = Path(args[0]).resolve() if args else find_project_root()
     if not root:
-        UI.error("Not in a maestro project")
+        UI.error("Not in an otaman project")
         return 1
 
     UI.header("Environment Check")
@@ -820,7 +821,7 @@ def cmd_status(args: list[str]) -> int:
     """Show cross-repo status dashboard. Also runs silent bus cleanup."""
     root = find_project_root()
     if not root:
-        UI.error("Not in a maestro project (no platform.yaml or .agents/ found)")
+        UI.error("Not in an otaman project (no platform.yaml or .agents/ found)")
         return 1
 
     script_args = [str(root)]
@@ -1057,7 +1058,7 @@ def cmd_whoami(args: list[str]) -> int:
     if root:
         UI.kv("  Project root", str(root))
     else:
-        UI.muted("  (not inside a maestro/otaman project)")
+        UI.muted("  (not inside a otaman project)")
     UI.kv("  Cwd", str(Path.cwd()))
     UI.kv("  Routing", routing or "<not set>")
     UI.kv("  Config dir", config_dir)
@@ -1179,7 +1180,7 @@ def cmd_read(args: list[str]) -> int:
         if not matches:
             # 2b. Token-based fallback: agents sometimes pass partial stems
             # like "20260426T15164601-tasks-gitlab-cicd-pipeline" when the
-            # real file has -maestro-to-backend-agent- in the middle. Match
+            # legacy: real file may have -maestro-to-backend-agent- in the middle. Match
             # each dash-separated token with wildcards between them.
             tokens = [tok for tok in stem.split("-") if tok]
             if len(tokens) >= 2:
@@ -1222,15 +1223,15 @@ def cmd_check(args: list[str]) -> int:
     """Check messages for an agent."""
     root = find_project_root()
     if not root:
-        UI.error("Not in a maestro project")
+        UI.error("Not in an otaman project")
         return 1
 
     # Determine agent: explicit arg → CWD→repo→owner → .agents/current-agent
     agent = resolve_agent_identity(root, explicit=args[0] if args else None)
     if not agent:
         UI.error("No agent specified and identity could not be resolved from cwd or .agents/current-agent")
-        UI.muted("Usage: maestro check <agent-name>")
-        UI.muted("   or: maestro set-agent <name> first")
+        UI.muted("Usage: otaman check <agent-name>")
+        UI.muted("   or: otaman set-agent <name> first")
         return 1
 
     try:
@@ -1368,20 +1369,20 @@ def cmd_ack(args: list[str], status: str = "resolved") -> int:
     if not args:
         UI.error("Message identifier required")
         UI.muted("Usage: otaman ack <msg-stem-or-partial> [--read | --resolved]")
-        UI.muted("  msg-stem: filename without .md (shown in 'maestro check' output)")
+        UI.muted("  msg-stem: filename without .md (shown in 'otaman check' output)")
         UI.muted("  --read: mark as read (will still show in pending-ish view)")
         UI.muted("  --resolved: mark as resolved (default)")
         return 1
 
     root = find_project_root()
     if not root:
-        UI.error("Not in a maestro project")
+        UI.error("Not in an otaman project")
         return 1
 
     # Determine agent: CWD→repo→owner → .agents/current-agent
     agent = resolve_agent_identity(root)
     if not agent:
-        UI.error("No agent identity set. Run from inside a managed repo, or: maestro set-agent <name>")
+        UI.error("No agent identity set. Run from inside a managed repo, or: otaman set-agent <name>")
         return 1
 
     active_dir, acks_dir = _resolve_bus_paths(root)
@@ -1398,7 +1399,7 @@ def cmd_ack(args: list[str], status: str = "resolved") -> int:
     # Token-based fallback: split input by dashes and glob between tokens.
     # Handles the "logical reconstruction" stem form
     # (e.g. "20260426T15164601-tasks-gitlab-cicd-pipeline" when the real
-    # filename has "-maestro-to-backend-agent-" in the middle).
+    # legacy: filename may have "-maestro-to-backend-agent-" in the middle).
     if not matches and "-" in pattern and active_dir.is_dir():
         tokens = [tok for tok in pattern.split("-") if tok]
         if len(tokens) >= 2:
@@ -1444,7 +1445,7 @@ def cmd_cleanup(args: list[str], dry_run: bool = False) -> int:
     """Archive old bus messages and clean up."""
     root = find_project_root()
     if not root:
-        UI.error("Not in a maestro project")
+        UI.error("Not in an otaman project")
         return 1
 
     UI.header("Otaman Bus Cleanup")
@@ -1499,12 +1500,12 @@ def cmd_propose(args: list[str], desc: str = "") -> int:
     """Create a spec-change-request on the bus for human approval."""
     if not args:
         UI.error("Title required")
-        UI.muted("Usage: maestro propose \"add user pagination\" [-d \"Detailed description\"]")
+        UI.muted("Usage: otaman propose \"add user pagination\" [-d \"Detailed description\"]")
         return 1
 
     root = find_project_root()
     if not root:
-        UI.error("Not in a maestro project")
+        UI.error("Not in an otaman project")
         return 1
 
     UI.header("Spec Change Request")
@@ -1578,7 +1579,7 @@ TODO: Concrete suggestions for what the spec should say.
     UI.kv("Blocked", str(blocked_file.relative_to(root)), C.YELLOW)
     print()
     UI.blocked("STOP: Do NOT implement features that depend on this spec change.")
-    UI.action(f"Switch to other tasks. Run {C.BOLD}maestro check{C.RESET} to poll for approval.")
+    UI.action(f"Switch to other tasks. Run {C.BOLD}otaman check{C.RESET} to poll for approval.")
     print()
     UI.muted("A human must review and approve this via: otaman approve")
     UI.muted("Edit the message file to fill in details if needed.")
@@ -1589,13 +1590,13 @@ def cmd_complete(args: list[str], tasks_spec: str = "", mark_all: bool = False) 
     """Report task completion: update tasks.md and send bus notification."""
     if not args:
         UI.error("Change name required")
-        UI.muted("Usage: maestro complete <change-name> --tasks \"2.1,3.1-3.5\"")
-        UI.muted("       maestro complete <change-name> --all")
+        UI.muted("Usage: otaman complete <change-name> --tasks \"2.1,3.1-3.5\"")
+        UI.muted("       otaman complete <change-name> --all")
         return 1
 
     root = find_project_root()
     if not root:
-        UI.error("Not in a maestro project")
+        UI.error("Not in an otaman project")
         return 1
 
     change_name = args[0]
@@ -1603,9 +1604,9 @@ def cmd_complete(args: list[str], tasks_spec: str = "", mark_all: bool = False) 
     if not tasks_spec and not mark_all:
         UI.error("Specify --tasks or --all")
         UI.muted("Examples:")
-        UI.muted(f"  maestro complete {change_name} --tasks \"2.1, 2.3\"")
-        UI.muted(f"  maestro complete {change_name} --tasks \"3.1-3.5\"")
-        UI.muted(f"  maestro complete {change_name} --all")
+        UI.muted(f"  otaman complete {change_name} --tasks \"2.1, 2.3\"")
+        UI.muted(f"  otaman complete {change_name} --tasks \"3.1-3.5\"")
+        UI.muted(f"  otaman complete {change_name} --all")
         return 1
 
     UI.header("Task Completion")
@@ -1713,7 +1714,7 @@ def cmd_approve(args: list[str], action: str = "list", comment: str = "") -> int
     """Review and approve/reject pending spec-change-requests."""
     root = find_project_root()
     if not root:
-        UI.error("Not in a maestro project")
+        UI.error("Not in an otaman project")
         return 1
 
     try:
@@ -1935,7 +1936,7 @@ def cmd_assign(args: list[str]) -> int:
     """Map tasks from OpenSpec tasks.md to repo owners and notify agents."""
     root = find_project_root()
     if not root:
-        UI.error("Not in a maestro project")
+        UI.error("Not in an otaman project")
         return 1
 
     UI.header("Task Assignment")
@@ -1962,13 +1963,13 @@ def cmd_assign(args: list[str]) -> int:
                                 rel = t.relative_to(root)
                                 UI.muted(str(rel))
                             print()
-                            UI.muted("Run: maestro assign <path-to-tasks.md-or-feature-dir>")
+                            UI.muted("Run: otaman assign <path-to-tasks.md-or-feature-dir>")
                             return 0
         except Exception:
             pass
         UI.error("Path to tasks.md or OpenSpec feature directory required")
-        UI.muted("Usage: maestro assign <path-to-tasks.md>")
-        UI.muted("       maestro assign openspec/changes/my-feature")
+        UI.muted("Usage: otaman assign <path-to-tasks.md>")
+        UI.muted("       otaman assign openspec/changes/my-feature")
         return 1
 
     target = args[0]
@@ -2045,7 +2046,7 @@ def cmd_compliance(args: list[str], fmt: str = "markdown") -> int:
     """Generate compliance report."""
     root = find_project_root()
     if not root:
-        UI.error("Not in a maestro project")
+        UI.error("Not in an otaman project")
         return 1
     result = run_script("compliance-report.py", str(root), "--format", fmt)
     return result.returncode
@@ -2055,7 +2056,7 @@ def cmd_validate_messages(args: list[str]) -> int:
     """Validate bus message files."""
     root = find_project_root()
     if not root:
-        UI.error("Not in a maestro project")
+        UI.error("Not in an otaman project")
         return 1
 
     UI.header("Bus Message Validation")
@@ -2070,23 +2071,23 @@ def cmd_validate_messages(args: list[str]) -> int:
 
 
 def cmd_migrate(args: list[str]) -> int:
-    """Migrate existing maestro deployment to a dedicated maestro folder."""
+    """Migrate existing otaman deployment to a dedicated otaman folder."""
     UI.header("Otaman Migrate")
 
     # Find existing project root (old layout: platform.yaml in a non-git parent)
     root = find_project_root()
     if not root:
         UI.error("No platform.yaml or .agents/ found")
-        UI.muted("Run from within an existing maestro-managed project.")
+        UI.muted("Run from within an existing otaman-managed project.")
         return 1
 
     # Check if already in a git repo (might already be migrated)
     git_dir = root / ".git"
     if git_dir.is_dir():
         UI.warn(f"{root} already has a .git/ directory")
-        print(f"  This may already be a dedicated maestro folder. Proceed with caution.\n")
+        print(f"  This may already be a dedicated otaman folder. Proceed with caution.\n")
 
-    # Determine maestro folder name
+    # Determine otaman folder name
     config_path = root / "platform.yaml"
     if not config_path.exists():
         UI.error(f"platform.yaml not found at {root}")
@@ -2103,7 +2104,7 @@ def cmd_migrate(args: list[str]) -> int:
     if args:
         maestro_name = args[0]
     else:
-        maestro_name = f"{project_name}-maestro"
+        maestro_name = f"{project_name}-otaman"
 
     maestro_dir = root / maestro_name
     if maestro_dir.exists() and any(maestro_dir.iterdir()):
@@ -2111,10 +2112,10 @@ def cmd_migrate(args: list[str]) -> int:
         return 1
 
     UI.kv("Migrating from", str(root), C.BOLD)
-    UI.kv("Maestro folder", str(maestro_dir), C.BOLD)
+    UI.kv("Otaman folder", str(maestro_dir), C.BOLD)
     print()
 
-    # Create maestro folder
+    # Create otaman folder
     maestro_dir.mkdir(parents=True, exist_ok=True)
 
     # Move artifacts
@@ -2145,13 +2146,13 @@ def cmd_migrate(args: list[str]) -> int:
             UI.ok(f"Moved {pattern}")
 
     if not moved:
-        UI.warn(f"Nothing to migrate — no maestro artifacts found at {root}")
+        UI.warn(f"Nothing to migrate — no otaman artifacts found at {root}")
         return 1
 
     # Rewrite repo paths in platform.yaml: ./repo -> ../repo
     new_config_path = maestro_dir / "platform.yaml"
     content = new_config_path.read_text(encoding="utf-8")
-    # Replace ./repo paths with ../repo (maestro folder is now one level deeper)
+    # Replace ./repo paths with ../repo (otaman folder is now one level deeper)
     import re
     content = re.sub(r'path:\s*\./([^\s]+)', r'path: ../\1', content)
     # Also fix specs.path if it points to a sibling
@@ -2177,7 +2178,7 @@ def cmd_migrate(args: list[str]) -> int:
         )
         UI.ok("Created .gitignore")
 
-    # Write .maestro markers in each repo
+    # Write .otaman markers in each repo
     try:
         with open(new_config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
@@ -2186,9 +2187,9 @@ def cmd_migrate(args: list[str]) -> int:
             if repo_dir.is_dir():
                 rel = os.path.relpath(maestro_dir.resolve(), repo_dir)
                 rel_posix = Path(rel).as_posix()
-                marker = repo_dir / ".maestro"
+                marker = repo_dir / ".otaman"
                 marker.write_text(
-                    f"# Path to maestro folder\n{rel_posix}\n",
+                    f"# Path to otaman folder\n{rel_posix}\n",
                     encoding="utf-8",
                 )
                 # Append to repo .gitignore
@@ -2196,14 +2197,14 @@ def cmd_migrate(args: list[str]) -> int:
                 needs_entry = True
                 if gi.exists():
                     gi_content = gi.read_text(encoding="utf-8")
-                    if ".maestro" in gi_content.splitlines():
+                    if ".otaman" in gi_content.splitlines():
                         needs_entry = False
                 if needs_entry:
                     with open(gi, "a", encoding="utf-8") as f:
-                        f.write("\n.maestro\n")
-                UI.ok(f"Marker {repo['name']}/.maestro -> {rel_posix}")
+                        f.write("\n.otaman\n")
+                UI.ok(f"Marker {repo['name']}/.otaman -> {rel_posix}")
     except Exception as e:
-        UI.warn(f"Could not write .maestro markers: {e}")
+        UI.warn(f"Could not write .otaman markers: {e}")
 
     # Initial commit
     subprocess.run(
@@ -2211,7 +2212,7 @@ def cmd_migrate(args: list[str]) -> int:
         capture_output=True,
     )
     subprocess.run(
-        ["git", "-C", str(maestro_dir), "commit", "-m", "Initial maestro migration"],
+        ["git", "-C", str(maestro_dir), "commit", "-m", "Initial otaman migration"],
         capture_output=True,
     )
     UI.ok("Committed initial state")
@@ -2221,14 +2222,14 @@ def cmd_migrate(args: list[str]) -> int:
     UI.muted("Next steps:")
     UI.muted(f"  1. cd {maestro_dir}")
     UI.muted("  2. Review platform.yaml (verify repo paths)")
-    UI.muted("  3. maestro init  (reinstall hooks with new paths)")
-    UI.muted("  4. Launch agents from the maestro folder")
+    UI.muted("  3. otaman init  (reinstall hooks with new paths)")
+    UI.muted("  4. Launch agents from the otaman folder")
     return 0
 
 
 def cmd_models(args: list[str]) -> int:
     """Show model/effort defaults shipped with the plugin and diff vs platform.yaml overrides."""
-    UI.header("Maestro Model/Effort Report")
+    UI.header("Otaman Model/Effort Report")
     try:
         result = run_script("models-report.py", *args)
         return result.returncode
@@ -2242,7 +2243,7 @@ def cmd_accounts(args: list[str]) -> int:
     Subcommands: add, list, remove. Forwards to scripts/accounts.py with
     its own argparse-based arg handling.
     """
-    UI.header("Maestro Accounts")
+    UI.header("Otaman Accounts")
     try:
         result = run_script("accounts.py", *args)
         return result.returncode
@@ -2257,7 +2258,7 @@ def cmd_ping(args: list[str]) -> int:
     notification, this is always delivered regardless of AFK state
     and without debounce — it's an explicit user/agent-invoked call.
     """
-    UI.header("Maestro Ping")
+    UI.header("Otaman Ping")
     try:
         result = run_script("ping.py", *args)
         return result.returncode
@@ -2270,7 +2271,7 @@ def cmd_afk(args: list[str]) -> int:
 
     Subcommands: on [DURATION], off, status. Forwards to scripts/afk.py.
     """
-    UI.header("Maestro AFK")
+    UI.header("Otaman AFK")
     try:
         result = run_script("afk.py", *args)
         return result.returncode
@@ -2286,7 +2287,7 @@ def cmd_bridge(args: list[str]) -> int:
     HTTP for PreToolUse hook requests and surfaces them via the
     configured transport.
     """
-    UI.header("Maestro Bridge")
+    UI.header("Otaman Bridge")
     try:
         result = run_script("bridge/cli.py", *args)
         return result.returncode
@@ -2304,7 +2305,7 @@ def cmd_mcp_config(args: list[str]) -> int:
     Code needs to connect to the bridge's MCP endpoint with the right
     bearer auth.
     """
-    UI.header("Maestro MCP Config")
+    UI.header("Otaman MCP Config")
     try:
         from otaman_cli.mcp_config import main as mcp_main
         return mcp_main(args)
@@ -2320,7 +2321,7 @@ def cmd_session(args: list[str]) -> int:
                 logged-in user's identity (reads token from
                 `otaman login` cache).
     """
-    UI.header("Maestro Session")
+    UI.header("Otaman Session")
     if not args:
         UI.error("Missing subcommand")
         UI.muted("Usage: otaman session <spawn> [args...]")
@@ -2346,7 +2347,7 @@ def cmd_git_host(args: list[str]) -> int:
       check             Load platform.yaml git_host:, resolve token, validate.
       list              Show git_host: config + origin-remote summary per repo.
     """
-    UI.header("Maestro Git Host")
+    UI.header("Otaman Git Host")
     sub = (args[0] if args else "list").lower()
     rest = args[1:]
 
@@ -2374,7 +2375,7 @@ def cmd_git_host(args: list[str]) -> int:
     if sub == "list":
         root = find_project_root()
         if not root:
-            UI.error("Not in a maestro project")
+            UI.error("Not in an otaman project")
             return 1
         cfg = gh.load_git_host_config(root)
         if cfg:
@@ -2388,7 +2389,7 @@ def cmd_git_host(args: list[str]) -> int:
             UI.kv("  Token source chain", sources or "(empty)")
         else:
             UI.muted("No `git_host:` block in platform.yaml (run "
-                     "`maestro git-host add` to wire one).")
+                     "`otaman git-host add` to wire one).")
         UI.info("Detected origin remotes:")
         remotes = gh.detect_remotes_for_maestro(root)
         if not remotes:
@@ -2404,11 +2405,11 @@ def cmd_git_host(args: list[str]) -> int:
     if sub == "check":
         root = find_project_root()
         if not root:
-            UI.error("Not in a maestro project")
+            UI.error("Not in an otaman project")
             return 1
         cfg = gh.load_git_host_config(root)
         if cfg is None:
-            UI.error("No `git_host:` configured. Run `maestro git-host add` first.")
+            UI.error("No `git_host:` configured. Run `otaman git-host add` first.")
             return 1
         result = gh.resolve_and_validate(cfg, maestro_root=root)
         if result.ok:
@@ -2430,7 +2431,7 @@ def cmd_git_host(args: list[str]) -> int:
         return _git_host_post_review(gh, rest)
 
     UI.error(f"Unknown subcommand: {sub}")
-    UI.muted("Usage: maestro git-host [detect|list|check|add|pr|post-review] [args...]")
+    UI.muted("Usage: otaman git-host [detect|list|check|add|pr|post-review] [args...]")
     return 1
 
 
@@ -2492,10 +2493,10 @@ def _git_host_resolve_repo(gh, root: Path, repo_arg: str | None):
 
 
 def _git_host_pr(gh, args: list[str]) -> int:
-    """`maestro git-host pr list|get|for-branch|comment`"""
+    """`otaman git-host pr list|get|for-branch|comment`"""
     if not args:
         UI.error("Missing subcommand")
-        UI.muted("Usage: maestro git-host pr [list|get|for-branch|comment] [args...]")
+        UI.muted("Usage: otaman git-host pr [list|get|for-branch|comment] [args...]")
         return 1
 
     action = args[0].lower()
@@ -2519,12 +2520,12 @@ def _git_host_pr(gh, args: list[str]) -> int:
 
     root = find_project_root()
     if not root:
-        UI.error("Not in a maestro project")
+        UI.error("Not in an otaman project")
         return 1
 
     cfg = gh.load_git_host_config(root)
     if cfg is None:
-        UI.error("No `git_host:` configured. Run `maestro git-host add` first.")
+        UI.error("No `git_host:` configured. Run `otaman git-host add` first.")
         return 1
 
     repo_dir, info = _git_host_resolve_repo(gh, root, repo_arg)
@@ -2557,7 +2558,7 @@ def _git_host_pr(gh, args: list[str]) -> int:
 
         if action == "get":
             if not positional:
-                UI.error("Missing PR number: maestro git-host pr get <number>")
+                UI.error("Missing PR number: otaman git-host pr get <number>")
                 return 1
             try:
                 number = int(positional[0])
@@ -2591,7 +2592,7 @@ def _git_host_pr(gh, args: list[str]) -> int:
 
         if action == "comment":
             if not positional:
-                UI.error("Missing PR number: maestro git-host pr comment <number> "
+                UI.error("Missing PR number: otaman git-host pr comment <number> "
                          "[--body TEXT | via stdin]")
                 return 1
             try:
@@ -2625,7 +2626,7 @@ def _git_host_pr(gh, args: list[str]) -> int:
 
 
 def _git_host_post_review(gh, args: list[str]) -> int:
-    """`maestro git-host post-review [REVIEW_FILE] [--pr N] [--repo NAME]`
+    """`otaman git-host post-review [REVIEW_FILE] [--pr N] [--repo NAME]`
 
     Reads a review artifact from .agents/reviews/ (or the explicit path
     given) and posts it as a PR comment. Uses the current branch's PR
@@ -2652,12 +2653,12 @@ def _git_host_post_review(gh, args: list[str]) -> int:
 
     root = find_project_root()
     if not root:
-        UI.error("Not in a maestro project")
+        UI.error("Not in an otaman project")
         return 1
 
     cfg = gh.load_git_host_config(root)
     if cfg is None:
-        UI.error("No `git_host:` configured. Run `maestro git-host add` first.")
+        UI.error("No `git_host:` configured. Run `otaman git-host add` first.")
         return 1
 
     # Find the review file.
@@ -2721,10 +2722,9 @@ def _git_host_post_review(gh, args: list[str]) -> int:
         pr_number = pr.number
         UI.muted(f"Resolved PR: #{pr_number} ({pr.title})")
 
-    # Wrap with a maestro header so the comment is identifiable + the
-    # reviewer knows it's machine-generated.
+    # legacy: wrap with plugin attribution; repo still named maestro-plugin on GitHub
     wrapped = (
-        f"> _Posted by [maestro-plugin](https://github.com/inprimex/maestro-plugin) "
+        f"> _Posted by [otaman-plugin](https://github.com/inprimex/maestro-plugin) "
         f"from `{review_path.name}`_\n\n"
         f"{body.rstrip()}\n"
     )
@@ -2746,7 +2746,7 @@ def _git_host_add_interactive(gh, args: list[str]) -> int:
     exactly the lines to add to platform.yaml + .otaman/secrets.env."""
     root = find_project_root()
     if not root:
-        UI.error("Not in a maestro project")
+        UI.error("Not in an otaman project")
         return 1
 
     # Try to auto-detect from the first repo that has a remote.
@@ -2795,18 +2795,18 @@ def _git_host_add_interactive(gh, args: list[str]) -> int:
     UI.muted(f"         - {{ type: env,    name: {env_name} }}")
     UI.muted(f"         - {{ type: dotenv, name: {env_name} }}")
     UI.muted("")
-    UI.action(f"4. Verify: `maestro git-host check`")
+    UI.action(f"4. Verify: `otaman git-host check`")
     return 0
 
 
 def cmd_install_cli(args: list[str]) -> int:
-    """Put the `maestro` command on PATH (POSIX symlink or Windows setx).
+    """Put the `otaman` command on PATH (POSIX symlink or Windows setx).
 
     Delegates to scripts/install_cli.py. Default mode is dry-run: the
     command prints what it *would* change. Pass ``--apply`` to actually
     edit PATH / create the symlink.
     """
-    UI.header("Maestro Install CLI")
+    UI.header("Otaman Install CLI")
     try:
         return run_script("install_cli.py", *args).returncode
     except SystemExit as e:
@@ -2817,20 +2817,20 @@ def cmd_launcher(args: list[str]) -> int:
     """Launcher management: scaffold, list, add, remove, register.
 
     Subcommands:
-      maestro launcher list              -- show registered launchers
-      maestro launcher add <path>         -- register manually
-      maestro launcher remove <path>      -- unregister
-      maestro launcher register <path>    -- silent register (used by launcher hooks)
-      maestro launcher <target> [opts]    -- scaffold a new launcher folder
+      otaman launcher list              -- show registered launchers
+      otaman launcher add <path>         -- register manually
+      otaman launcher remove <path>      -- unregister
+      otaman launcher register <path>    -- silent register (used by launcher hooks)
+      otaman launcher <target> [opts]    -- scaffold a new launcher folder
     """
     if not args:
         UI.error("subcommand or target folder required")
         UI.muted("Usage:")
-        UI.muted("  maestro launcher list                    -- show registered launchers")
-        UI.muted("  maestro launcher add <path>              -- register manually")
-        UI.muted("  maestro launcher remove <path>           -- unregister")
-        UI.muted("  maestro launcher register <path>         -- silent register (hook use)")
-        UI.muted("  maestro launcher <target> [...flags]      -- scaffold a new launcher folder")
+        UI.muted("  otaman launcher list                    -- show registered launchers")
+        UI.muted("  otaman launcher add <path>              -- register manually")
+        UI.muted("  otaman launcher remove <path>           -- unregister")
+        UI.muted("  otaman launcher register <path>         -- silent register (hook use)")
+        UI.muted("  otaman launcher <target> [...flags]      -- scaffold a new launcher folder")
         return 1
 
     sub = args[0].lower()
@@ -2847,7 +2847,7 @@ def cmd_launcher(args: list[str]) -> int:
             entries = reg.list_entries()
             if not entries:
                 UI.muted("No launchers registered. They auto-register on first launch, or:")
-                UI.muted("  maestro launcher add <path>")
+                UI.muted("  otaman launcher add <path>")
                 return 0
             UI.header(f"Registered Launchers ({len(entries)})")
             for entry in entries:
@@ -2861,7 +2861,7 @@ def cmd_launcher(args: list[str]) -> int:
         if sub in ("add", "register"):
             if len(args) < 2:
                 UI.error("path required")
-                UI.muted(f"Usage: maestro launcher {sub} <path>")
+                UI.muted(f"Usage: otaman launcher {sub} <path>")
                 return 1
             path = Path(args[1]).expanduser()
             if sub == "add" and not path.is_dir():
@@ -2884,7 +2884,7 @@ def cmd_launcher(args: list[str]) -> int:
         if sub == "remove":
             if len(args) < 2:
                 UI.error("path required")
-                UI.muted("Usage: maestro launcher remove <path>")
+                UI.muted("Usage: otaman launcher remove <path>")
                 return 1
             try:
                 removed = reg.unregister(args[1])
@@ -2898,7 +2898,7 @@ def cmd_launcher(args: list[str]) -> int:
             return 1
 
     # Default: scaffold a new launcher folder.
-    UI.header("Maestro Launcher Scaffold")
+    UI.header("Otaman Launcher Scaffold")
     try:
         result = run_script("scaffold-launcher.py", *args)
         return result.returncode
@@ -2941,7 +2941,7 @@ def cmd_upgrade(args: list[str]) -> int:
       1. Read its launch-settings.yaml + active connection
       2. If remote (ssh/mesh): SSH to the host, run
          ``cd <ssh_plugin_path> && git pull`` then ``cd <ssh_remote_root>
-         && python3 cli/maestro.py init``
+         && python3 cli/maestro.py init``  (legacy: uses plugin entry-point directly)
       3. If local: run the same commands locally
       4. Report success / failure per launcher
 
@@ -2949,7 +2949,7 @@ def cmd_upgrade(args: list[str]) -> int:
       --dry-run             show what would run, don't execute
       --launcher <path>     refresh just one launcher
       --skip-pull           don't ``git pull`` (init refresh only)
-      --skip-init           don't ``maestro init`` (pull only)
+      --skip-init           don't ``otaman init`` (pull only)
     """
     dry_run = False
     only_launcher: str | None = None
@@ -2988,16 +2988,16 @@ def cmd_upgrade(args: list[str]) -> int:
         entries = [e for e in entries if str(Path(e["path"]).resolve()) == normalised or e["path"] == only_launcher]
         if not entries:
             UI.error(f"Launcher not in registry: {only_launcher}")
-            UI.muted("Run `maestro launcher add <path>` to register it first.")
+            UI.muted("Run `otaman launcher add <path>` to register it first.")
             return 1
 
     if not entries:
         UI.warn("No launchers registered.")
         UI.muted("They auto-register on first launch via the launcher script,")
-        UI.muted("or you can register manually: maestro launcher add <path>")
+        UI.muted("or you can register manually: otaman launcher add <path>")
         return 0
 
-    UI.header(f"Maestro Upgrade ({len(entries)} launcher{'s' if len(entries) != 1 else ''})")
+    UI.header(f"Otaman Upgrade ({len(entries)} launcher{'s' if len(entries) != 1 else ''})")
     if dry_run:
         UI.muted("DRY RUN -- preview only, nothing will execute")
         print()
@@ -3013,7 +3013,7 @@ def cmd_upgrade(args: list[str]) -> int:
         if not launcher_path.is_dir():
             failures.append((str(launcher_path), "launcher folder no longer exists"))
             UI.warn("  Skipped: folder no longer exists")
-            UI.muted("  Run `maestro launcher remove <path>` to clean up the registry")
+            UI.muted("  Run `otaman launcher remove <path>` to clean up the registry")
             continue
 
         ls_path = launcher_path / "launch-settings.yaml"
@@ -3106,15 +3106,15 @@ def _upgrade_one(
             UI.muted("    (skipping git pull -- no ssh_plugin_path configured)")
 
         if not skip_init:
-            # Use python3 -m so we don't depend on `maestro` being on PATH on
+            # Use python3 -m so we don't depend on `otaman` being on PATH on
             # the remote (nvm/login-shell dance is fragile in non-interactive
             # SSH). The plugin path is already known.
             if not plugin_path:
-                UI.warn("    Cannot run maestro init -- no ssh_plugin_path configured")
+                UI.warn("    Cannot run otaman init -- no ssh_plugin_path configured")
                 return 3
             remote = (
                 f"cd {maestro_root} && "
-                f"python3 {plugin_path}/cli/maestro.py init"
+                f"python3 {plugin_path}/cli/maestro.py init"  # legacy: plugin entry-point not yet renamed
             )
             full = ssh_cmd + [remote]
             UI.muted(f"    Run: {' '.join(full)}")
@@ -3130,7 +3130,7 @@ def _upgrade_one(
         if not local_root:
             UI.error("    Missing local_root for local connection")
             return 2
-        # Plugin path: the maestro CLI itself is part of the plugin checkout.
+        # Plugin path: the otaman CLI itself is part of the plugin checkout.
         plugin_root = Path(__file__).resolve().parent.parent
 
         if not skip_pull:
@@ -3141,7 +3141,7 @@ def _upgrade_one(
                     return rc
 
         if not skip_init:
-            UI.muted(f"    Run: maestro init  (cwd={local_root})")
+            UI.muted(f"    Run: otaman init  (cwd={local_root})")
             if not dry_run:
                 rc = subprocess.run(
                     [sys.executable, str(Path(__file__).resolve()), "init"],
@@ -3159,12 +3159,12 @@ def cmd_set_agent(args: list[str]) -> int:
     """Set current agent identity."""
     if not args:
         UI.error("Agent name required")
-        UI.muted("Usage: maestro set-agent backend-agent")
+        UI.muted("Usage: otaman set-agent backend-agent")
         return 1
 
     root = find_project_root()
     if not root:
-        UI.error("Not in a maestro project")
+        UI.error("Not in an otaman project")
         return 1
 
     agent_name = args[0]
@@ -3187,7 +3187,7 @@ def _find_presale_dir(start: Path) -> Path | None:
         new = d / ".otaman-presale"
         if new.is_dir():
             return new
-        legacy = d / ".maestro-presale"
+        legacy = d / ".maestro-presale"  # legacy: fallback for pre-rebrand presale dirs
         if legacy.is_dir():
             return legacy
     return None
@@ -3195,7 +3195,7 @@ def _find_presale_dir(start: Path) -> Path | None:
 
 def cmd_presale(args: list[str]) -> int:
     """Initialize a pre-sale estimation project."""
-    UI.header("Maestro Pre-Sale")
+    UI.header("Otaman Pre-Sale")
 
     # Check for existing presale
     cwd = Path.cwd()
@@ -3262,7 +3262,7 @@ def cmd_presale(args: list[str]) -> int:
 
 def cmd_retrospective(args: list[str]) -> int:
     """Post-project retrospective — updates benchmarks."""
-    UI.header("Maestro Retrospective")
+    UI.header("Otaman Retrospective")
 
     # Find project meta
     cwd = Path.cwd()
@@ -3283,7 +3283,7 @@ def cmd_retrospective(args: list[str]) -> int:
 
     if not project_code:
         UI.error("No project code found.")
-        UI.muted("Usage: maestro retrospective [project-code]")
+        UI.muted("Usage: otaman retrospective [project-code]")
         UI.muted("Or run from a directory with .otaman-presale/project-meta.yaml (or legacy .maestro-presale/)")
         return 1
 
@@ -3306,7 +3306,7 @@ def cmd_retrospective(args: list[str]) -> int:
 
 def cmd_discovery_phase(args: list[str]) -> int:
     """Show discovery phase status."""
-    UI.header("Maestro Discovery Phase")
+    UI.header("Otaman Discovery Phase")
 
     # Find presale dir
     d = Path.cwd()
@@ -3316,8 +3316,8 @@ def cmd_discovery_phase(args: list[str]) -> int:
         if new_.is_dir():
             presale_dir = new_
             break
-        if (d / ".maestro-presale").is_dir():
-            presale_dir = d / ".maestro-presale"
+        if (d / ".maestro-presale").is_dir():  # legacy: fallback for pre-rebrand presale dirs
+            presale_dir = d / ".maestro-presale"  # legacy: pre-rebrand directory name
             break
         parent = d.parent
         if parent == d:
@@ -3326,7 +3326,7 @@ def cmd_discovery_phase(args: list[str]) -> int:
 
     if not presale_dir:
         UI.error("No .otaman-presale/ (or legacy .maestro-presale/) directory found.")
-        UI.muted("Run 'maestro presale' first to initialize a pre-sale project.")
+        UI.muted("Run 'otaman presale' first to initialize a pre-sale project.")
         return 1
 
     # Show status
@@ -3365,7 +3365,7 @@ def cmd_discovery_phase(args: list[str]) -> int:
 
 def cmd_handoff(args: list[str]) -> int:
     """Show handoff readiness."""
-    UI.header("Maestro Handoff")
+    UI.header("Otaman Handoff")
 
     d = Path.cwd()
     presale_dir = None
@@ -3374,8 +3374,8 @@ def cmd_handoff(args: list[str]) -> int:
         if new_.is_dir():
             presale_dir = new_
             break
-        if (d / ".maestro-presale").is_dir():
-            presale_dir = d / ".maestro-presale"
+        if (d / ".maestro-presale").is_dir():  # legacy: fallback for pre-rebrand presale dirs
+            presale_dir = d / ".maestro-presale"  # legacy: pre-rebrand directory name
             break
         parent = d.parent
         if parent == d:
@@ -3406,9 +3406,10 @@ def cmd_handoff(args: list[str]) -> int:
 
 def cmd_audit_knowledge(args: list[str]) -> int:
     """Show knowledge audit status."""
-    UI.header("Maestro Knowledge Audit")
+    UI.header("Otaman Knowledge Audit")
 
     # Check multiple locations for audit file
+    # legacy: include .maestro-presale fallback until otaman-core 1.0
     for candidate in [".otaman-presale/knowledge-audit.yaml", ".maestro-presale/knowledge-audit.yaml", ".agents/knowledge-audit.yaml"]:
         p = Path(candidate)
         if p.exists():
@@ -3436,14 +3437,14 @@ def cmd_audit_knowledge(args: list[str]) -> int:
 
 def cmd_team(args: list[str], desc: str) -> int:
     """Orchestrate a cross-repo feature."""
-    UI.header("Maestro Team Orchestration")
+    UI.header("Otaman Team Orchestration")
 
     if not args:
         UI.error("Feature description required")
-        UI.muted("Usage: maestro team <workflow-or-description> [-d details]")
+        UI.muted("Usage: otaman team <workflow-or-description> [-d details]")
         UI.muted("Examples:")
-        UI.muted('  maestro team api-change -d "Add pagination to /users"')
-        UI.muted('  maestro team "Add user authentication flow"')
+        UI.muted('  otaman team api-change -d "Add pagination to /users"')
+        UI.muted('  otaman team "Add user authentication flow"')
         return 1
 
     feature = " ".join(args)
@@ -3467,12 +3468,13 @@ def cmd_team(args: list[str], desc: str) -> int:
 
 def cmd_gate(args: list[str]) -> int:
     """Check gate readiness for a phase transition."""
-    UI.header("Maestro Gate Check")
+    UI.header("Otaman Gate Check")
 
     root = find_project_root()
     transition = args[0] if args else None
 
     # Determine current phase
+    # legacy: include .maestro-presale fallback until otaman-core 1.0
     for meta_loc in [".otaman-presale/project-meta.yaml", ".maestro-presale/project-meta.yaml", ".agents/project-meta.yaml"]:
         p = Path(meta_loc) if not root else root / meta_loc
         if p.exists():
@@ -3496,7 +3498,7 @@ def cmd_gate(args: list[str]) -> int:
     if transition:
         UI.kv("Transition", transition, C.BOLD)
     else:
-        UI.error("Could not determine transition. Specify: maestro gate <from>-to-<to>")
+        UI.error("Could not determine transition. Specify: otaman gate <from>-to-<to>")
         return 1
 
     UI.subheader("To run full gate validation:")
@@ -3511,15 +3513,15 @@ def cmd_help() -> int:
 {C.BOLD}{C.CYAN}Otaman{C.RESET} - Multi-Repo Agent Orchestration (v{VERSION})
 
 {C.BOLD}Setup & maintenance:{C.RESET}
-  {C.GREEN}scan{C.RESET} [path] [--maestro-dir D]   Scan repos, create maestro folder with draft config
+  {C.GREEN}scan{C.RESET} [path] [--otaman-dir D]    Scan repos, create otaman folder with draft config
   {C.GREEN}init{C.RESET} [config]                 Initialize .agents/ from platform.yaml (idempotent)
-  {C.GREEN}migrate{C.RESET} [name]                Migrate legacy layout to dedicated maestro folder
-  {C.GREEN}clone{C.RESET} <source> [--target D]    Clone all repos from maestro config (git URL, SSH, local)
+  {C.GREEN}migrate{C.RESET} [name]                Migrate legacy layout to dedicated otaman folder
+  {C.GREEN}clone{C.RESET} <source> [--target D]    Clone all repos from otaman config (git URL, SSH, local)
   {C.GREEN}doctor{C.RESET}                        Check environment readiness (git, runtimes, CLI, tmux, MCP)
   {C.GREEN}validate{C.RESET} [config]             Validate platform.yaml against the schema
   {C.GREEN}validate-messages{C.RESET} [file]      Validate bus message files
-  {C.GREEN}install-cli{C.RESET} [--prefix DIR]     Install ``maestro`` shim on PATH (so launchers find it)
-  {C.GREEN}upgrade{C.RESET} [--dry-run]            Walk launcher registry: git pull + maestro init each
+  {C.GREEN}install-cli{C.RESET} [--prefix DIR]     Install ``otaman`` shim on PATH (so launchers find it)
+  {C.GREEN}upgrade{C.RESET} [--dry-run]            Walk launcher registry: git pull + otaman init each
   {C.GREEN}compliance{C.RESET} [--format F]        Generate compliance audit report (HIPAA / ISO / GDPR)
 
 {C.BOLD}Bus & messages:{C.RESET}
@@ -3568,6 +3570,8 @@ def cmd_help() -> int:
   {C.GREEN}bridge{C.RESET} [install|uninstall|...]   Bridge daemon lifecycle (install/run/status)
   {C.GREEN}afk{C.RESET} [on|off|status]            AFK toggle — when on, approvals route to Telegram
   {C.GREEN}ping{C.RESET} <message>                 Proactively notify the user via Telegram
+  {C.GREEN}mcp-config{C.RESET} --bridge-url URL     Emit .mcp.json for Claude Code (team mode)
+  {C.GREEN}session{C.RESET} spawn --agent A --repo R  Spawn a Claude session under logged-in user
 
 {C.BOLD}Git host integration (PR / MR):{C.RESET}
   {C.GREEN}git-host{C.RESET} <subcommand>          Git host PAT + PR/MR API:
@@ -3588,17 +3592,17 @@ def cmd_help() -> int:
   --launcher PATH            Restrict upgrade to one registered launcher
 
 {C.BOLD}Quick start:{C.RESET}
-  maestro scan                # scan your repos
-  maestro init                # set up .agents/ infrastructure
-  maestro set-agent backend-agent  # set your identity
-  maestro status              # see the dashboard
-  maestro check               # check your messages
-  maestro ack <msg-stem>      # acknowledge a message
+  otaman scan                # scan your repos
+  otaman init                # set up .agents/ infrastructure
+  otaman set-agent backend-agent  # set your identity
+  otaman status              # see the dashboard
+  otaman check               # check your messages
+  otaman ack <msg-stem>      # acknowledge a message
 
 {C.BOLD}Updating across many platforms:{C.RESET}
-  maestro launcher list       # show registered launchers (auto-registered on first launch)
-  maestro upgrade --dry-run   # preview: git pull each plugin checkout + maestro init each platform
-  maestro upgrade             # for real
+  otaman launcher list       # show registered launchers (auto-registered on first launch)
+  otaman upgrade --dry-run   # preview: git pull each plugin checkout + otaman init each platform
+  otaman upgrade             # for real
 
 {C.BOLD}Bus lifecycle:{C.RESET}
   Messages are written to .agents/bus/active/ with timestamp-based IDs.
@@ -3649,7 +3653,7 @@ def main() -> int:
         return cmd_help()
 
     if args[0] in ("-v", "--version"):
-        print(f"maestro {VERSION}")
+        print(f"otaman {VERSION}")
         return 0
 
     command = args[0]

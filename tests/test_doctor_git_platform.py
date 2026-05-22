@@ -2,7 +2,7 @@
 
 The check predates the native `git_host:` API integration. Once a PAT is
 configured + validates, the standalone CLI (glab/gh/bb/az) is no longer
-*required* for maestro PR features, so a CLI install/auth gap should
+*required* for otaman PR features, so a CLI install/auth gap should
 downgrade from failure to a warning.
 """
 
@@ -106,7 +106,7 @@ class TestCliNotInstalled:
         assert result["status"] == "warn"
         issue = result["issues"][0]
         assert "optional" in issue["issue"]
-        assert "maestro git-host" in issue["issue"]
+        assert "otaman git-host" in issue["issue"]
         assert issue["severity"] == "medium"
         # pr_enabled should still be True because the API covers it.
         assert result["details"]["pr_enabled"] is True
@@ -126,7 +126,7 @@ class TestCliNotAuthenticated:
         self, gitlab_repo, tmp_path, with_gitlab_remote, monkeypatch,
     ):
         """The exact Roman case: glab installed but not logged in,
-        maestro PAT works — should show warn + an explanatory hint."""
+        otaman PAT works — should show warn + an explanatory hint."""
         monkeypatch.setenv("DOC_TOK", "x")
         (tmp_path / "platform.yaml").write_text(
             "project: test\ngit_host:\n  provider: gitlab\n  token: DOC_TOK\n",

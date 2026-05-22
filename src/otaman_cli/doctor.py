@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Maestro Doctor — validate environment readiness for agent development.
+"""Otaman Doctor — validate environment readiness for agent development.
 
 Checks:
 - Git identity (user.name, user.email)
@@ -178,7 +178,7 @@ def check_git_platform(repos: list[dict[str, Any]], project_root: Path) -> dict[
 
     # If the native `git_host:` API integration is configured AND its PAT
     # validates, the standalone CLI (glab/gh/bb/az) is no longer required
-    # for maestro features — it's just a convenience for terminal browsing.
+    # for otaman features — it's just a convenience for terminal browsing.
     # Downgrade install/auth gaps from "fail" to "warn" in that case so the
     # overall doctor run doesn't flag as broken.
     api_live = _git_host_pat_is_live(project_root)
@@ -193,7 +193,7 @@ def check_git_platform(repos: list[dict[str, Any]], project_root: Path) -> dict[
         if not cli_path:
             issue_text = f"{cli_name} CLI not installed"
             issue_text += (
-                " — optional, `maestro git-host` covers it via API"
+                " — optional, `otaman git-host` covers it via API"
                 if api_live else " — agents cannot create PRs"
             )
             issues.append({
@@ -210,7 +210,7 @@ def check_git_platform(repos: list[dict[str, Any]], project_root: Path) -> dict[
                 issue_text = f"{cli_name} CLI installed but not authenticated"
                 if api_live:
                     issue_text += (
-                        " — optional, `maestro git-host` is authenticated "
+                        " — optional, `otaman git-host` is authenticated "
                         "via platform.yaml's `git_host:` block"
                     )
                 issues.append({
@@ -589,7 +589,7 @@ def check_openspec(config: dict[str, Any], project_root: Path) -> dict[str, Any]
 
 
 def check_maestro_plugin(project_root: Path) -> dict[str, Any]:
-    """Check maestro plugin is properly set up."""
+    """Check otaman plugin is properly set up."""
     result: dict[str, Any] = {"check": "maestro_plugin", "status": "ok", "details": {}}
     issues = []
 
@@ -597,8 +597,8 @@ def check_maestro_plugin(project_root: Path) -> dict[str, Any]:
     agents_dir = project_root / ".agents"
     if not agents_dir.is_dir():
         issues.append({
-            "issue": ".agents/ directory not found — run maestro init first",
-            "fix": "maestro init",
+            "issue": ".agents/ directory not found — run otaman init first",
+            "fix": "otaman init",
             "severity": "critical",
         })
 
@@ -606,8 +606,8 @@ def check_maestro_plugin(project_root: Path) -> dict[str, Any]:
     ownership = agents_dir / "ownership.json"
     if agents_dir.is_dir() and not ownership.exists():
         issues.append({
-            "issue": "ownership.json missing — run maestro init",
-            "fix": "maestro init",
+            "issue": "ownership.json missing — run otaman init",
+            "fix": "otaman init",
             "severity": "critical",
         })
 
@@ -616,7 +616,7 @@ def check_maestro_plugin(project_root: Path) -> dict[str, Any]:
     if not config.exists():
         issues.append({
             "issue": "platform.yaml not found",
-            "fix": "maestro scan",
+            "fix": "otaman scan",
             "severity": "critical",
         })
 
@@ -631,13 +631,13 @@ def check_maestro_plugin(project_root: Path) -> dict[str, Any]:
                 repos_without_mcp.append(repo["name"])
         if repos_without_mcp:
             # Show the repo names so the user knows which one(s) to fix —
-            # not just a count. Re-running `maestro init` is the right path
-            # but it must be run from the maestro folder, not from inside a
+            # not just a count. Re-running `otaman init` is the right path
+            # but it must be run from the otaman folder, not from inside a
             # managed repo, so include the absolute path.
             names = ", ".join(repos_without_mcp)
             issues.append({
                 "issue": f"{len(repos_without_mcp)} repo(s) missing .mcp.json (MCP tools won't work): {names}",
-                "fix": f"cd {project_root} && maestro init   # re-run from maestro folder to install .mcp.json",
+                "fix": f"cd {project_root} && otaman init   # re-run from otaman folder to install .mcp.json",
                 "severity": "high",
             })
             result["details"]["repos_without_mcp"] = repos_without_mcp
@@ -690,8 +690,8 @@ def check_secrets_leaks(project_root: Path) -> dict[str, Any]:
                 "issue": ".otaman/secrets.env is tracked in git — secrets may leak on push",
                 "fix": (
                     "Rotate any tokens stored here, then:\n"
-                    "  git -C <maestro> rm --cached .otaman/secrets.env\n"
-                    "  git -C <maestro> commit -m 'untrack secrets.env'\n"
+                    "  git -C <otaman-folder> rm --cached .otaman/secrets.env\n"
+                    "  git -C <otaman-folder> commit -m 'untrack secrets.env'\n"
                     "  (see: https://github.com/newren/git-filter-repo to purge from history)"
                 ),
                 "severity": "critical",
@@ -739,16 +739,16 @@ def check_secrets_leaks(project_root: Path) -> dict[str, Any]:
     result["details"]["gitignore_missing"] = missing_gi
     if missing_gi:
         # Show the resolved gitignore path so the user knows WHICH file to
-        # edit. When `maestro doctor` is run from a managed repo (not the
-        # maestro folder), project_root resolves to the maestro folder via
-        # the .maestro marker — and that's the .gitignore that needs the
+        # edit. When `otaman doctor` is run from a managed repo (not the
+        # otaman folder), project_root resolves to the otaman folder via
+        # the .otaman marker (or legacy .maestro) — and that's the .gitignore that needs the
         # entry, not the current repo's. Showing the absolute path
         # eliminates the foot-gun.
         gi_display = str(gitignore)
         issues.append({
             "issue": f".gitignore missing entries: {', '.join(missing_gi)} (file: {gi_display})",
             "fix": (
-                f"Run `maestro init` from the maestro folder ({project_root}) to regenerate, "
+                f"Run `otaman init` from the otaman folder ({project_root}) to regenerate, "
                 f"or add manually:\n"
                 f"  echo '.otaman/secrets.env' >> {gi_display}"
             ),
@@ -886,6 +886,47 @@ def check_git_host(project_root: Path) -> dict[str, Any]:
     return result
 
 
+def check_launch_commands_resume(repos: list[dict[str, Any]]) -> dict[str, Any]:
+    """Warn when a repo's launch_commands invoke claude without -c/--resume.
+
+    Stale platform.yaml entries that bypass the launcher rewrite can omit -c,
+    causing SSH reconnects to start a fresh Claude session instead of resuming
+    the in-progress one. (M-13b in finish-maestro-to-otaman-migration)
+    """
+    import re as _re
+    result: dict[str, Any] = {"check": "launch_commands_resume", "status": "ok", "details": {}}
+    issues = []
+    _claude_pat = _re.compile(r'\bclaude\b')
+    _resume_pat = _re.compile(r'(?:^|\s)(?:-c\b|--continue\b|--resume\b)')
+
+    for repo in repos:
+        name = repo.get("name", "?")
+        cmds = repo.get("launch_commands")
+        if not cmds:
+            continue
+        if isinstance(cmds, str):
+            cmds = [cmds]
+        for cmd in cmds:
+            if _claude_pat.search(cmd) and not _resume_pat.search(cmd):
+                issues.append({
+                    "issue": (
+                        f"repo `{name}`: launch_commands lacks -c — "
+                        "SSH reconnect will start a fresh session"
+                    ),
+                    "fix": (
+                        f"Add -c to the claude invocation in platform.yaml for repo '{name}', "
+                        "e.g.: claude -c --plugin-dir ... (see M-3 in finish-maestro-to-otaman-migration)"
+                    ),
+                    "severity": "low",
+                })
+                break
+
+    if issues:
+        result["status"] = "warn"
+        result["issues"] = issues
+    return result
+
+
 def run_doctor(project_root: Path) -> dict[str, Any]:
     """Run all doctor checks and return comprehensive report."""
     config_path = project_root / "platform.yaml"
@@ -909,6 +950,7 @@ def run_doctor(project_root: Path) -> dict[str, Any]:
         check_maestro_plugin(project_root),
         check_secrets_leaks(project_root),
         check_git_host(project_root),
+        check_launch_commands_resume(repos),
     ]
 
     passed = sum(1 for c in checks if c["status"] == "ok")
@@ -940,7 +982,7 @@ def main() -> int:
         from otaman_core._resolve import find_maestro_root
         project_root = find_maestro_root()
         if not project_root:
-            print(json.dumps({"error": "No maestro project found"}))
+            print(json.dumps({"error": "No otaman project found"}))
             return 2
 
     report = run_doctor(project_root)

@@ -41,7 +41,7 @@ class TestPosixDryRun:
         assert rc == 0
         text = out.getvalue()
         assert "Would symlink" in text
-        assert str(fake_bin / "maestro") in text
+        assert str(fake_bin / "otaman") in text
         assert "--apply" in text
         # Nothing was actually created.
         assert not fake_bin.exists()
@@ -54,7 +54,7 @@ class TestPosixApply:
         out = io.StringIO()
         rc = install_cli.posix_install(fake_bin, apply=True, out=out)
         assert rc == 0
-        target = fake_bin / "maestro"
+        target = fake_bin / "otaman"
         assert target.is_symlink()
         assert target.resolve() == install_cli.POSIX_LAUNCHER.resolve()
 
@@ -73,7 +73,7 @@ class TestPosixApply:
         if not IS_POSIX:
             pytest.skip("POSIX-only")
         fake_bin.mkdir(parents=True)
-        regular = fake_bin / "maestro"
+        regular = fake_bin / "otaman"
         regular.write_text("#!/bin/sh\necho hand-rolled\n", encoding="utf-8")
         out = io.StringIO()
         rc = install_cli.posix_install(fake_bin, apply=True, out=out)
@@ -88,28 +88,28 @@ class TestPosixUninstall:
         if not IS_POSIX:
             pytest.skip("POSIX-only")
         fake_bin.mkdir(parents=True)
-        (fake_bin / "maestro").symlink_to(install_cli.POSIX_LAUNCHER)
+        (fake_bin / "otaman").symlink_to(install_cli.POSIX_LAUNCHER)
         out = io.StringIO()
         rc = install_cli.posix_uninstall(fake_bin, apply=False, out=out)
         assert rc == 0
         assert "Would remove" in out.getvalue()
-        assert (fake_bin / "maestro").is_symlink()
+        assert (fake_bin / "otaman").is_symlink()
 
     def test_apply_removes_symlink(self, fake_bin):
         if not IS_POSIX:
             pytest.skip("POSIX-only")
         fake_bin.mkdir(parents=True)
-        (fake_bin / "maestro").symlink_to(install_cli.POSIX_LAUNCHER)
+        (fake_bin / "otaman").symlink_to(install_cli.POSIX_LAUNCHER)
         out = io.StringIO()
         rc = install_cli.posix_uninstall(fake_bin, apply=True, out=out)
         assert rc == 0
-        assert not (fake_bin / "maestro").exists()
+        assert not (fake_bin / "otaman").exists()
 
     def test_refuses_non_symlink(self, fake_bin):
         if not IS_POSIX:
             pytest.skip("POSIX-only")
         fake_bin.mkdir(parents=True)
-        (fake_bin / "maestro").write_text("x", encoding="utf-8")
+        (fake_bin / "otaman").write_text("x", encoding="utf-8")
         out = io.StringIO()
         rc = install_cli.posix_uninstall(fake_bin, apply=True, out=out)
         assert rc == 1
@@ -218,10 +218,10 @@ class TestRun:
             pytest.skip("POSIX-only")
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
-        (bin_dir / "maestro").symlink_to(install_cli.POSIX_LAUNCHER)
+        (bin_dir / "otaman").symlink_to(install_cli.POSIX_LAUNCHER)
         rc = install_cli.run([
             "--uninstall", "--bin-dir", str(bin_dir),
         ])
         assert rc == 0
         # Dry-run: symlink still there.
-        assert (bin_dir / "maestro").is_symlink()
+        assert (bin_dir / "otaman").is_symlink()
