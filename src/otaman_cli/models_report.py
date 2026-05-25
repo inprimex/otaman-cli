@@ -29,7 +29,7 @@ def _find_plugin_root() -> Path:
     Resolution chain (transitional during Stages 2-3 of the carve):
     1. OTAMAN_PLUGIN_ROOT env var (operator override)
     2. Sibling otaman-plugin checkout (post-Stage 4)
-    3. Sibling otaman-plugin (or legacy maestro-plugin) checkout
+    3. Sibling otaman-plugin (or legacy: maestro-plugin) checkout
     4. Fallback: this package's parent dir (empty report if no commands/agents)
 
     Stage 4 simplifies this when otaman-plugin owns commands/ + agents/.
@@ -161,7 +161,7 @@ def print_diff(commands: list[dict], agents: list[dict], overrides: dict) -> Non
         nonlocal any_diff
         header_printed = False
         for e in entries:
-            # Match by "/otaman:name" (preferred) or "/maestro:name" (legacy) or bare name
+            # Match by "/otaman:name" (preferred) or "/maestro:name" (legacy: old prefix) or bare name
             key_full = f"/otaman:{e['name']}" if label == "Commands" else e["name"]
             override = overrides_map.get(key_full) or overrides_map.get(e["name"])
             if not override:

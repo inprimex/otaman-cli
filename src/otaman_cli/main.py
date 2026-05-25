@@ -336,7 +336,7 @@ def _find_existing_otaman_project(scan_root: Path) -> Path | None:
 
     Checks in order:
       1. scan_root itself has platform.yaml (flat layout)
-      2. Any child folder matching *-otaman/ or legacy *-maestro/ with platform.yaml
+      2. Any child folder matching *-otaman/ or legacy: *-maestro/ with platform.yaml
       3. scan_root has .agents/ (legacy at-root layout)
     """
     if (scan_root / "platform.yaml").is_file():
@@ -345,8 +345,7 @@ def _find_existing_otaman_project(scan_root: Path) -> Path | None:
         for child in scan_root.iterdir():
             if not child.is_dir():
                 continue
-            # legacy: allow -maestro suffix in folder detection until otaman-core 1.0
-            if child.name.endswith("-otaman") or child.name.endswith("-maestro"):
+            if child.name.endswith("-otaman") or child.name.endswith("-maestro"):  # legacy: -maestro suffix until otaman-core 1.0
                 if (child / "platform.yaml").is_file():
                     return child
     if (scan_root / ".agents").is_dir():
@@ -401,7 +400,7 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
         else:
             project_name = resolved.name.lower().replace(" ", "-").replace("_", "-")
             project_name = "".join(c for c in project_name if c.isalnum() or c == "-") or "my-platform"
-        # Default folder name: {project}-otaman/ (was {project}-maestro/ pre-rebrand;
+        # Default folder name: {project}-otaman/ (legacy: was {project}-maestro/ pre-rebrand;
         # back-compat handled by 2B.1-B existing-project detection).
         maestro_path = resolved / f"{project_name}-otaman"
 
@@ -442,7 +441,7 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
                 UI.ok("Created .gitignore")
                 print()
 
-    script_args = [scan_path, "--maestro-dir", str(maestro_path)]
+    script_args = [scan_path, "--maestro-dir", str(maestro_path)]  # legacy: plugin script arg
     if update:
         script_args.append("--update")
     if dry_run:
@@ -2724,7 +2723,7 @@ def _git_host_post_review(gh, args: list[str]) -> int:
 
     # legacy: wrap with plugin attribution; repo still named maestro-plugin on GitHub
     wrapped = (
-        f"> _Posted by [otaman-plugin](https://github.com/inprimex/maestro-plugin) "
+        f"> _Posted by [otaman-plugin](https://github.com/inprimex/maestro-plugin) "  # legacy: GitHub repo not yet renamed
         f"from `{review_path.name}`_\n\n"
         f"{body.rstrip()}\n"
     )
@@ -3180,7 +3179,7 @@ def _find_presale_dir(start: Path) -> Path | None:
     """Locate a presale directory walking up from ``start``.
 
     Prefers ``.otaman-presale/`` (current name). Falls back to legacy
-    ``.maestro-presale/`` for one release window (sunset at otaman-core 1.0).
+    legacy: ``.maestro-presale/`` for one release window (sunset at otaman-core 1.0).
     Returns absolute Path or None.
     """
     for d in [start] + list(start.parents):
@@ -3284,7 +3283,7 @@ def cmd_retrospective(args: list[str]) -> int:
     if not project_code:
         UI.error("No project code found.")
         UI.muted("Usage: otaman retrospective [project-code]")
-        UI.muted("Or run from a directory with .otaman-presale/project-meta.yaml (or legacy .maestro-presale/)")
+        UI.muted("Or run from a directory with .otaman-presale/project-meta.yaml (or legacy: .maestro-presale/)")
         return 1
 
     UI.kv("Project", project_code, C.BOLD)
@@ -3325,7 +3324,7 @@ def cmd_discovery_phase(args: list[str]) -> int:
         d = parent
 
     if not presale_dir:
-        UI.error("No .otaman-presale/ (or legacy .maestro-presale/) directory found.")
+        UI.error("No .otaman-presale/ (or legacy: .maestro-presale/) directory found.")
         UI.muted("Run 'otaman presale' first to initialize a pre-sale project.")
         return 1
 
@@ -3383,7 +3382,7 @@ def cmd_handoff(args: list[str]) -> int:
         d = parent
 
     if not presale_dir:
-        UI.error("No .otaman-presale/ (or legacy .maestro-presale/) directory found.")
+        UI.error("No .otaman-presale/ (or legacy: .maestro-presale/) directory found.")
         return 1
 
     UI.kv("Presale dir", str(presale_dir))
@@ -3409,8 +3408,7 @@ def cmd_audit_knowledge(args: list[str]) -> int:
     UI.header("Otaman Knowledge Audit")
 
     # Check multiple locations for audit file
-    # legacy: include .maestro-presale fallback until otaman-core 1.0
-    for candidate in [".otaman-presale/knowledge-audit.yaml", ".maestro-presale/knowledge-audit.yaml", ".agents/knowledge-audit.yaml"]:
+    for candidate in [".otaman-presale/knowledge-audit.yaml", ".maestro-presale/knowledge-audit.yaml", ".agents/knowledge-audit.yaml"]:  # legacy: presale fallback
         p = Path(candidate)
         if p.exists():
             try:
@@ -3474,8 +3472,7 @@ def cmd_gate(args: list[str]) -> int:
     transition = args[0] if args else None
 
     # Determine current phase
-    # legacy: include .maestro-presale fallback until otaman-core 1.0
-    for meta_loc in [".otaman-presale/project-meta.yaml", ".maestro-presale/project-meta.yaml", ".agents/project-meta.yaml"]:
+    for meta_loc in [".otaman-presale/project-meta.yaml", ".maestro-presale/project-meta.yaml", ".agents/project-meta.yaml"]:  # legacy: presale fallback
         p = Path(meta_loc) if not root else root / meta_loc
         if p.exists():
             try:
@@ -3706,7 +3703,7 @@ def main() -> int:
         elif rest[i] == "--resolved":
             ack_status = "resolved"
             i += 1
-        elif rest[i] in ("--maestro-dir", "--otaman-dir", "--target") and i + 1 < len(rest):
+        elif rest[i] in ("--maestro-dir", "--otaman-dir", "--target") and i + 1 < len(rest):  # legacy: backward-compat arg
             maestro_dir = rest[i + 1]
             i += 2
         elif rest[i] == "--name" and i + 1 < len(rest):

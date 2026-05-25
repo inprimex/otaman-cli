@@ -87,3 +87,8 @@ jobs:
       - name: Run tests
         working-directory: workspace/otaman-cli
         run: uv run pytest tests/ -v
+
+      - name: Audit maestro references (Linux/macOS only)
+        if: runner.os != 'Windows'
+        working-directory: workspace/otaman-cli
+        run: bash ../otaman-core/scripts/audit-maestro-refs.sh src/

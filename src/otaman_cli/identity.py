@@ -21,7 +21,7 @@ def find_project_root(start: Path | None = None) -> Path | None:
     """Find the otaman root directory.
 
     Resolution chain:
-    1. .otaman marker file (or legacy .maestro) — contains relative path to otaman folder
+    1. .otaman marker file (or legacy: .maestro) — contains relative path to otaman folder
     2. MAESTRO_ROOT environment variable
     3. Walk-up fallback (legacy: platform.yaml or .agents/ in parent)
 

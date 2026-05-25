@@ -741,7 +741,7 @@ def check_secrets_leaks(project_root: Path) -> dict[str, Any]:
         # Show the resolved gitignore path so the user knows WHICH file to
         # edit. When `otaman doctor` is run from a managed repo (not the
         # otaman folder), project_root resolves to the otaman folder via
-        # the .otaman marker (or legacy .maestro) — and that's the .gitignore that needs the
+        # the .otaman marker (or legacy: .maestro) — and that's the .gitignore that needs the
         # entry, not the current repo's. Showing the absolute path
         # eliminates the foot-gun.
         gi_display = str(gitignore)
@@ -886,12 +886,47 @@ def check_git_host(project_root: Path) -> dict[str, Any]:
     return result
 
 
+def check_plugin_doctor(project_root: Path) -> dict[str, Any]:
+    """Run plugin-side doctor checks (M4_PLUGIN_DIR_DRIFT, M4_WSL_PATH_UNDER_SSH,
+    M13B_MISSING_CONTINUE_FLAG) via otaman_plugin.doctor_checks.run_all_checks().
+
+    Gracefully degrades when otaman_plugin is not importable — returns ok with
+    a note so the rest of doctor still runs.
+    """
+    result: dict[str, Any] = {"check": "plugin_doctor", "status": "ok", "details": {}}
+    try:
+        from otaman_plugin.doctor_checks import run_all_checks
+    except ImportError:
+        result["details"]["skipped"] = "otaman_plugin not importable"
+        return result
+
+    warnings = run_all_checks(project_root)
+    if not warnings:
+        return result
+
+    issues = []
+    for w in warnings:
+        repo_tag = f"{w.repo}: " if w.repo else ""
+        issue: dict[str, Any] = {
+            "issue": f"{repo_tag}{w.message} ({w.code})",
+            "severity": {"info": "low", "warn": "medium", "error": "high"}.get(w.severity, "medium"),
+        }
+        if w.hint:
+            issue["fix"] = w.hint
+        issues.append(issue)
+
+    has_error = any(w.severity == "error" for w in warnings)
+    result["status"] = "fail" if has_error else "warn"
+    result["issues"] = issues
+    return result
+
+
 def check_launch_commands_resume(repos: list[dict[str, Any]]) -> dict[str, Any]:
     """Warn when a repo's launch_commands invoke claude without -c/--resume.
 
     Stale platform.yaml entries that bypass the launcher rewrite can omit -c,
     causing SSH reconnects to start a fresh Claude session instead of resuming
-    the in-progress one. (M-13b in finish-maestro-to-otaman-migration)
+    the in-progress one. (M-13b in finish-maestro-to-otaman-migration: legacy string sweep)
     """
     import re as _re
     result: dict[str, Any] = {"check": "launch_commands_resume", "status": "ok", "details": {}}
@@ -915,7 +950,7 @@ def check_launch_commands_resume(repos: list[dict[str, Any]]) -> dict[str, Any]:
                     ),
                     "fix": (
                         f"Add -c to the claude invocation in platform.yaml for repo '{name}', "
-                        "e.g.: claude -c --plugin-dir ... (see M-3 in finish-maestro-to-otaman-migration)"
+                        "e.g.: claude -c --plugin-dir ... (see M-3 in finish-maestro-to-otaman-migration: legacy)"
                     ),
                     "severity": "low",
                 })
@@ -951,6 +986,7 @@ def run_doctor(project_root: Path) -> dict[str, Any]:
         check_secrets_leaks(project_root),
         check_git_host(project_root),
         check_launch_commands_resume(repos),
+        check_plugin_doctor(project_root),
     ]
 
     passed = sum(1 for c in checks if c["status"] == "ok")

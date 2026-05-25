@@ -1,6 +1,6 @@
 """Per-user, per-host registry of known launcher folders.
 
-Tracked in ``~/.otaman/launchers.yaml`` (was ``~/.maestro/launchers.yaml`` pre-rebrand). Used by ``otaman upgrade`` to
+Tracked in ``~/.otaman/launchers.yaml`` (legacy: was ``~/.maestro/launchers.yaml`` pre-rebrand). Used by ``otaman upgrade`` to
 walk every launcher this user has on this machine and refresh it
 (``git pull`` on the plugin checkout + ``otaman init`` on the otaman
 folder each launcher targets).

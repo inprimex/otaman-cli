@@ -33,9 +33,8 @@ from pathlib import Path
 # Layout (post-Step-1 carve): src/otaman_cli/install_cli.py
 # Walk up to otaman-cli/ root, then into cli/.
 CLI_DIR = Path(__file__).resolve().parent.parent.parent / "cli"
-# legacy: launcher shell scripts still use maestro.sh / maestro.cmd filename in plugin repo
-POSIX_LAUNCHER = CLI_DIR / "maestro.sh"
-WINDOWS_LAUNCHER = CLI_DIR / "maestro.cmd"
+POSIX_LAUNCHER = CLI_DIR / "maestro.sh"  # legacy: launcher filename in plugin repo not yet renamed
+WINDOWS_LAUNCHER = CLI_DIR / "maestro.cmd"  # legacy: launcher filename in plugin repo not yet renamed
 
 
 # ---------------------------------------------------------------------------
