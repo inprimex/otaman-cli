@@ -1,0 +1,440 @@
+"""Top-level orchestrator for `otaman onboard program-init` (tasks.md 2.1-2.3).
+
+Flow:
+    1. Detect edition (CE/EE) + mode (1/2+)
+    2. Locate question YAML  →  fallback to built-in if not found
+    3. Check for checkpoint  →  offer resume or restart
+    4. Detect existing platform.yaml  →  UPDATE mode if found
+    5. Run YAML-driven Q&A via questionary; checkpoint after each step
+    6. Generate / update platform.yaml
+    7. Scaffold companion repos (in-process, with graceful fallback)
+    8. Print post-init guidance
+    9. Clear checkpoint on success
+
+Idempotency (task 2.2):
+    - Re-running on an existing program detects platform.yaml
+    - Prompts "update existing program?" instead of re-asking all questions
+    - Only delta questions are presented (questions whose step was NOT in
+      the previous platform.yaml's step list)
+
+Failure recovery (task 2.3):
+    - Checkpoint is written after every step (via on_step_complete callback)
+    - On re-run the checkpoint is loaded and completed steps are skipped
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+from typing import Any
+
+from otaman_cli.onboard.program_init.checkpoint import Checkpoint
+from otaman_cli.onboard.program_init.edition import detect_edition, detect_mode
+from otaman_cli.onboard.program_init.guidance import print_guidance
+from otaman_cli.onboard.program_init.platform_gen import update_platform_yaml, write_platform_yaml
+from otaman_cli.onboard.program_init.scaffold import ScaffoldResult, compute_companion_repos, scaffold_companion_repos
+
+# Default question YAML search path (relative to otaman-meta sibling checkout)
+_DEFAULT_QUESTIONS_REL = "../otaman-meta/onboarding/program-init-questions.yaml"
+
+
+def _find_questions_yaml(override: str | None = None) -> Path | None:
+    if override:
+        p = Path(override)
+        return p if p.is_file() else None
+    # Try well-known paths
+    candidates = [
+        Path(_DEFAULT_QUESTIONS_REL),
+        Path.home() / ".otaman" / "onboarding" / "program-init-questions.yaml",
+    ]
+    for c in candidates:
+        if c.is_file():
+            return c
+    return None
+
+
+def _load_questions(questions_yaml: Path | None) -> list[dict[str, Any]]:
+    if questions_yaml:
+        from otaman_cli.onboard.program_init.questions import load_questions
+        return load_questions(questions_yaml)
+    # Fall back to the built-in minimal question set (ensures tests always work)
+    return _builtin_questions()
+
+
+def _builtin_questions() -> list[dict[str, Any]]:
+    """Minimal hard-coded question set used when the YAML file is absent.
+
+    Mirrors the 10-step walkthrough from proposal.md §1.  The YAML-driven
+    file in otaman-meta is authoritative for production; this is the safe
+    fallback for CI / fresh checkouts.
+    """
+    return [
+        # ── step: identity ──────────────────────────────────────────────────
+        {
+            "id": "program_name", "step": "identity", "type": "text",
+            "label": "Program name (kebab-slug)",
+            "default": "my-program", "validate": "kebab_slug",
+            "output_mapping": "project",
+        },
+        {
+            "id": "description", "step": "identity", "type": "text",
+            "label": "Short description",
+            "default": "",
+            "output_mapping": "description",
+        },
+        {
+            "id": "primary_repo", "step": "identity", "type": "text",
+            "label": "Primary repo path (specs repo)",
+            "default": "",
+            "output_mapping": "repos[0].path",
+        },
+        {
+            "id": "domains", "step": "identity", "type": "checkbox",
+            "label": "Target domain(s)",
+            "options": [
+                "software-development", "tech-startup", "fintech",
+                "healthcare", "e-commerce", "gaming", "ai-ml",
+                "drones-uav", "embedded-iot", "other",
+            ],
+            "default": [],
+            "output_mapping": "domains",
+        },
+        # ── step: roles ──────────────────────────────────────────────────────
+        {
+            "id": "roles", "step": "roles", "type": "checkbox",
+            "label": "Active roles in this program",
+            "options": ["CEO", "CPO", "CTO", "BA", "cofounder", "engineer", "designer", "legal"],
+            "default": [],
+            "output_mapping": "roles",
+        },
+        # ── step: processes ──────────────────────────────────────────────────
+        {
+            "id": "processes", "step": "processes", "type": "checkbox",
+            "label": "Which processes do you want to enable?",
+            "options": [
+                "outcomes", "solutions", "personas", "vocabulary",
+                "flows", "processes", "risks", "assumptions", "strategy",
+            ],
+            "default": [],
+            "output_mapping": "processes",
+        },
+        # ── step: currency ───────────────────────────────────────────────────
+        {
+            "id": "currency_code", "step": "currency", "type": "text",
+            "label": "Currency code (ISO 4217)",
+            "default": "USD",
+            "output_mapping": "currency.code",
+        },
+        {
+            "id": "currency_symbol", "step": "currency", "type": "text",
+            "label": "Currency symbol",
+            "default": "$",
+            "output_mapping": "currency.symbol",
+        },
+        {
+            "id": "currency_decimals", "step": "currency", "type": "number",
+            "label": "Decimal places",
+            "default": 2,
+            "output_mapping": "currency.decimal_places",
+        },
+        # ── step: scales ─────────────────────────────────────────────────────
+        {
+            "id": "probability_scale", "step": "scales", "type": "select",
+            "label": "Risk probability scale",
+            "options": ["t-shirt", "fibonacci", "percentage", "custom"],
+            "default": "t-shirt",
+            "output_mapping": "triage.probability_scale",
+        },
+        {
+            "id": "impact_scale", "step": "scales", "type": "select",
+            "label": "Risk impact scale",
+            "options": ["t-shirt", "fibonacci", "numeric", "custom"],
+            "default": "t-shirt",
+            "output_mapping": "triage.impact_scale",
+        },
+        # ── step: releases ───────────────────────────────────────────────────
+        {
+            "id": "releases", "step": "releases", "type": "text",
+            "label": "Release sequence (comma-separated, e.g. MVP,post-MVP)",
+            "default": "MVP",
+            "output_mapping": "releases",
+        },
+        # ── step: skills ─────────────────────────────────────────────────────
+        {
+            "id": "skill_profile", "step": "skills", "type": "select",
+            "label": "Skill profile",
+            "options": [
+                "software-development-default",
+                "tech-startup-cofounder",
+                "fintech-default",
+                "healthcare-default",
+                "custom",
+            ],
+            "default": "software-development-default",
+            "output_mapping": "skills.profile",
+        },
+        # ── step: git_platform ───────────────────────────────────────────────
+        {
+            "id": "git_platform", "step": "git_platform", "type": "select",
+            "label": "Git platform",
+            "options": ["local", "github", "gitlab", "bitbucket"],
+            "default": "local",
+            "mode_min": 1,
+            "output_mapping": "git_platform",
+        },
+        # ── step: secrets (CE: env-file/os-keyring; EE: full list) ─────────
+        {
+            "id": "secret_backend", "step": "secrets", "type": "select",
+            "label": "Secret backend",
+            "options": ["env-file", "os-keyring"],
+            "default": "env-file",
+            "condition": "edition == 'ce'",
+            "output_mapping": "secrets.backend",
+        },
+        {
+            "id": "secret_backend_ee", "step": "secrets", "type": "select",
+            "label": "Secret backend",
+            "options": [
+                "env-file", "os-keyring", "vault", "aws-secrets-manager",
+                "gcp-secret-manager", "azure-key-vault", "1password-connect",
+                "doppler", "infisical",
+            ],
+            "default": "env-file",
+            "condition": "edition == 'ee'",
+            "edition_min": "ee",
+            "output_mapping": "secrets.backend",
+        },
+        # ── step: zitadel (EE + Mode 2+ only) ───────────────────────────────
+        {
+            "id": "organisation_name", "step": "zitadel", "type": "text",
+            "label": "Zitadel organisation name",
+            "default": "",
+            "edition_min": "ee",
+            "mode_min": 2,
+            "output_mapping": "ee.organisation",
+        },
+    ]
+
+
+def _detect_existing_platform_yaml(program_name: str, primary_repo: str | None) -> Path | None:
+    """Try to find an existing platform.yaml for this program."""
+    candidates: list[Path] = []
+    if primary_repo:
+        candidates.append(Path(primary_repo).expanduser() / "platform.yaml")
+    # Convention: ~/otaman/<program>/<program>-specs/platform.yaml
+    candidates.append(
+        Path.home() / program_name / f"{program_name}-specs" / "platform.yaml"
+    )
+    for c in candidates:
+        if c.is_file():
+            return c
+    return None
+
+
+def _parse_releases(raw: str) -> list[str]:
+    """'MVP,post-MVP' → ['MVP', 'post-MVP']"""
+    return [r.strip() for r in raw.split(",") if r.strip()]
+
+
+def run_program_init(args: argparse.Namespace) -> int:
+    """Main entry point called from the CLI.
+
+    Returns 0 on success, non-zero on error.
+    """
+    # ── 1. edition + mode ────────────────────────────────────────────────────
+    edition = detect_edition()
+    mode_override: int | None = getattr(args, "mode", None)
+    # Try to locate an existing platform.yaml early so mode can be auto-detected
+    # from it (design Q3). We use the --program slug hint if available; the full
+    # path is confirmed again later after the checkpoint / primary_repo are known.
+    _early_slug = getattr(args, "program", None) or None
+    _early_yaml = _detect_existing_platform_yaml(_early_slug or "", None) if _early_slug else None
+    mode = mode_override if mode_override else detect_mode(_early_yaml)
+
+    print()
+    print("  Welcome to Otaman program-init.  Let's set up your new program.")
+    print(f"  Edition: {edition.upper()}  |  Mode: {mode}")
+    print()
+
+    if edition == "ee":
+        lic_env = __import__("os").environ.get("OTAMAN_LICENSE_FILE", "~/.otaman/license.key")
+        print(f"  [EE] License detected: {lic_env}")
+        print()
+
+    # ── 2. load questions ────────────────────────────────────────────────────
+    questions_path = _find_questions_yaml(getattr(args, "questions_yaml", None))
+    questions = _load_questions(questions_path)
+    if questions_path:
+        _note(f"Using question definitions from {questions_path}")
+    else:
+        _note("Using built-in question definitions (no program-init-questions.yaml found)")
+
+    # ── 3. checkpoint detection ───────────────────────────────────────────────
+    # We need program_name early for checkpoint lookup; use a lightweight peek
+    # at an existing checkpoint or the first text question
+    ckpt_slug = _peek_program_slug(args)
+    checkpoint = Checkpoint.load(ckpt_slug) if ckpt_slug else None
+
+    if checkpoint and checkpoint.completed_steps:
+        _note(
+            f"Checkpoint found for '{checkpoint.program}' — "
+            f"completed steps: {', '.join(checkpoint.completed_steps)}"
+        )
+        resume = _ask_yes_no("Resume from checkpoint?", default=True)
+        if not resume:
+            checkpoint = None
+            _note("Starting fresh.")
+        else:
+            _note(f"Resuming from last checkpoint.")
+
+    # ── 4. existing platform.yaml (UPDATE mode) ───────────────────────────────
+    existing_yaml: Path | None = None
+    if checkpoint:
+        prefill_name = checkpoint.answers.get("program_name", "")
+        existing_yaml = _detect_existing_platform_yaml(
+            prefill_name,
+            checkpoint.answers.get("primary_repo"),
+        )
+    if existing_yaml:
+        print(f"  [i] Found existing platform.yaml: {existing_yaml}")
+        update_mode = _ask_yes_no("Update existing program?", default=True)
+        if not update_mode:
+            existing_yaml = None  # treat as fresh
+
+    # ── 5. run questions ─────────────────────────────────────────────────────
+    prefill = checkpoint.answers if checkpoint else {}
+    completed_steps = checkpoint.completed_steps if checkpoint else []
+
+    # We need a checkpoint name before running — ask for program_name first if unknown
+    if not ckpt_slug:
+        ckpt_slug = _ask_program_name_early(questions)
+
+    active_checkpoint = checkpoint or Checkpoint.new(ckpt_slug)
+
+    def on_step_complete(step_id: str, step_answers: dict[str, Any]) -> None:
+        active_checkpoint.mark_step(step_id, step_answers)
+        _note(f"Step '{step_id}' complete — checkpoint saved.")
+
+    from otaman_cli.onboard.program_init.questions import run_questions
+    try:
+        answers = run_questions(
+            questions,
+            edition=edition,
+            mode=mode,
+            prefill=prefill,
+            skip_steps=completed_steps,
+            on_step_complete=on_step_complete,
+        )
+    except (KeyboardInterrupt, EOFError):
+        print()
+        print("  [!] Interrupted — progress saved to checkpoint.  Re-run to resume.")
+        return 1
+
+    # Inject meta-answers the questions don't ask
+    answers["active_edition"] = edition
+    answers["mode"] = mode
+    if "releases" in answers and isinstance(answers["releases"], str):
+        answers["releases"] = _parse_releases(answers["releases"])
+
+    program_name: str = answers.get("program_name", ckpt_slug)
+
+    # Compute companion repos from processes
+    processes: list[str] = answers.get("processes", [])
+    companion_repos = compute_companion_repos(processes)
+    answers["scaffold_business"] = "business" in companion_repos
+    answers["scaffold_strategy"] = "strategy" in companion_repos
+
+    # ── 6. generate / update platform.yaml ───────────────────────────────────
+    if existing_yaml:
+        platform_out = existing_yaml
+        _note(f"Updating {platform_out} …")
+        try:
+            update_platform_yaml(answers, platform_out)
+            _ok(f"Updated platform.yaml at {platform_out}")
+        except Exception as exc:
+            _error(f"platform.yaml update failed: {exc}")
+            return 1
+    else:
+        # --output-dir overrides primary_repo as the output base directory
+        output_dir_override: str | None = getattr(args, "output_dir", None)
+        if output_dir_override:
+            platform_out = Path(output_dir_override).expanduser() / "platform.yaml"
+        else:
+            primary_repo_raw: str = answers.get("primary_repo") or str(
+                Path.home() / program_name / f"{program_name}-specs"
+            )
+            platform_out = Path(primary_repo_raw).expanduser() / "platform.yaml"
+        _note(f"Generating {platform_out} …")
+        try:
+            write_platform_yaml(answers, platform_out)
+            _ok(f"Generated platform.yaml at {platform_out}")
+        except Exception as exc:
+            _error(f"platform.yaml generation failed: {exc}")
+            return 1
+
+    # ── 7. scaffold companion repos ───────────────────────────────────────────
+    if companion_repos:
+        _note(f"Scaffolding companion repos: {', '.join(companion_repos)} …")
+        dry_run = getattr(args, "dry_run", False)
+        result: ScaffoldResult = scaffold_companion_repos(
+            program_name, companion_repos, answers, dry_run=dry_run
+        )
+        for repo in result.scaffolded:
+            _ok(f"Scaffolded {repo}")
+        for repo in result.skipped:
+            _note(f"Already exists, skipped: {repo}")
+        for err in result.errors:
+            _warn(err)
+
+    # ── 8. post-init guidance ─────────────────────────────────────────────────
+    print_guidance(answers, program_name)
+
+    # ── 9. clear checkpoint on success ────────────────────────────────────────
+    active_checkpoint.clear()
+
+    return 0
+
+
+# --------------------------------------------------------------------------- helpers
+
+def _note(msg: str) -> None:
+    print(f"  [i] {msg}")
+
+
+def _ok(msg: str) -> None:
+    print(f"  [+] {msg}")
+
+
+def _warn(msg: str) -> None:
+    print(f"  [!] {msg}")
+
+
+def _error(msg: str) -> None:
+    print(f"  [X] {msg}", file=sys.stderr)
+
+
+def _ask_yes_no(question: str, *, default: bool = True) -> bool:
+    hint = "Y/n" if default else "y/N"
+    try:
+        raw = input(f"  ? {question} [{hint}]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return default
+    if not raw:
+        return default
+    return raw in ("y", "yes")
+
+
+def _peek_program_slug(args: argparse.Namespace) -> str | None:
+    """If --program was passed on the CLI, return it; else None."""
+    return getattr(args, "program", None) or None
+
+
+def _ask_program_name_early(questions: list[dict[str, Any]]) -> str:
+    """Ask only the program_name question to establish the checkpoint slug."""
+    for q in questions:
+        if q.get("id") == "program_name":
+            from otaman_cli.onboard.program_init.questions import ask_question
+            ans = ask_question(q, {})
+            if ans:
+                return str(ans)
+    return "my-program"

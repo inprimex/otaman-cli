@@ -183,7 +183,7 @@ def test_help_doesnt_list_obviously_phantom_commands() -> None:
         "set", "set-default", "set-repo", "set-agent", "install", "uninstall",
         "on", "off", "status", "approve", "reject", "detect", "check", "pr",
         # onboard sub-subcommand names (otaman onboard <sub>)
-        "add-user", "list-users",
+        "add-user", "list-users", "program-init",
         "post-review",
         # "otaman" appears as the top-level binary name in Quick start examples.
         "otaman",

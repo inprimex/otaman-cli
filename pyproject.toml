@@ -11,6 +11,8 @@ dependencies = [
     "otaman-bridge",
     "otaman-plugin",
     "pyyaml>=6",
+    "questionary>=2.0",
+    "ruamel.yaml>=0.18",
 ]
 
 [project.optional-dependencies]

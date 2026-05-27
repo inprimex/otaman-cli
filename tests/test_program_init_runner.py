@@ -1,0 +1,189 @@
+"""Integration tests for runner.py — end-to-end program-init flow (tasks.md 2.1-2.3)."""
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from otaman_cli.onboard.program_init.runner import run_program_init
+
+
+def _args(**kw) -> argparse.Namespace:
+    """Minimal Namespace matching the CLI parser output."""
+    defaults = {
+        "program": None,
+        "questions_yaml": None,
+        "mode": None,
+        "dry_run": False,
+        "output_dir": None,
+    }
+    defaults.update(kw)
+    return argparse.Namespace(**defaults)
+
+
+class TestRunnerEndToEnd:
+    """Full flow tests with all I/O mocked.
+
+    questionary is mocked via _Q_AVAILABLE=False + input() patching so tests
+    run non-interactively.
+    """
+
+    def _disable_questionary(self):
+        """Context manager that disables questionary in the questions module."""
+        import otaman_cli.onboard.program_init.questions as qmod
+        orig = qmod._Q_AVAILABLE
+        qmod._Q_AVAILABLE = False
+        return orig
+
+    def _restore_questionary(self, orig):
+        import otaman_cli.onboard.program_init.questions as qmod
+        qmod._Q_AVAILABLE = orig
+
+    def test_full_flow_ce_mode1(self, tmp_path, monkeypatch):
+        """Happy-path: CE edition, Mode 1, no existing platform.yaml."""
+        # Redirect state dir + input
+        monkeypatch.setattr(
+            "otaman_cli.onboard.program_init.checkpoint._STATE_DIR_BASE",
+            tmp_path / "state",
+        )
+        orig = self._disable_questionary()
+
+        responses = iter([
+            "test-app",        # program_name
+            "Test application",  # description
+            str(tmp_path / "test-app" / "test-app-specs"),  # primary_repo
+            "",                # domains (blank = defaults)
+            "",                # roles
+            "",                # processes
+            "USD",             # currency_code
+            "$",               # currency_symbol
+            "2",               # currency_decimals
+            "t-shirt",         # probability_scale (select → blank = default)
+            "t-shirt",         # impact_scale
+            "MVP",             # releases
+            "",                # skill_profile (select → blank = default)
+            "",                # git_platform (select → blank = default)
+            "",                # secret_backend (select → blank = default)
+        ])
+        monkeypatch.setattr("builtins.input", lambda _: next(responses, ""))
+
+        try:
+            args = _args(program="test-app")
+            rc = run_program_init(args)
+        finally:
+            self._restore_questionary(orig)
+
+        # Exit code 0 (success)
+        assert rc == 0
+
+        # platform.yaml was generated
+        platform = tmp_path / "test-app" / "test-app-specs" / "platform.yaml"
+        assert platform.is_file()
+        content = platform.read_text()
+        assert "test-app" in content
+
+        # Checkpoint was cleared on success
+        ckpt = tmp_path / "state" / "test-app" / ".init-state.yaml"
+        assert not ckpt.exists()
+
+    def test_resume_from_checkpoint(self, tmp_path, monkeypatch):
+        """Checkpoint with identity step completed → should skip identity questions."""
+        from otaman_cli.onboard.program_init.checkpoint import Checkpoint
+
+        state_base = tmp_path / "state"
+        monkeypatch.setattr(
+            "otaman_cli.onboard.program_init.checkpoint._STATE_DIR_BASE",
+            state_base,
+        )
+
+        # Plant a checkpoint
+        ckpt = Checkpoint.new("resume-app")
+        ckpt.mark_step("identity", {
+            "program_name": "resume-app",
+            "description": "From checkpoint",
+            "primary_repo": str(tmp_path / "resume-app" / "specs"),
+            "domains": [],
+        })
+
+        orig = self._disable_questionary()
+        # "y" to resume from checkpoint, then remaining questions
+        responses = iter([
+            "y",   # resume from checkpoint?
+            "",    # roles
+            "",    # processes
+            "EUR", # currency_code
+            "€",   # currency_symbol
+            "2",   # currency_decimals
+            "",    # probability scale
+            "",    # impact scale
+            "MVP", # releases
+            "",    # skill profile
+            "",    # git platform
+            "",    # secret backend
+        ])
+        monkeypatch.setattr("builtins.input", lambda _: next(responses, ""))
+
+        try:
+            args = _args(program="resume-app")
+            rc = run_program_init(args)
+        finally:
+            self._restore_questionary(orig)
+
+        assert rc == 0
+        # Description came from checkpoint
+        platform = tmp_path / "resume-app" / "specs" / "platform.yaml"
+        assert platform.is_file()
+        content = platform.read_text()
+        assert "resume-app" in content
+        assert "EUR" in content  # answered post-checkpoint
+
+    def test_keyboard_interrupt_saves_checkpoint(self, tmp_path, monkeypatch):
+        """KeyboardInterrupt mid-flow → checkpoint saved, rc == 1."""
+        state_base = tmp_path / "state"
+        monkeypatch.setattr(
+            "otaman_cli.onboard.program_init.checkpoint._STATE_DIR_BASE",
+            state_base,
+        )
+
+        import otaman_cli.onboard.program_init.questions as qmod
+        orig_qa = qmod._Q_AVAILABLE
+        qmod._Q_AVAILABLE = False
+
+        call_count = {"n": 0}
+        def _input_interrupt(prompt):
+            call_count["n"] += 1
+            if call_count["n"] > 2:
+                raise KeyboardInterrupt
+            return ["interrupt-app", "Testing interrupt"][call_count["n"] - 1]
+
+        monkeypatch.setattr("builtins.input", _input_interrupt)
+
+        try:
+            args = _args(program="interrupt-app")
+            rc = run_program_init(args)
+        finally:
+            qmod._Q_AVAILABLE = orig_qa
+
+        assert rc == 1
+
+
+class TestCliWiring:
+    """Smoke tests for the CLI argparse wiring."""
+
+    def test_program_init_in_help(self, capsys):
+        from otaman_cli.onboard.cli import main as onboard_main
+        with pytest.raises(SystemExit):
+            onboard_main(["--help"])
+        out = capsys.readouterr().out
+        assert "program-init" in out
+
+    def test_program_init_help(self, capsys):
+        from otaman_cli.onboard.cli import main as onboard_main
+        with pytest.raises(SystemExit):
+            onboard_main(["program-init", "--help"])
+        out = capsys.readouterr().out
+        assert "--program" in out
+        assert "--dry-run" in out
+        assert "--mode" in out

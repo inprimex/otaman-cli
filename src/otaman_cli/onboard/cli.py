@@ -9,6 +9,12 @@ from otaman_cli.onboard.doctor import cmd_doctor
 from otaman_cli.onboard.users import cmd_add_user, cmd_list_users, cmd_whoami
 
 
+def _cmd_program_init(args: argparse.Namespace) -> int:
+    """Dispatch to the program-init runner."""
+    from otaman_cli.onboard.program_init import run_program_init
+    return run_program_init(args)
+
+
 def build_onboard_parser(parser: argparse.ArgumentParser) -> None:
     """Attach onboard subcommands to ``parser`` (a sub-parser from main.py)."""
     sub = parser.add_subparsers(dest="onboard_cmd", required=True)
@@ -43,6 +49,45 @@ def build_onboard_parser(parser: argparse.ArgumentParser) -> None:
     p_doctor = sub.add_parser("doctor", help="diagnostic checks for onboarding state")
     p_doctor.add_argument("--state-dir", help="override state dir")
     p_doctor.set_defaults(func=cmd_doctor)
+
+    # program-init
+    p_prog = sub.add_parser(
+        "program-init",
+        help=(
+            "interactive program initialisation wizard — generates platform.yaml, "
+            "scaffolds companion repos, configures roles and processes"
+        ),
+    )
+    p_prog.add_argument(
+        "--program", "-p",
+        metavar="SLUG",
+        help="program slug (kebab-case); asked interactively if omitted",
+    )
+    p_prog.add_argument(
+        "--questions-yaml",
+        metavar="PATH",
+        help=(
+            "override path to program-init-questions.yaml "
+            "(default: ../otaman-meta/onboarding/program-init-questions.yaml)"
+        ),
+    )
+    p_prog.add_argument(
+        "--mode",
+        type=int,
+        choices=[1, 2],
+        help="override Mode detection (1 = local, 2 = Mode 2+/Zitadel)",
+    )
+    p_prog.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="preview companion-repo scaffolding without writing to disk",
+    )
+    p_prog.add_argument(
+        "--output-dir",
+        metavar="PATH",
+        help="override output directory for generated platform.yaml",
+    )
+    p_prog.set_defaults(func=_cmd_program_init)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -3542,7 +3542,8 @@ def cmd_help() -> int:
 
 {C.BOLD}Team onboarding:{C.RESET}
   {C.GREEN}onboard{C.RESET} <sub> [args]            User / project provisioning:
-                                  add-user, list-users, whoami, doctor
+                                  add-user, list-users, whoami, doctor,
+                                  program-init (interactive Day 1 wizard)
 
 {C.BOLD}Auth & tokens (multi-user):{C.RESET}
   {C.GREEN}login{C.RESET}                         Authenticate via OIDC device flow; cache token
