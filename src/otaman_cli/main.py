@@ -572,8 +572,123 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
     return 0
 
 
-def cmd_init(args: list[str], dry_run: bool = False, skip_doctor: bool = False) -> int:
-    """Initialize .agents/ from platform.yaml."""
+
+def _cmd_init_update() -> int:
+    """Patch .otaman agent: fields across all repos (--update mode, D5).
+
+    Reads platform.yaml from the project root, then for each repo writes
+    agent: <owner> into the repo's .otaman file (creating it if absent).
+    Also writes agent: human to the otaman-meta .otaman file.
+    Idempotent — safe to run multiple times.
+    """
+    root = find_project_root()
+    if not root:
+        UI.error("Not in an otaman project")
+        return 1
+
+    platform_yaml = root / "platform.yaml"
+    if not platform_yaml.is_file():
+        UI.error(f"platform.yaml not found at {platform_yaml}")
+        return 2
+
+    try:
+        import yaml as _yaml
+        config = _yaml.safe_load(platform_yaml.read_text(encoding="utf-8")) or {}
+    except Exception as e:
+        UI.error(f"Failed to read platform.yaml: {e}")
+        return 2
+
+    UI.header("Otaman Init --update")
+    updated = 0
+    skipped = 0
+
+    for repo in config.get("repos", []):
+        repo_path_rel = repo.get("path", "")
+        owner = repo.get("owner", "")
+        name = repo.get("name", repo_path_rel)
+        if not repo_path_rel:
+            continue
+        repo_dir = (root / repo_path_rel).resolve()
+        if not repo_dir.is_dir():
+            UI.muted(f"  skip {name}: directory not found")
+            skipped += 1
+            continue
+
+        marker = repo_dir / ".otaman"
+        if marker.is_file():
+            existing = marker.read_text(encoding="utf-8")
+        else:
+            # Compute relative path from repo to meta dir
+            import os as _os
+            rel = _os.path.relpath(root.resolve(), repo_dir)
+            rel_posix = pathlib.Path(rel).as_posix()
+            existing = f"# Path to otaman folder
+{rel_posix}
+"
+
+        # Check if agent: field already present
+        lines = existing.splitlines()
+        has_agent = any(l.strip().startswith("agent:") for l in lines)
+        if has_agent:
+            # Update existing agent: line
+            new_lines = []
+            for l in lines:
+                if l.strip().startswith("agent:") and owner:
+                    new_lines.append(f"agent: {owner}")
+                else:
+                    new_lines.append(l)
+            new_content = "
+".join(new_lines) + "
+"
+        else:
+            agent_line = f"agent: {owner}
+" if owner else ""
+            new_content = existing.rstrip("
+") + "
+" + agent_line
+
+        marker.write_text(new_content, encoding="utf-8")
+        label = f" (agent: {owner})" if owner else ""
+        UI.ok(f"{name}/.otaman updated{label}")
+        updated += 1
+
+    # Write agent: human to meta dir itself
+    meta_marker = root / ".otaman"
+    if meta_marker.is_file():
+        existing = meta_marker.read_text(encoding="utf-8")
+        lines = existing.splitlines()
+        has_agent = any(l.strip().startswith("agent:") for l in lines)
+        if not has_agent:
+            meta_marker.write_text(existing.rstrip("
+") + "
+agent: human
+", encoding="utf-8")
+            UI.ok("otaman-meta/.otaman updated (agent: human)")
+            updated += 1
+        else:
+            UI.muted("otaman-meta/.otaman already has agent: field")
+    else:
+        UI.muted("otaman-meta/.otaman not found — skipping meta agent write")
+
+    print()
+    UI.kv("Updated", str(updated))
+    UI.kv("Skipped", str(skipped))
+    UI.muted("Run 'otaman init --update' again after adding new repos to platform.yaml.")
+    return 0
+
+
+def cmd_init(args: list[str], dry_run: bool = False, skip_doctor: bool = False, update: bool = False) -> int:
+    """Initialize .agents/ from platform.yaml.
+
+    With --update: patches existing .otaman files across all platform repos
+    to write the agent: <owner> field (D5 of agent-identity-per-directory spec).
+    Also writes agent: human to the meta repo itself.  Safe to run multiple
+    times (idempotent).
+    """
+    # --update mode: patch .otaman agent: fields across all repos and exit
+    if update:
+        return _cmd_init_update()
+
     config = args[0] if args else "platform.yaml"
     config_path = Path(config).resolve()
 
@@ -1104,7 +1219,9 @@ def cmd_send(args: list[str]) -> int:
 
     agent = resolve_agent_identity(root, explicit=ns.explicit_from)
     if not agent:
-        UI.error("Agent identity could not be resolved from cwd or .agents/current-agent")
+        UI.error("Agent identity could not be resolved.")
+        UI.muted("  Sources tried: OTAMAN_AGENT env, ~/.otaman-session, .otaman agent: field, .agents/current-agent")
+        UI.muted("  Fix: run 'otaman init --update' to write per-repo .otaman files, or set OTAMAN_AGENT env var")
         UI.muted("Tip: run from inside a managed repo, or pass --from <agent>")
         return 1
 
@@ -1228,7 +1345,9 @@ def cmd_check(args: list[str]) -> int:
     # Determine agent: explicit arg → CWD→repo→owner → .agents/current-agent
     agent = resolve_agent_identity(root, explicit=args[0] if args else None)
     if not agent:
-        UI.error("No agent specified and identity could not be resolved from cwd or .agents/current-agent")
+        UI.error("No agent specified and identity could not be resolved.")
+        UI.muted("  Sources tried: OTAMAN_AGENT env, ~/.otaman-session, .otaman agent: field, .agents/current-agent")
+        UI.muted("  Fix: run 'otaman init --update', set OTAMAN_AGENT env var, or: otaman set-agent <name>")
         UI.muted("Usage: otaman check <agent-name>")
         UI.muted("   or: otaman set-agent <name> first")
         return 1
@@ -1381,7 +1500,9 @@ def cmd_ack(args: list[str], status: str = "resolved") -> int:
     # Determine agent: CWD→repo→owner → .agents/current-agent
     agent = resolve_agent_identity(root)
     if not agent:
-        UI.error("No agent identity set. Run from inside a managed repo, or: otaman set-agent <name>")
+        UI.error("No agent identity set.")
+        UI.muted("  Run from inside a managed repo, set OTAMAN_AGENT env var, or: otaman set-agent <name>")
+        UI.muted("  Run 'otaman init --update' to write per-repo .otaman agent: fields")
         return 1
 
     active_dir, acks_dir = _resolve_bus_paths(root)
@@ -2177,18 +2298,23 @@ def cmd_migrate(args: list[str]) -> int:
         )
         UI.ok("Created .gitignore")
 
-    # Write .otaman markers in each repo
+    # Write .otaman markers in each repo (includes agent: <owner> field per D2)
     try:
         with open(new_config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
         for repo in config.get("repos", []):
             repo_dir = (maestro_dir / repo["path"]).resolve()
+            owner = repo.get("owner", "")
             if repo_dir.is_dir():
                 rel = os.path.relpath(maestro_dir.resolve(), repo_dir)
                 rel_posix = Path(rel).as_posix()
                 marker = repo_dir / ".otaman"
+                agent_line = f"agent: {owner}
+" if owner else ""
                 marker.write_text(
-                    f"# Path to otaman folder\n{rel_posix}\n",
+                    f"# Path to otaman folder
+{rel_posix}
+{agent_line}",
                     encoding="utf-8",
                 )
                 # Append to repo .gitignore
@@ -2200,8 +2326,19 @@ def cmd_migrate(args: list[str]) -> int:
                         needs_entry = False
                 if needs_entry:
                     with open(gi, "a", encoding="utf-8") as f:
-                        f.write("\n.otaman\n")
-                UI.ok(f"Marker {repo['name']}/.otaman -> {rel_posix}")
+                        f.write("
+.otaman
+")
+                label = f" (agent: {owner})" if owner else ""
+                UI.ok(f"Marker {repo['name']}/.otaman -> {rel_posix}{label}")
+        # Also write agent: human to otaman-meta itself (D5)
+        meta_marker = maestro_dir / ".otaman"
+        if meta_marker.exists():
+            existing = meta_marker.read_text(encoding="utf-8")
+            if "agent:" not in existing:
+                meta_marker.write_text(existing.rstrip() + "
+agent: human
+", encoding="utf-8")
     except Exception as e:
         UI.warn(f"Could not write .otaman markers: {e}")
 
@@ -3155,7 +3292,12 @@ def _upgrade_one(
 
 
 def cmd_set_agent(args: list[str]) -> int:
-    """Set current agent identity."""
+    """Set current agent identity (session-local).
+
+    Writes to ~/.otaman-session (D3 of agent-identity-per-directory spec).
+    During the deprecation phase also writes .agents/current-agent with a
+    deprecation comment so old callers still work but see the DEPRECATED warning.
+    """
     if not args:
         UI.error("Agent name required")
         UI.muted("Usage: otaman set-agent backend-agent")
@@ -3167,11 +3309,28 @@ def cmd_set_agent(args: list[str]) -> int:
         return 1
 
     agent_name = args[0]
+
+    # Primary: ~/.otaman-session (session-local, not shared across tabs)
+    session_file = Path.home() / ".otaman-session"
+    session_file.write_text(agent_name + "
+", encoding="utf-8")
+    UI.ok(f"Agent identity set to: {UI.agent(agent_name)}")
+    UI.kv("File", str(session_file))
+
+    # Deprecation phase: also write .agents/current-agent with a comment marker
+    # so any code still reading it gets the value but the DEPRECATED warning fires.
     agent_file = root / ".agents" / "current-agent"
     agent_file.parent.mkdir(parents=True, exist_ok=True)
-    agent_file.write_text(agent_name + "\n", encoding="utf-8")
-    UI.ok(f"Agent identity set to: {UI.agent(agent_name)}")
-    UI.kv("File", str(agent_file.relative_to(root)))
+    agent_file.write_text(
+        "# DEPRECATED: identity now stored in ~/.otaman-session
+"
+        "# Run 'otaman init --update' to migrate to per-repo .otaman agent: fields
+"
+        + agent_name + "
+",
+        encoding="utf-8",
+    )
+    UI.muted("(Also wrote .agents/current-agent for backwards compatibility)")
     return 0
 
 
@@ -3718,7 +3877,7 @@ def main() -> int:
 
     commands = {
         "scan": lambda: cmd_scan(positional, update=update, maestro_dir=maestro_dir, dry_run=dry_run, project_name_override=project_name_override),
-        "init": lambda: cmd_init(positional, dry_run=dry_run, skip_doctor=skip_doctor),
+        "init": lambda: cmd_init(positional, dry_run=dry_run, skip_doctor=skip_doctor, update=update),
         "clone": lambda: cmd_clone(positional, target=maestro_dir or ""),
         "doctor": lambda: cmd_doctor(positional),
         "status": lambda: cmd_status(positional),
