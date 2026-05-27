@@ -352,6 +352,47 @@ def _resolve_options(q: dict[str, Any], answers: dict[str, Any]) -> list[str]:
     return list(opts)
 
 
+# --------------------------------------------------------------------------- computed defaults
+
+def _recommend_skill_profile(answers: dict[str, Any]) -> str:
+    """Recommend a skill profile based on domain + role selections.
+
+    Spec table (spec.md §Skill profile recommendation):
+        healthcare domain         → healthcare-default
+        fintech domain            → fintech-default
+        software-development + cofounder role  → tech-startup-cofounder
+        tech-startup domain                    → tech-startup-cofounder
+        (default)                              → software-development-default
+    """
+    domains = set(answers.get("domains") or [])
+    roles = set(answers.get("roles") or [])
+    processes = set(answers.get("processes") or [])
+    if "healthcare" in domains:
+        return "healthcare-default"
+    if "fintech" in domains:
+        return "fintech-default"
+    if "cofounder" in roles or "tech-startup" in domains or "strategy" in processes:
+        return "tech-startup-cofounder"
+    return "software-development-default"
+
+
+# Registry of built-in default_from functions
+_DEFAULT_FN_MAP: dict[str, Any] = {
+    "skill_profile_recommendation": _recommend_skill_profile,
+}
+
+
+def _resolve_dynamic_default(q: dict[str, Any], answers: dict[str, Any]) -> Any:
+    """Return the computed default if ``default_from`` is set, else the static ``default``."""
+    fn_name = q.get("default_from")
+    if fn_name and fn_name in _DEFAULT_FN_MAP:
+        try:
+            return _DEFAULT_FN_MAP[fn_name](answers)
+        except Exception:
+            pass  # fallback to static default
+    return q.get("default")
+
+
 # --------------------------------------------------------------------------- public
 
 _ASK_DISPATCH = {
@@ -388,6 +429,11 @@ def ask_question(
     fn = _ASK_DISPATCH.get(q_type)
     if fn is None:
         raise ValueError(f"Unknown question type: {q_type!r}")
+
+    # Apply computed default if default_from is set (e.g. skill_profile_recommendation)
+    computed = _resolve_dynamic_default(q, answers)
+    if computed != q.get("default"):
+        q = {**q, "default": computed}  # shallow copy — do not mutate original
 
     if q_type in ("text", "confirm", "number"):
         return fn(q)

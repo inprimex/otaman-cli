@@ -28,8 +28,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from otaman_cli.onboard.program_init.agents_init import init_agents_structure
 from otaman_cli.onboard.program_init.checkpoint import Checkpoint
 from otaman_cli.onboard.program_init.edition import detect_edition, detect_mode
+from otaman_cli.onboard.program_init.git_init import create_gitignore, ensure_git_repo, initial_commit
 from otaman_cli.onboard.program_init.guidance import print_guidance
 from otaman_cli.onboard.program_init.platform_gen import update_platform_yaml, write_platform_yaml
 from otaman_cli.onboard.program_init.scaffold import ScaffoldResult, compute_companion_repos, scaffold_companion_repos
@@ -113,10 +115,18 @@ def _builtin_questions() -> list[dict[str, Any]]:
             "label": "Which processes do you want to enable?",
             "options": [
                 "outcomes", "solutions", "personas", "vocabulary",
-                "flows", "processes", "risks", "assumptions", "strategy",
+                "flows", "processes", "risks", "assumptions",
             ],
             "default": [],
             "output_mapping": "processes",
+        },
+        # strategy offered only when cofounder role is active (spec §Q order §4)
+        {
+            "id": "strategy_opt_in", "step": "processes", "type": "confirm",
+            "label": "Enable strategy process (pitch deck + business plan + GTM + financials)?",
+            "default": False,
+            "condition": "'cofounder' in answers.get('roles', [])",
+            "output_mapping": "processes[+strategy]",
         },
         # ── step: currency ───────────────────────────────────────────────────
         {
@@ -152,11 +162,12 @@ def _builtin_questions() -> list[dict[str, Any]]:
             "default": "t-shirt",
             "output_mapping": "triage.impact_scale",
         },
-        # ── step: releases ───────────────────────────────────────────────────
+        # ── step: releases (outcomes-gated per spec §Q §7) ───────────────────
         {
             "id": "releases", "step": "releases", "type": "text",
             "label": "Release sequence (comma-separated, e.g. MVP,post-MVP)",
             "default": "MVP",
+            "condition": "'outcomes' in answers.get('processes', [])",
             "output_mapping": "releases",
         },
         # ── step: skills ─────────────────────────────────────────────────────
@@ -171,6 +182,7 @@ def _builtin_questions() -> list[dict[str, Any]]:
                 "custom",
             ],
             "default": "software-development-default",
+            "default_from": "skill_profile_recommendation",
             "output_mapping": "skills.profile",
         },
         # ── step: git_platform ───────────────────────────────────────────────
@@ -338,8 +350,14 @@ def run_program_init(args: argparse.Namespace) -> int:
 
     program_name: str = answers.get("program_name", ckpt_slug)
 
+    # Merge strategy_opt_in into processes list (strategy is a separate confirm question
+    # gated on cofounder role — spec §Q question-order §4)
+    processes: list[str] = list(answers.get("processes") or [])
+    if answers.get("strategy_opt_in") and "strategy" not in processes:
+        processes.append("strategy")
+        answers["processes"] = processes
+
     # Compute companion repos from processes
-    processes: list[str] = answers.get("processes", [])
     companion_repos = compute_companion_repos(processes)
     answers["scaffold_business"] = "business" in companion_repos
     answers["scaffold_strategy"] = "strategy" in companion_repos
@@ -372,7 +390,35 @@ def run_program_init(args: argparse.Namespace) -> int:
             _error(f"platform.yaml generation failed: {exc}")
             return 1
 
-    # ── 7. scaffold companion repos ───────────────────────────────────────────
+    # ── 7a. initialize .agents/ structure in the specs repo ──────────────────
+    specs_dir = platform_out.parent
+    if specs_dir.is_dir():
+        _note("Initializing .agents/ directory structure …")
+        try:
+            created_paths = init_agents_structure(specs_dir, program_name)
+            for p in created_paths:
+                _ok(f"Created {p}")
+            if not created_paths:
+                _note(".agents/ already initialized — nothing to do.")
+        except Exception as exc:
+            _warn(f".agents/ init failed (non-fatal): {exc}")
+
+    # ── 7b. git init + initial commit ────────────────────────────────────────
+    if not existing_yaml:  # only for fresh inits, not UPDATE flow
+        _note("Ensuring specs repo is a git repository …")
+        git_err = ensure_git_repo(specs_dir)
+        if git_err:
+            _warn(f"git init failed (non-fatal): {git_err}")
+        else:
+            create_gitignore(specs_dir)
+            _note("Creating initial git commit …")
+            commit_err = initial_commit(specs_dir, program_name, answers)
+            if commit_err:
+                _warn(f"Initial commit failed (non-fatal): {commit_err}")
+            else:
+                _ok("Initial commit created.")
+
+    # ── 7c. scaffold companion repos ─────────────────────────────────────────
     if companion_repos:
         _note(f"Scaffolding companion repos: {', '.join(companion_repos)} …")
         dry_run = getattr(args, "dry_run", False)
@@ -389,7 +435,10 @@ def run_program_init(args: argparse.Namespace) -> int:
     # ── 8. post-init guidance ─────────────────────────────────────────────────
     print_guidance(answers, program_name)
 
-    # ── 9. clear checkpoint on success ────────────────────────────────────────
+    # ── 9. audit trail — bus message ──────────────────────────────────────────
+    _emit_audit_message(program_name, answers, platform_out)
+
+    # ── 10. clear checkpoint on success ───────────────────────────────────────
     active_checkpoint.clear()
 
     return 0
@@ -438,3 +487,56 @@ def _ask_program_name_early(questions: list[dict[str, Any]]) -> str:
             if ans:
                 return str(ans)
     return "my-program"
+
+
+def _emit_audit_message(
+    program_name: str,
+    answers: dict[str, Any],
+    platform_out: Path,
+) -> None:
+    """Emit a `program-init-completed` bus message for the audit trail.
+
+    Spec requirement: "every program-init invocation SHALL emit a
+    `program-init-completed` bus message."
+
+    Tries to call the otaman bus CLI (`otaman send`).  Fails silently
+    so the audit trail never breaks the init flow.
+    """
+    import datetime
+    import os
+    import subprocess
+
+    processes = answers.get("processes") or []
+    roles = answers.get("roles") or []
+    scaffolded: list[str] = []
+    if answers.get("scaffold_business"):
+        scaffolded.append(f"{program_name}-business")
+    if answers.get("scaffold_strategy"):
+        scaffolded.append(f"{program_name}-strategy")
+
+    body = (
+        f"program: {program_name}\n"
+        f"edition: {answers.get('active_edition', 'ce')}\n"
+        f"mode: {answers.get('mode', 1)}\n"
+        f"processes: {', '.join(sorted(processes)) or 'none'}\n"
+        f"roles: {', '.join(sorted(roles)) or 'none'}\n"
+        f"scaffolded_repos: {', '.join(scaffolded) or 'none'}\n"
+        f"platform_yaml: {platform_out}\n"
+        f"timestamp: {datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
+        f"actor: {os.environ.get('USER', 'unknown')}\n"
+    )
+
+    try:
+        subprocess.run(
+            [
+                "otaman", "send",
+                "--to", "cli-agent",
+                "--subject", f"program-init-completed: {program_name}",
+                "--body", body,
+            ],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception:
+        pass  # audit trail failure must never abort the init flow

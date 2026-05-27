@@ -169,6 +169,52 @@ class TestRunnerEndToEnd:
         assert rc == 1
 
 
+class TestStrategyOptIn:
+    """Verify strategy_opt_in merges into processes list."""
+
+    def test_strategy_opt_in_true_adds_to_processes(self, tmp_path, monkeypatch):
+        """When cofounder selected and strategy_opt_in=Y, processes gets 'strategy'."""
+        monkeypatch.setattr(
+            "otaman_cli.onboard.program_init.checkpoint._STATE_DIR_BASE",
+            tmp_path / "state",
+        )
+        import otaman_cli.onboard.program_init.questions as qmod
+        orig = qmod._Q_AVAILABLE
+        qmod._Q_AVAILABLE = False
+
+        responses = iter([
+            "strat-app",          # program_name
+            "Strategy test",      # description
+            str(tmp_path / "strat-app" / "strat-app-specs"),  # primary_repo
+            "",                   # domains
+            "5",                  # roles → cofounder (5th option in list: CEO CPO CTO BA cofounder)
+            "",                   # role_cofounder (blank)
+            "",                   # processes (no outcomes etc.)
+            "y",                  # strategy_opt_in → Yes (cofounder is present)
+            "USD",                # currency_code
+            "$",                  # currency_symbol
+            "2",                  # currency_decimals
+            # scales not shown (no risks/outcomes)
+            # releases not shown (no outcomes)
+            "",                   # skill_profile
+            "",                   # git_platform
+            "",                   # secret_backend
+        ])
+        monkeypatch.setattr("builtins.input", lambda _: next(responses, ""))
+
+        try:
+            args = _args(program="strat-app")
+            rc = run_program_init(args)
+        finally:
+            qmod._Q_AVAILABLE = orig
+
+        assert rc == 0
+        platform = tmp_path / "strat-app" / "strat-app-specs" / "platform.yaml"
+        assert platform.is_file()
+        content = platform.read_text()
+        assert "strategy" in content
+
+
 class TestCliWiring:
     """Smoke tests for the CLI argparse wiring."""
 

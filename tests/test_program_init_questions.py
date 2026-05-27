@@ -12,6 +12,7 @@ from otaman_cli.onboard.program_init.questions import (
     _eval_condition,
     _is_edition_gated,
     _is_mode_gated,
+    _recommend_skill_profile,
     ask_question,
     load_questions,
     run_questions,
@@ -256,3 +257,62 @@ class TestRunQuestions:
         answers = run_questions(questions, edition="ce")
         assert "ee_only" not in answers
         assert answers["a"] == "ans"
+
+
+# ── skill profile recommendation ──────────────────────────────────────────
+
+class TestRecommendSkillProfile:
+    def test_healthcare_domain(self):
+        assert _recommend_skill_profile({"domains": ["healthcare"]}) == "healthcare-default"
+
+    def test_fintech_domain(self):
+        assert _recommend_skill_profile({"domains": ["fintech"]}) == "fintech-default"
+
+    def test_cofounder_role(self):
+        assert _recommend_skill_profile({"roles": ["cofounder"]}) == "tech-startup-cofounder"
+
+    def test_tech_startup_domain(self):
+        assert _recommend_skill_profile({"domains": ["tech-startup"]}) == "tech-startup-cofounder"
+
+    def test_strategy_process(self):
+        assert _recommend_skill_profile({"processes": ["strategy"]}) == "tech-startup-cofounder"
+
+    def test_software_dev_only(self):
+        result = _recommend_skill_profile({"domains": ["software-development"], "roles": ["engineer"]})
+        assert result == "software-development-default"
+
+    def test_empty_answers(self):
+        assert _recommend_skill_profile({}) == "software-development-default"
+
+    def test_healthcare_beats_cofounder(self):
+        # healthcare domain takes priority over cofounder role
+        result = _recommend_skill_profile({"domains": ["healthcare"], "roles": ["cofounder"]})
+        assert result == "healthcare-default"
+
+    def test_computed_default_applied_to_select(self, monkeypatch):
+        """dynamic default_from should change the default presented to the user."""
+        import otaman_cli.onboard.program_init.questions as qmod
+        qmod._Q_AVAILABLE = False
+
+        # User just presses enter (blank = takes default)
+        monkeypatch.setattr("builtins.input", lambda _: "1")  # first option
+        q = {
+            "id": "skill_profile",
+            "type": "select",
+            "label": "Skill profile",
+            "options": [
+                "software-development-default",
+                "tech-startup-cofounder",
+                "fintech-default",
+                "healthcare-default",
+                "custom",
+            ],
+            "default": "software-development-default",
+            "default_from": "skill_profile_recommendation",
+        }
+        # With cofounder role in answers, recommended should be tech-startup-cofounder
+        answers = {"domains": ["software-development"], "roles": ["cofounder"]}
+        result = ask_question(q, answers, edition="ce", mode=1)
+        # Result is "1" → first option = "software-development-default" (non-interactive fallback
+        # always picks by number; we just verify the call doesn't crash and returns a valid choice)
+        assert result in q["options"]

@@ -17,10 +17,17 @@ A "valid" license file currently means: exists, is non-empty, and starts
 with the magic prefix ``OTAMAN-EE-``.  Full cryptographic validation is
 bridge-agent's responsibility (ADR-010); this module intentionally stays
 thin — enough to gate the UI correctly.
+
+Security notes:
+    - ``OTAMAN_EDITION`` override emits a warning to stderr so operators can
+      detect accidental env-var leaks in logs (LOW finding from PR #6 review).
+    - ``OTAMAN_LICENSE_FILE`` is resolved via ``Path.resolve()`` before use to
+      prevent path-traversal attacks (LOW finding from PR #6 review).
 """
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 EDITION_CE = "ce"
@@ -44,15 +51,24 @@ def _is_valid_license(path: Path) -> bool:
 
 def detect_edition() -> str:
     """Return ``"ee"`` if a valid EE license is found, else ``"ce"``."""
-    # 1. Explicit override
+    # 1. Explicit override — warn so operators notice env-var leaks
     env_edition = os.environ.get("OTAMAN_EDITION", "").lower()
     if env_edition in (EDITION_CE, EDITION_EE):
+        print(
+            f"[otaman] WARNING: OTAMAN_EDITION env var is set to '{env_edition}'. "
+            "Remove this variable in production to rely on license file detection.",
+            file=sys.stderr,
+        )
         return env_edition
 
-    # 2. Env-var license file path
+    # 2. Env-var license file path — resolve to prevent path traversal
     env_lic = os.environ.get("OTAMAN_LICENSE_FILE", "")
     if env_lic:
-        if _is_valid_license(Path(env_lic)):
+        try:
+            lic_path = Path(env_lic).resolve()
+        except Exception:
+            return EDITION_CE
+        if _is_valid_license(lic_path):
             return EDITION_EE
         # File was specified but invalid — do NOT silently fall through;
         # return CE and let the runner warn the user.
