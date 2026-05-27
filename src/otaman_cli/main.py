@@ -1335,7 +1335,7 @@ def cmd_read(args: list[str]) -> int:
     return 0
 
 
-def cmd_check(args: list[str]) -> int:
+def cmd_check(args: list[str], hide_broadcast_hours: int | None = None) -> int:
     """Check messages for an agent."""
     root = find_project_root()
     if not root:
@@ -1399,6 +1399,7 @@ def cmd_check(args: list[str]) -> int:
             messages.append({
                 "id": fm.get("id", "?"),
                 "from": fm.get("from", "?"),
+                "to": str(fm.get("to", "")),
                 "priority": fm.get("priority", "normal"),
                 "type": fm.get("type", "?"),
                 "status": status,
@@ -1414,9 +1415,27 @@ def cmd_check(args: list[str]) -> int:
     pending = [m for m in messages if m["status"] == "pending"]
     other = [m for m in messages if m["status"] != "pending"]
 
+    # Apply --hide-broadcast-older-than filter (D4)
+    if hide_broadcast_hours is not None and hide_broadcast_hours > 0:
+        from datetime import datetime, timezone, timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hide_broadcast_hours)
+        def _is_old_broadcast(m: dict) -> bool:
+            if m.get("to") != "all":
+                return False
+            ts_str = m.get("timestamp", "")
+            if not ts_str:
+                return False
+            try:
+                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                return ts < cutoff
+            except ValueError:
+                return False
+        pending = [m for m in pending if not _is_old_broadcast(m)]
+
     if pending:
         for m in pending:
-            UI.bullet(f"{m['id']} from {UI.agent(m['from'])} [{UI.priority(m['priority'])}]")
+            broadcast_label = " (broadcast)" if m.get("to") == "all" else ""
+            UI.bullet(f"{m['id']} from {UI.agent(m['from'])} [{UI.priority(m['priority'])}]{broadcast_label}")
             print(f"    {m['subject']}")
             UI.muted(f"{m['type']} | {m['timestamp']} | {m['stem']}")
             print()
@@ -1706,6 +1725,53 @@ TODO: Concrete suggestions for what the spec should say.
     return 0
 
 
+
+def _find_task_assignment_sender(active_dir: "Path", change_name: str, root: "Path") -> str:
+    """Locate the agent who sent the task-assignment for *change_name*.
+
+    Scans bus active/ for messages with type: task-assignment whose
+    body or change: frontmatter field matches *change_name*.
+    Returns the from: agent name, or human if not found (D2 fallback).
+    """
+    try:
+        import yaml as _yaml
+    except ImportError:
+        return "human"
+
+    try:
+        candidates = sorted(active_dir.glob("*.md"), reverse=True)
+    except OSError:
+        return "human"
+
+    for f in candidates:
+        try:
+            text = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        import re as _re
+        fm_match = _re.match(r"^---\n(.+?)\n---", text, _re.DOTALL)
+        if not fm_match:
+            continue
+        try:
+            fm = _yaml.safe_load(fm_match.group(1))
+        except Exception:
+            continue
+        if not isinstance(fm, dict):
+            continue
+        if fm.get("type") != "task-assignment":
+            continue
+        # Match by explicit change: field or by change_name in subject/body
+        fm_change = fm.get("change", "")
+        if fm_change and fm_change == change_name:
+            return str(fm.get("reply-to") or fm.get("from") or "human").strip()
+        # Fallback: check if change_name appears in the message subject
+        subject_match = _re.search(r"## Subject:.*" + _re.escape(change_name), text)
+        if subject_match:
+            return str(fm.get("reply-to") or fm.get("from") or "human").strip()
+
+    return "human"
+
+
 def cmd_complete(args: list[str], tasks_spec: str = "", mark_all: bool = False) -> int:
     """Report task completion: update tasks.md and send bus notification."""
     if not args:
@@ -1769,24 +1835,24 @@ def cmd_complete(args: list[str], tasks_spec: str = "", mark_all: bool = False) 
         UI.muted(f"File: {tasks_file}")
 
     # Step 2: Create task-complete bus message
+    # D1: locate originating task-assignment to route reply to assigner only
+    # D2: fall back to 'human' if no task-assignment found (not 'all')
     from datetime import datetime, timezone
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     now_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
 
+    recipient = _find_task_assignment_sender(active_dir, change_name, root)
+
     slug = re.sub(r"[^a-z0-9]+", "-", change_name.lower()).strip("-")[:30]
     msg_id = f"{now_ts}-complete-{slug}"
-    filename = f"{now_ts}-{agent}-to-all-task-complete.md"
-
-    active_dir, _ = _resolve_bus_paths(root)
-    active_dir.mkdir(parents=True, exist_ok=True)
-    (active_dir / "acks").mkdir(exist_ok=True)
+    filename = f"{now_ts}-{agent}-to-{recipient.replace('/', '-')}-task-complete.md"
 
     task_label = "all tasks" if mark_all else f"tasks {tasks_spec}"
 
     content = f"""---
 id: {msg_id}
 from: {agent}
-to: all
+to: {recipient}
 priority: normal
 type: task-complete
 change: {change_name}
@@ -1808,7 +1874,7 @@ status: pending
 
     print()
     UI.ok(f"Bus notification: {filepath.relative_to(root)}")
-    UI.muted(f"Type: task-complete | To: all | Change: {change_name}")
+    UI.muted(f"Type: task-complete | To: {recipient} | Change: {change_name}")
 
     # Step 3: Clear blocked entry if all tasks are done
     if mark_all:
@@ -3827,6 +3893,7 @@ def main() -> int:
     approve_action = "list"
     complete_tasks = ""
     complete_all = False
+    hide_broadcast_hours: int | None = None
     maestro_dir: str | None = None
     project_name_override: str | None = None
     positional: list[str] = []
@@ -3857,6 +3924,12 @@ def main() -> int:
         elif rest[i] == "--all":
             complete_all = True
             i += 1
+        elif rest[i] == "--hide-broadcast-older-than" and i + 1 < len(rest):
+            try:
+                hide_broadcast_hours = int(rest[i + 1])
+            except ValueError:
+                UI.warn(f"--hide-broadcast-older-than expects an integer (hours); ignoring '{rest[i+1]}'")
+            i += 2
         elif rest[i] == "--read":
             ack_status = "read"
             i += 1
@@ -3881,7 +3954,7 @@ def main() -> int:
         "clone": lambda: cmd_clone(positional, target=maestro_dir or ""),
         "doctor": lambda: cmd_doctor(positional),
         "status": lambda: cmd_status(positional),
-        "check": lambda: cmd_check(positional),
+        "check": lambda: cmd_check(positional, hide_broadcast_hours=hide_broadcast_hours),
         "read": lambda: cmd_read(positional),
         "send": lambda: cmd_send(rest),
         "whoami": lambda: cmd_whoami(rest),
