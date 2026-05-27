@@ -574,13 +574,7 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
 
 
 def _cmd_init_update() -> int:
-    """Patch .otaman agent: fields across all repos (--update mode, D5).
-
-    Reads platform.yaml from the project root, then for each repo writes
-    agent: <owner> into the repo's .otaman file (creating it if absent).
-    Also writes agent: human to the otaman-meta .otaman file.
-    Idempotent — safe to run multiple times.
-    """
+    """Patch .otaman agent: fields across all repos (--update mode, D5)."""
     root = find_project_root()
     if not root:
         UI.error("Not in an otaman project")
@@ -618,64 +612,46 @@ def _cmd_init_update() -> int:
         if marker.is_file():
             existing = marker.read_text(encoding="utf-8")
         else:
-            # Compute relative path from repo to meta dir
             import os as _os
             rel = _os.path.relpath(root.resolve(), repo_dir)
             rel_posix = pathlib.Path(rel).as_posix()
-            existing = f"# Path to otaman folder
-{rel_posix}
-"
+            existing = "# Path to otaman folder" + chr(10) + rel_posix + chr(10)
 
-        # Check if agent: field already present
-        lines = existing.splitlines()
-        has_agent = any(l.strip().startswith("agent:") for l in lines)
+        lines_c = existing.splitlines()
+        has_agent = any(l.strip().startswith("agent:") for l in lines_c)
         if has_agent:
-            # Update existing agent: line
-            new_lines = []
-            for l in lines:
+            new_l = []
+            for l in lines_c:
                 if l.strip().startswith("agent:") and owner:
-                    new_lines.append(f"agent: {owner}")
+                    new_l.append("agent: " + owner)
                 else:
-                    new_lines.append(l)
-            new_content = "
-".join(new_lines) + "
-"
+                    new_l.append(l)
+            new_content = chr(10).join(new_l) + chr(10)
         else:
-            agent_line = f"agent: {owner}
-" if owner else ""
-            new_content = existing.rstrip("
-") + "
-" + agent_line
+            agent_line = ("agent: " + owner + chr(10)) if owner else ""
+            new_content = existing.rstrip(chr(10)) + chr(10) + agent_line
 
         marker.write_text(new_content, encoding="utf-8")
-        label = f" (agent: {owner})" if owner else ""
-        UI.ok(f"{name}/.otaman updated{label}")
+        UI.ok(name + "/.otaman updated" + ((" (agent: " + owner + ")") if owner else ""))
         updated += 1
 
-    # Write agent: human to meta dir itself
     meta_marker = root / ".otaman"
     if meta_marker.is_file():
         existing = meta_marker.read_text(encoding="utf-8")
-        lines = existing.splitlines()
-        has_agent = any(l.strip().startswith("agent:") for l in lines)
+        has_agent = any(l.strip().startswith("agent:") for l in existing.splitlines())
         if not has_agent:
-            meta_marker.write_text(existing.rstrip("
-") + "
-agent: human
-", encoding="utf-8")
+            meta_marker.write_text(existing.rstrip(chr(10)) + chr(10) + "agent: human" + chr(10), encoding="utf-8")
             UI.ok("otaman-meta/.otaman updated (agent: human)")
             updated += 1
         else:
             UI.muted("otaman-meta/.otaman already has agent: field")
     else:
-        UI.muted("otaman-meta/.otaman not found — skipping meta agent write")
+        UI.muted("otaman-meta/.otaman not found")
 
     print()
     UI.kv("Updated", str(updated))
     UI.kv("Skipped", str(skipped))
-    UI.muted("Run 'otaman init --update' again after adding new repos to platform.yaml.")
     return 0
-
 
 def cmd_init(args: list[str], dry_run: bool = False, skip_doctor: bool = False, update: bool = False) -> int:
     """Initialize .agents/ from platform.yaml.
@@ -2375,12 +2351,9 @@ def cmd_migrate(args: list[str]) -> int:
                 rel = os.path.relpath(maestro_dir.resolve(), repo_dir)
                 rel_posix = Path(rel).as_posix()
                 marker = repo_dir / ".otaman"
-                agent_line = f"agent: {owner}
-" if owner else ""
+                agent_line = ("agent: " + owner + chr(10)) if owner else ""
                 marker.write_text(
-                    f"# Path to otaman folder
-{rel_posix}
-{agent_line}",
+                    f"# Path to otaman folder\n{rel_posix}\n{agent_line}",
                     encoding="utf-8",
                 )
                 # Append to repo .gitignore
@@ -2391,10 +2364,10 @@ def cmd_migrate(args: list[str]) -> int:
                     if ".otaman" in gi_content.splitlines():
                         needs_entry = False
                 if needs_entry:
+
                     with open(gi, "a", encoding="utf-8") as f:
-                        f.write("
-.otaman
-")
+                        f.write(chr(10) + ".otaman" + chr(10))
+
                 label = f" (agent: {owner})" if owner else ""
                 UI.ok(f"Marker {repo['name']}/.otaman -> {rel_posix}{label}")
         # Also write agent: human to otaman-meta itself (D5)
@@ -2402,9 +2375,9 @@ def cmd_migrate(args: list[str]) -> int:
         if meta_marker.exists():
             existing = meta_marker.read_text(encoding="utf-8")
             if "agent:" not in existing:
-                meta_marker.write_text(existing.rstrip() + "
-agent: human
-", encoding="utf-8")
+                meta_marker.write_text(existing.rstrip() + chr(10) + "agent: human" + chr(10), encoding="utf-8")
+
+
     except Exception as e:
         UI.warn(f"Could not write .otaman markers: {e}")
 
@@ -3378,8 +3351,8 @@ def cmd_set_agent(args: list[str]) -> int:
 
     # Primary: ~/.otaman-session (session-local, not shared across tabs)
     session_file = Path.home() / ".otaman-session"
-    session_file.write_text(agent_name + "
-", encoding="utf-8")
+    session_file.write_text(agent_name + chr(10), encoding="utf-8")
+
     UI.ok(f"Agent identity set to: {UI.agent(agent_name)}")
     UI.kv("File", str(session_file))
 
@@ -3388,14 +3361,14 @@ def cmd_set_agent(args: list[str]) -> int:
     agent_file = root / ".agents" / "current-agent"
     agent_file.parent.mkdir(parents=True, exist_ok=True)
     agent_file.write_text(
-        "# DEPRECATED: identity now stored in ~/.otaman-session
-"
-        "# Run 'otaman init --update' to migrate to per-repo .otaman agent: fields
-"
-        + agent_name + "
-",
+        "# DEPRECATED: identity now stored in ~/.otaman-session" + chr(10)
+        + "# Run 'otaman init --update' to migrate to per-repo .otaman agent: fields" + chr(10)
+        + agent_name + chr(10),
         encoding="utf-8",
     )
+
+
+
     UI.muted("(Also wrote .agents/current-agent for backwards compatibility)")
     return 0
 
