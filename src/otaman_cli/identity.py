@@ -1,26 +1,28 @@
 """Per-tab agent identity resolution (carved from legacy cli/maestro.py).  # legacy: filename
 
-Resolution priority chain (agent-identity-per-directory spec, D1):
+Resolution priority chain (agent-identity-per-directory spec D1, amended 2026-05-28):
 
 1. ``OTAMAN_AGENT`` environment variable  (highest — automated session spawn)
-2. ``~/.otaman-session`` file  (session-local; written by ``otaman set-agent``)
-3. ``.otaman`` ``agent:`` field found by walking up from CWD  (per-repo)
-4. ``.agents/current-agent`` file  (deprecated project-global fallback)
-5. ``None`` / ERROR — no identity; caller must prompt user
+2. ``.otaman`` ``agent:`` field found by walking up from CWD  (per-repo)
+3. ``.agents/current-agent`` file  (deprecated project-global fallback)
+4. ``None`` / ERROR — no identity; caller must prompt user
 
-The CWD ancestry walk (step 3) starts at the current working directory and
-walks up parent directories until it finds a ``.otaman`` file that contains
-an ``agent:`` line, or reaches the filesystem root.
+The CWD ancestry walk (step 2) starts at the current working directory and
+walks up parent directories.  A ``.otaman`` file WITHOUT an ``agent:`` field
+does NOT stop the walk — the walker continues up until an ``agent:`` value is
+found or the filesystem root is reached.
 
-Step 4 emits a DEPRECATED warning to stderr when it is the source.  Step 5
+Step 3 emits a DEPRECATED warning to stderr when it is the source.  Step 4
 returns ``None``; callers that can't continue without an identity should exit
 with an instructive message.
 
-The earlier step-2 (CWD→platform.yaml→owner) from the 2026-04-29 fix is now
-subsumed by step 3: ``otaman init`` writes ``agent: <owner>`` into each
-repo's ``.otaman`` file, so the CWD walk finds the right identity without
-needing to parse ``platform.yaml`` at runtime.  The ``platform.yaml`` lookup
-is kept as a fallback within step 3 for repos that haven't been updated yet.
+``~/.otaman-session`` is no longer read.  It was user-global state (not
+session-local) and caused concurrent-session identity collisions (2026-05-28
+watchtower incident).  Per-repo ``.otaman agent:`` fields written by
+``otaman init`` replace it entirely.
+
+The CWD→platform.yaml→owner fallback (2026-04-29 fix) is preserved within
+step 2 for repos not yet updated by ``otaman init --update``.
 """
 
 from __future__ import annotations
@@ -49,6 +51,9 @@ def find_project_root(start: Path | None = None) -> Path | None:
 def _read_otaman_agent_field(cwd: Path) -> str | None:
     """Walk up from *cwd* looking for a ``.otaman`` file with an ``agent:`` line.
 
+    A ``.otaman`` without an ``agent:`` field does NOT stop the walk — the
+    walker continues to parent directories (spec D1, task 2.2).
+
     Returns the agent name if found, otherwise ``None``.
     """
     for directory in [cwd, *cwd.parents]:
@@ -64,9 +69,7 @@ def _read_otaman_agent_field(cwd: Path) -> str | None:
                     value = stripped[len("agent:"):].strip()
                     if value:
                         return value
-            # Found a .otaman file but no agent: field — stop walking
-            # (this repo intentionally has no agent binding, e.g. otaman-meta)
-            return None
+            # No agent: field in this .otaman — keep walking up (D1)
     return None
 
 
@@ -77,14 +80,13 @@ def resolve_agent_identity(
 ) -> str | None:
     """Resolve which agent identity to act as.
 
-    Priority chain (D1 of agent-identity-per-directory spec):
+    Priority chain (D1, amended 2026-05-28 — no ~/.otaman-session):
     1. explicit arg (CLI --agent / direct call)
     2. OTAMAN_AGENT environment variable
-    3. ~/.otaman-session file (written by ``otaman set-agent``)
-    4. .otaman ``agent:`` field found by CWD ancestry walk
+    3. .otaman ``agent:`` field found by CWD ancestry walk
        (falls back to platform.yaml CWD->owner for un-updated repos)
-    5. .agents/current-agent (deprecated; emits warning)
-    6. None (caller decides whether to error)
+    4. .agents/current-agent (deprecated; emits warning)
+    5. None (caller decides whether to error)
     """
     # 1. Explicit argument always wins
     if explicit:
@@ -99,23 +101,13 @@ def resolve_agent_identity(
         cwd = Path.cwd()
     cwd = cwd.resolve()
 
-    # 3. ~/.otaman-session (session-local; set by `otaman set-agent`)
-    session_file = Path.home() / ".otaman-session"
-    if session_file.is_file():
-        try:
-            text = session_file.read_text(encoding="utf-8").strip()
-            if text and not text.startswith("#"):
-                return text
-        except OSError:
-            pass
-
-    # 4a. .otaman agent: field — CWD ancestry walk
+    # 3a. .otaman agent: field — CWD ancestry walk (keeps walking past .otaman without agent:)
     dotoman_agent = _read_otaman_agent_field(cwd)
     if dotoman_agent:
         return dotoman_agent
 
-    # 4b. CWD → platform.yaml → owner (for repos that haven't been updated
-    #     by `otaman init --update` yet; same logic as the 2026-04-29 fix)
+    # 3b. CWD → platform.yaml → owner (backwards compat for repos not yet updated
+    #     by `otaman init --update`; same logic as the 2026-04-29 fix)
     try:
         worktree_main = resolve_worktree_main(cwd)
     except Exception:
@@ -149,7 +141,7 @@ def resolve_agent_identity(
                 ):
                     return str(owner).strip()
 
-    # 5. .agents/current-agent — deprecated fallback
+    # 4. .agents/current-agent — deprecated fallback
     agent_file = root / ".agents" / "current-agent"
     if agent_file.is_file():
         try:
@@ -169,5 +161,5 @@ def resolve_agent_identity(
                 )
                 return name
 
-    # 6. Nothing found
+    # 5. Nothing found
     return None

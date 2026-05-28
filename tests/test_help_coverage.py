@@ -187,6 +187,8 @@ def test_help_doesnt_list_obviously_phantom_commands() -> None:
         "post-review",
         # "otaman" appears as the top-level binary name in Quick start examples.
         "otaman",
+        # shell built-in in Quick start example: "export OTAMAN_AGENT=<name>"
+        "export",
         # `help` is dispatched specially before the dict lookup (see main()
         # ``if args[0] in ("-h", "--help", "help"): return cmd_help()``),
         # so it's a legitimate top-level command without a dispatcher entry.
