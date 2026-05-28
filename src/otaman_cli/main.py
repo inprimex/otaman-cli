@@ -689,7 +689,7 @@ def _cmd_init_update() -> int:
         else:
             import os as _os
             rel = _os.path.relpath(root.resolve(), repo_dir)
-            rel_posix = pathlib.Path(rel).as_posix()
+            rel_posix = Path(rel).as_posix()
             existing = "# Path to otaman folder" + chr(10) + rel_posix + chr(10)
 
         lines_c = existing.splitlines()
@@ -710,28 +710,34 @@ def _cmd_init_update() -> int:
         UI.ok(name + "/.otaman updated" + ((" (agent: " + owner + ")") if owner else ""))
         updated += 1
 
-        # Regenerate launch commands with OTAMAN_AGENT=<owner> prefix (D4)
+        # Count repos whose launch commands would change (D4).
+        # Mutation happens below via in-place text patching, not by mutating
+        # the parsed `config` dict — yaml.dump would alphabetize keys, drop
+        # comments, and break downstream parsers (notably the launcher).
         if owner and isinstance(repo.get("launch"), dict):
             cmds = repo["launch"].get("commands", [])
-            new_cmds = []
-            changed = False
-            for cmd in cmds:
-                new_cmd = _inject_agent_env_into_command(cmd, owner)
-                if new_cmd != cmd:
-                    changed = True
-                new_cmds.append(new_cmd)
-            if changed:
-                repo["launch"]["commands"] = new_cmds
+            if any(_inject_agent_env_into_command(c, owner) != c for c in cmds):
                 launch_updated += 1
-                UI.muted(f"  {name}: launch commands updated with OTAMAN_AGENT={owner}")
+                UI.muted(f"  {name}: launch commands will be updated with OTAMAN_AGENT={owner}")
 
-    # Write back platform.yaml if launch commands changed
+    # Write back platform.yaml via in-place text patch so original key order,
+    # comments, and quoting style are preserved. We walk the raw lines and
+    # track current repo's owner via `  owner: <name>` markers; any line in
+    # the same block containing `claude` gets the OTAMAN_AGENT prefix applied.
     if launch_updated > 0:
         try:
-            platform_yaml.write_text(
-                _yaml.dump(config, default_flow_style=False, allow_unicode=True),
-                encoding="utf-8",
-            )
+            original_text = platform_yaml.read_text(encoding="utf-8")
+            owner_line_pat = re.compile(r"^\s+owner:\s*(\S+)")
+            current_owner = None
+            new_lines = []
+            for line in original_text.splitlines(keepends=True):
+                m = owner_line_pat.match(line)
+                if m:
+                    current_owner = m.group(1)
+                if current_owner and "claude" in line:
+                    line = _inject_agent_env_into_command(line, current_owner)
+                new_lines.append(line)
+            platform_yaml.write_text("".join(new_lines), encoding="utf-8")
             UI.ok(f"platform.yaml updated ({launch_updated} repo(s) launch commands patched)")
         except Exception as e:
             UI.warn(f"Failed to write platform.yaml: {e}")
