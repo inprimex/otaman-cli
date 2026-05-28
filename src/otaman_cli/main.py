@@ -1817,6 +1817,10 @@ def cmd_complete(args: list[str], tasks_spec: str = "", mark_all: bool = False) 
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     now_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
 
+    active_dir, _ = _resolve_bus_paths(root)
+    active_dir.mkdir(parents=True, exist_ok=True)
+    (active_dir / "acks").mkdir(exist_ok=True)
+
     recipient = _find_task_assignment_sender(active_dir, change_name, root)
 
     slug = re.sub(r"[^a-z0-9]+", "-", change_name.lower()).strip("-")[:30]
