@@ -49,10 +49,11 @@ def find_project_root(start: Path | None = None) -> Path | None:
 
 
 def _read_otaman_agent_field(cwd: Path) -> str | None:
-    """Walk up from *cwd* looking for a ``.otaman`` file with an ``agent:`` line.
+    """Walk up from *cwd* looking for agent identity in ``.otaman`` (file or dir shape).
 
-    A ``.otaman`` without an ``agent:`` field does NOT stop the walk — the
-    walker continues to parent directories (spec D1, task 2.2).
+    File shape: parse ``agent:`` field as before.
+    Directory shape (otaman-meta legacy): read ``<dir>/.otaman/agent`` (single-line text).
+    Missing ``agent:`` / missing ``agent`` file at an ancestor does NOT stop the walk.
 
     Returns the agent name if found, otherwise ``None``.
     """
@@ -69,7 +70,20 @@ def _read_otaman_agent_field(cwd: Path) -> str | None:
                     value = stripped[len("agent:"):].strip()
                     if value:
                         return value
-            # No agent: field in this .otaman — keep walking up (D1)
+            # No agent: field in this .otaman file — keep walking up
+        elif marker.is_dir():
+            agent_file = marker / "agent"
+            if agent_file.is_file():
+                try:
+                    text = agent_file.read_text(encoding="utf-8").strip()
+                except OSError:
+                    continue
+                # Take the first non-empty line (D6: extras silently ignored)
+                for line in text.splitlines():
+                    name = line.strip()
+                    if name:
+                        return name
+            # No agent file in this .otaman dir — keep walking up
     return None
 
 

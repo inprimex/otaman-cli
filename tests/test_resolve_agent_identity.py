@@ -25,11 +25,22 @@ from otaman_cli.identity import resolve_agent_identity
 # Fixtures
 
 
+@pytest.fixture(autouse=True)
+def clear_otaman_agent_env(monkeypatch):
+    """Ensure OTAMAN_AGENT env var doesn't bleed in from the test runner's environment."""
+    monkeypatch.delenv("OTAMAN_AGENT", raising=False)
+
+
+
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
     """Lay out a maestro project: maestro folder + 3 sibling repos.
 
     Returns the maestro folder path (the conventional ``project_root``).
+
+    Each repo gets a ``.otaman`` file with ``agent: <owner>`` so the new
+    per-directory resolution chain finds identity without needing platform.yaml.
+    This matches the post-``otaman init --update`` state the new spec requires.
     """
     parent = tmp_path / "myplatform"
     parent.mkdir()
@@ -40,9 +51,12 @@ def project(tmp_path: Path) -> Path:
 
     backend = parent / "auth-service"
     backend.mkdir()
+    (backend / ".otaman").write_text("agent: backend-agent\n", encoding="utf-8")
+
     web = parent / "web-app"
     web.mkdir()
     (web / "src").mkdir()  # nested cwd
+    (web / ".otaman").write_text("agent: frontend-agent\n", encoding="utf-8")
 
     (maestro / "platform.yaml").write_text(
         """
@@ -126,15 +140,27 @@ def test_returns_none_when_nothing_resolves(project: Path) -> None:
 # Edge cases
 
 
-def test_malformed_platform_yaml_does_not_crash(project: Path) -> None:
-    """Bad YAML should fall back to current-agent, not raise."""
+def test_malformed_platform_yaml_does_not_crash(project: Path, monkeypatch) -> None:
+    """Bad YAML should fall back to current-agent, not raise.
+
+    We monkeypatch the .otaman walk to return None so this test exercises
+    the platform.yaml → current-agent fallback path specifically.
+    """
+    import otaman_cli.identity as _id_mod
+    monkeypatch.setattr(_id_mod, "_read_otaman_agent_field", lambda cwd: None)
     (project / "platform.yaml").write_text("not: valid: yaml: ::: [", encoding="utf-8")
     (project / ".agents" / "current-agent").write_text("rescue-agent\n")
     assert resolve_agent_identity(project, project.parent / "auth-service") == "rescue-agent"
 
 
-def test_repo_missing_owner_field_skipped(project: Path) -> None:
-    """A repo entry without `owner` shouldn't match — fall through to next or fallback."""
+def test_repo_missing_owner_field_skipped(project: Path, monkeypatch) -> None:
+    """A repo entry without `owner` shouldn't match — fall through to next or fallback.
+
+    We monkeypatch the .otaman walk to return None so this test exercises
+    the platform.yaml → current-agent fallback path specifically.
+    """
+    import otaman_cli.identity as _id_mod
+    monkeypatch.setattr(_id_mod, "_read_otaman_agent_field", lambda cwd: None)
     (project / "platform.yaml").write_text(
         """
 project: myplatform
@@ -153,7 +179,7 @@ repos:
     backend_cwd = project.parent / "auth-service"
     # auth-service has no owner → falls through to current-agent
     assert resolve_agent_identity(project, backend_cwd) == "default-fallback"
-    # web-app still resolves correctly
+    # web-app still resolves correctly (via platform.yaml, walk is mocked out)
     web_cwd = project.parent / "web-app"
     assert resolve_agent_identity(project, web_cwd) == "frontend-agent"
 
