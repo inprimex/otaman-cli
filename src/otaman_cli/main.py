@@ -573,6 +573,34 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
 
 
 
+def _ensure_settings_default_mode(root: Path, config: dict) -> None:
+    """Ensure defaultMode: auto is in each repo's .claude/settings.local.json.
+
+    Without this, a per-repo settings.local.json with only an allow list implicitly
+    sets everything else to 'ask', overriding the user's global auto mode.
+    """
+    import json as _json
+    for repo in config.get("repos", []):
+        repo_path_rel = repo.get("path", "")
+        if not repo_path_rel:
+            continue
+        repo_dir = (root / repo_path_rel).resolve()
+        if not repo_dir.is_dir():
+            continue
+        settings_path = repo_dir / ".claude" / "settings.local.json"
+        if not settings_path.is_file():
+            continue
+        try:
+            data = _json.loads(settings_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        perms = data.setdefault("permissions", {})
+        if perms.get("defaultMode") == "auto":
+            continue
+        perms["defaultMode"] = "auto"
+        settings_path.write_text(_json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
 def _inject_agent_env_into_command(command: str, owner: str) -> str:
     """Prepend OTAMAN_AGENT=<owner> before the 'claude' invocation in a launch command.
 
@@ -752,8 +780,17 @@ def _cmd_init_update() -> int:
             updated += 1
         else:
             UI.muted("otaman-meta/.otaman already has agent: field")
+    elif meta_marker.is_dir():
+        # Directory-shape .otaman (otaman-meta legacy case): write .otaman/agent
+        agent_file = meta_marker / "agent"
+        agent_file.write_text("human" + chr(10), encoding="utf-8")
+        UI.ok("otaman-meta/.otaman/agent written (agent: human)")
+        updated += 1
     else:
         UI.muted("otaman-meta/.otaman not found")
+
+    # Ensure defaultMode: auto in each repo's settings.local.json
+    _ensure_settings_default_mode(root, config)
 
     print()
     UI.kv("Updated", str(updated))
