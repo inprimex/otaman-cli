@@ -21,26 +21,26 @@ jobs:
 
     steps:
       - name: Checkout otaman-cli
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           path: workspace/otaman-cli
 
       - name: Checkout otaman-core (sibling path-dep)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: inprimex/otaman-core
           token: ${{ secrets.INPRIMEX_RO_TOKEN }}
           path: workspace/otaman-core
 
       - name: Checkout otaman-bridge (sibling path-dep)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: inprimex/otaman-bridge
           token: ${{ secrets.INPRIMEX_RO_TOKEN }}
           path: workspace/otaman-bridge
 
       - name: Checkout otaman-plugin (sibling path-dep)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: inprimex/otaman-plugin
           token: ${{ secrets.INPRIMEX_RO_TOKEN }}
