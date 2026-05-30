@@ -1855,6 +1855,55 @@ TODO: Concrete suggestions for what the spec should say.
 
 
 
+def _read_platform_specs_path(root: "Path") -> str:
+    """Return the specs.path value from platform.yaml, or '' if absent."""
+    try:
+        import yaml as _yaml
+        config_path = root / "platform.yaml"
+        if not config_path.is_file():
+            return ""
+        with open(config_path, encoding="utf-8") as f:
+            config = _yaml.safe_load(f) or {}
+        return config.get("specs", {}).get("path", "")
+    except Exception:
+        return ""
+
+
+def _read_spec_owner(root: "Path", change_name: str) -> "str | None":
+    """Return spec_owner from <change>/.openspec.yaml, or None if absent/unresolvable."""
+    try:
+        import yaml as _yaml
+        specs_rel = _read_platform_specs_path(root)
+        if not specs_rel:
+            return None
+        openspec_yaml = (root / specs_rel / "openspec" / "changes" / change_name / ".openspec.yaml").resolve()
+        if not openspec_yaml.is_file():
+            return None
+        with open(openspec_yaml, encoding="utf-8") as f:
+            data = _yaml.safe_load(f) or {}
+        owner = data.get("spec_owner", "")
+        return str(owner).strip() or None
+    except Exception:
+        return None
+
+
+def _write_spec_owner(root: "Path", change_name: str, agent: str) -> None:
+    """Write or update spec_owner field in <change>/.openspec.yaml. Silent no-op on any error."""
+    try:
+        specs_rel = _read_platform_specs_path(root)
+        if not specs_rel:
+            return
+        openspec_yaml = (root / specs_rel / "openspec" / "changes" / change_name / ".openspec.yaml").resolve()
+        if not openspec_yaml.parent.is_dir():
+            return
+        lines = openspec_yaml.read_text(encoding="utf-8").splitlines() if openspec_yaml.is_file() else []
+        new_lines = [l for l in lines if not l.strip().startswith("spec_owner:")]
+        new_lines.append(f"spec_owner: {agent}")
+        openspec_yaml.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _find_task_assignment_sender(active_dir: "Path", change_name: str, root: "Path") -> str:
     """Locate the agent who sent the task-assignment for *change_name*.
 
@@ -2008,6 +2057,16 @@ status: pending
     print()
     UI.ok(f"Bus notification: {filepath.relative_to(root)}")
     UI.muted(f"Type: task-complete | To: {recipient} | Change: {change_name}")
+
+    # Step 2b: Fanout to spec_owner if set and different from primary recipient
+    spec_owner = _read_spec_owner(root, change_name)
+    if spec_owner and spec_owner != recipient:
+        fanout_filename = f"{now_ts}-{agent}-to-{spec_owner.replace('/', '-')}-task-complete.md"
+        fanout_content = content.replace(f"\nto: {recipient}\n", f"\nto: {spec_owner}\n", 1)
+        fanout_path = active_dir / fanout_filename
+        fanout_path.write_text(fanout_content, encoding="utf-8")
+        UI.ok(f"Bus notification: {fanout_path.relative_to(root)}")
+        UI.muted(f"Type: task-complete | To: {spec_owner} (spec_owner) | Change: {change_name}")
 
     # Step 3: Clear blocked entry if all tasks are done
     if mark_all:
@@ -2310,6 +2369,10 @@ def cmd_assign(args: list[str]) -> int:
     unassigned = report.get("unassigned", 0)
     done = report.get("done", 0)
     pending = report.get("pending", 0)
+
+    if feature and feature != "?":
+        assign_agent = resolve_agent_identity(root) or "unknown-agent"
+        _write_spec_owner(root, feature, assign_agent)
 
     UI.kv("Feature", feature, C.BOLD)
     UI.kv("Tasks", f"{total} total ({done} done, {pending} pending)")
