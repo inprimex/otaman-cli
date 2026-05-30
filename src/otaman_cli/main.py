@@ -23,6 +23,8 @@ Usage:
     otaman validate [<config>]        Validate platform.yaml
     otaman validate-messages [<file>] Validate bus message files
     otaman compliance [--format F]    Generate compliance audit report
+    otaman blocked --list              List blocked tasks for current agent
+    otaman blocked --clear <slug>     Remove a blocked task entry
     otaman set-agent <name>           DEPRECATED — use 'export OTAMAN_AGENT=<name>' instead
     otaman presale [name domain client]  Initialize pre-sale estimation project
     otaman retrospective [project-code]  Post-project retrospective
@@ -3550,6 +3552,63 @@ def _upgrade_one(
     return 2
 
 
+def cmd_blocked(args: list[str], list_mode: bool = False, clear_slug: str = "") -> int:
+    """List or clear blocked tasks for the current agent."""
+    root = find_project_root()
+    if not root:
+        UI.error("Not in an otaman project")
+        return 1
+
+    agent = resolve_agent_identity(root) or "unknown-agent"
+    blocked_file = root / ".agents" / "blocked" / f"{agent}.md"
+
+    if list_mode:
+        if not blocked_file.is_file():
+            print("No blocked tasks.")
+            return 0
+        text = blocked_file.read_text(encoding="utf-8")
+        sections = re.findall(
+            r"^## Blocked: (.+?)$(.*?)(?=^## Blocked:|\Z)",
+            text, re.MULTILINE | re.DOTALL,
+        )
+        if not sections:
+            print("No blocked tasks.")
+            return 0
+        for slug, body in sections:
+            slug = slug.strip()
+            since = ""
+            m = re.search(r"\*\*Blocked since\*\*:\s*(.+)", body)
+            if m:
+                since = f"  (since {m.group(1).strip()})"
+            print(f"{slug}{since}")
+            proposal_m = re.search(r"\*\*Proposal\*\*:\s*(.+)", body)
+            if proposal_m:
+                UI.muted(f"  proposal: {proposal_m.group(1).strip()}")
+        return 0
+
+    if clear_slug:
+        if not blocked_file.is_file():
+            UI.muted(f"No blocked task found: {clear_slug}")
+            return 0
+        text = blocked_file.read_text(encoding="utf-8")
+        pattern = re.compile(
+            rf"^## Blocked: {re.escape(clear_slug)}\s*\n.*?(?=^## Blocked:|\Z)",
+            re.MULTILINE | re.DOTALL,
+        )
+        new_text = pattern.sub("", text).rstrip("\n")
+        if new_text == text.rstrip("\n"):
+            UI.muted(f"No blocked task found: {clear_slug}")
+            return 0
+        blocked_file.write_text(new_text + "\n" if new_text else "", encoding="utf-8")
+        UI.ok(f"Cleared blocked task: {clear_slug}")
+        return 0
+
+    UI.error("Specify --list or --clear <slug>")
+    UI.muted("  otaman blocked --list")
+    UI.muted("  otaman blocked --clear <slug>")
+    return 1
+
+
 def cmd_set_agent(args: list[str]) -> int:
     """DEPRECATED: otaman set-agent no longer mutates any file.
 
@@ -3928,6 +3987,8 @@ def cmd_help() -> int:
   {C.GREEN}send{C.RESET} <to> --subject S --body B  Send a bus message ([--type T] [--priority P])
   {C.GREEN}ack{C.RESET} <msg> [--read|--resolved]   Acknowledge a bus message (resolved is default)
   {C.GREEN}cleanup{C.RESET} [--dry-run]            Archive old, fully-acked bus messages
+  {C.GREEN}blocked{C.RESET} --list               List blocked tasks for the current agent
+  {C.GREEN}blocked{C.RESET} --clear <slug>        Remove a blocked task entry (idempotent)
   {C.GREEN}set-agent{C.RESET} <name>              DEPRECATED — see 'otaman set-agent --help' for migration
 
 {C.BOLD}Workflow & specs:{C.RESET}
@@ -4069,6 +4130,8 @@ def main() -> int:
     complete_tasks = ""
     complete_all = False
     hide_broadcast_hours: int | None = None
+    blocked_list = False
+    blocked_clear = ""
     maestro_dir: str | None = None
     project_name_override: str | None = None
     shell_flag = False
@@ -4108,6 +4171,12 @@ def main() -> int:
                 hide_broadcast_hours = int(rest[i + 1])
             except ValueError:
                 UI.warn(f"--hide-broadcast-older-than expects an integer (hours); ignoring '{rest[i+1]}'")
+            i += 2
+        elif rest[i] == "--list":
+            blocked_list = True
+            i += 1
+        elif rest[i] == "--clear" and i + 1 < len(rest):
+            blocked_clear = rest[i + 1]
             i += 2
         elif rest[i] == "--read":
             ack_status = "read"
@@ -4162,6 +4231,7 @@ def main() -> int:
         "git-host": lambda: cmd_git_host(rest),
         "models": lambda: cmd_models(rest),
         "set-agent": lambda: cmd_set_agent(positional),
+        "blocked": lambda: cmd_blocked(positional, list_mode=blocked_list, clear_slug=blocked_clear),
         "presale": lambda: cmd_presale(positional),
         "retrospective": lambda: cmd_retrospective(positional),
         "discovery": lambda: cmd_discovery_phase(positional),
