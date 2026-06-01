@@ -10,7 +10,17 @@ from otaman_cli.onboard.users import cmd_add_user, cmd_list_users, cmd_whoami
 
 
 def _cmd_program_init(args: argparse.Namespace) -> int:
-    """Dispatch to the program-init runner."""
+    """Dispatch to the program-init runner.
+
+    DEPRECATED: prefer `otaman init`, which handles all starting states
+    (empty dir, sibling repos, existing platform.yaml) via smart routing.
+    Removed in the next release cycle following cli-init-smart-entry-point ship.
+    """
+    print(
+        "\nℹ  'otaman onboard program-init' is deprecated.\n"
+        "   Run 'otaman init' instead — it handles all starting states.\n",
+        file=sys.stderr,
+    )
     from otaman_cli.onboard.program_init import run_program_init
     return run_program_init(args)
 
@@ -51,11 +61,14 @@ def build_onboard_parser(parser: argparse.ArgumentParser) -> None:
     p_doctor.set_defaults(func=cmd_doctor)
 
     # program-init
+    # DEPRECATED: superseded by `otaman init` (cli-init-smart-entry-point).
+    # Kept as alias for one release cycle; remove after that ship.
     p_prog = sub.add_parser(
         "program-init",
         help=(
-            "interactive program initialisation wizard — generates platform.yaml, "
-            "scaffolds companion repos, configures roles and processes"
+            "DEPRECATED — use `otaman init` instead. Interactive program "
+            "initialisation wizard — generates platform.yaml, scaffolds "
+            "companion repos, configures roles and processes"
         ),
     )
     p_prog.add_argument(

@@ -24,6 +24,7 @@ Failure recovery (task 2.3):
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -87,7 +88,9 @@ def _builtin_questions() -> list[dict[str, Any]]:
         {
             "id": "primary_repo", "step": "identity", "type": "text",
             "label": "Primary repo path (specs repo)",
-            "default": "",
+            # Single-repo default: when cmd_init detects cwd is a git repo, it
+            # sets OTAMAN_INIT_CWD_IS_GIT=1 so the wizard can suggest "." here.
+            "default": "." if os.environ.get("OTAMAN_INIT_CWD_IS_GIT") else "",
             "output_mapping": "repos[0].path",
         },
         {
