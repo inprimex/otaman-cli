@@ -3710,6 +3710,163 @@ def cmd_blocked(args: list[str], list_mode: bool = False, clear_slug: str = "") 
     return 1
 
 
+def _parse_flag_value(rest: list[str], flag: str, *, default: str | None = None) -> str | None:
+    """Consume `--flag VALUE` from *rest* (mutates), returning VALUE or default."""
+    if flag in rest:
+        i = rest.index(flag)
+        if i + 1 < len(rest):
+            value = rest[i + 1]
+            del rest[i:i + 2]
+            return value
+    return default
+
+
+def _parse_flag_list(rest: list[str], flag: str) -> list[str]:
+    """Consume all `--flag VALUE` occurrences from *rest* (mutates), returning list."""
+    values: list[str] = []
+    while flag in rest:
+        i = rest.index(flag)
+        if i + 1 < len(rest):
+            values.append(rest[i + 1])
+            del rest[i:i + 2]
+        else:
+            del rest[i:i + 1]
+            break
+    return values
+
+
+def _parse_dependencies(deps: list[str]) -> list[dict]:
+    """Parse `--depends-on KIND:VALUE` strings into typed dependency dicts.
+
+    Format:
+        outcome:JTBD-3-foo        → {kind: outcome, ref: JTBD-3-foo}
+        solution:SOL-1-bar        → {kind: solution, ref: SOL-1-bar}
+        external:Email provider   → {kind: external, name: "Email provider"}
+    """
+    out: list[dict] = []
+    for d in deps:
+        if ":" not in d:
+            UI.warn(f"Ignoring malformed --depends-on (need KIND:VALUE): {d!r}")
+            continue
+        kind, value = d.split(":", 1)
+        kind = kind.strip()
+        value = value.strip()
+        if kind in ("outcome", "solution"):
+            out.append({"kind": kind, "ref": value})
+        elif kind == "external":
+            out.append({"kind": "external", "name": value})
+        else:
+            UI.warn(f"Ignoring --depends-on with unknown kind {kind!r}: {d!r}")
+    return out
+
+
+def cmd_outcome(args: list[str]) -> int:
+    """`otaman outcome <action> [...]` — dispatches to cli_outcome.dispatch."""
+    if not args:
+        UI.error("Usage: otaman outcome <action> [options]")
+        UI.muted("Actions: add | list | show | history | promote | demote | "
+                 "retire | request-estimate | accept-cost | reject-cost")
+        return 1
+
+    action, *rest_args = args
+    rest = list(rest_args)
+    parsed: dict[str, object] = {}
+
+    # Common: positional <id> for show/history/promote/demote/retire/etc.
+    if rest and not rest[0].startswith("-"):
+        parsed["id"] = rest.pop(0)
+
+    # action-specific flags
+    parsed["as_a"] = _parse_flag_value(rest, "--as-a")
+    parsed["i_want_to"] = _parse_flag_value(rest, "--i-want-to")
+    parsed["incremental_outcome"] = _parse_flag_value(rest, "--incremental-outcome")
+    parsed["so_i_can"] = _parse_flag_value(rest, "--so-i-can")
+    parsed["ultimate_outcome"] = _parse_flag_value(rest, "--ultimate-outcome")
+    parsed["category"] = _parse_flag_value(rest, "--category")
+    parsed["persona"] = _parse_flag_value(rest, "--persona")
+    parsed["impact"] = _parse_flag_value(rest, "--impact")
+    parsed["priority"] = _parse_flag_value(rest, "--priority")
+    parsed["product_notes"] = _parse_flag_value(rest, "--product-notes")
+    parsed["release"] = _parse_flag_value(rest, "--release")
+    parsed["status"] = _parse_flag_value(rest, "--status")
+    parsed["reason"] = _parse_flag_value(rest, "--reason") or _parse_flag_value(rest, "--note")
+    parsed["solution"] = _parse_flag_value(rest, "--solution")
+    # `add` accepts an explicit --id if positional wasn't used
+    if not parsed.get("id"):
+        parsed["id"] = _parse_flag_value(rest, "--id")
+
+    if rest:
+        UI.warn(f"Unrecognised arguments ignored: {rest}")
+
+    from otaman_cli.registries import cli_outcome
+    return cli_outcome.dispatch(action, parsed)
+
+
+def cmd_solution(args: list[str]) -> int:
+    """`otaman solution <action> [...]` — dispatches to cli_solution.dispatch."""
+    if not args:
+        UI.error("Usage: otaman solution <action> [options]")
+        UI.muted("Actions: add | list | show | history | propose | "
+                 "promote-to-complete | discard")
+        return 1
+
+    action, *rest_args = args
+    rest = list(rest_args)
+    parsed: dict[str, object] = {}
+
+    if rest and not rest[0].startswith("-"):
+        parsed["id"] = rest.pop(0)
+
+    parsed["outcome"] = _parse_flag_value(rest, "--outcome")
+    parsed["description"] = _parse_flag_value(rest, "--description")
+    parsed["t_shirt"] = _parse_flag_value(rest, "--t-shirt")
+    ef = _parse_flag_value(rest, "--effort-days")
+    parsed["effort_days"] = float(ef) if ef else None
+    parsed["release"] = _parse_flag_value(rest, "--release")
+    parsed["cto_notes"] = _parse_flag_value(rest, "--cto-notes")
+    parsed["status"] = _parse_flag_value(rest, "--status")
+    parsed["reason"] = _parse_flag_value(rest, "--reason") or _parse_flag_value(rest, "--note")
+    parsed["pros"] = _parse_flag_list(rest, "--pro")
+    parsed["cons"] = _parse_flag_list(rest, "--con")
+    parsed["dependencies"] = _parse_dependencies(_parse_flag_list(rest, "--depends-on"))
+    if not parsed.get("id"):
+        parsed["id"] = _parse_flag_value(rest, "--id")
+
+    if rest:
+        UI.warn(f"Unrecognised arguments ignored: {rest}")
+
+    from otaman_cli.registries import cli_solution
+    return cli_solution.dispatch(action, parsed)
+
+
+def cmd_persona(args: list[str]) -> int:
+    """`otaman persona <action> [...]` — dispatches to cli_persona.dispatch."""
+    if not args:
+        UI.error("Usage: otaman persona <action> [options]")
+        UI.muted("Actions: add | list | show | retire")
+        return 1
+
+    action, *rest_args = args
+    rest = list(rest_args)
+    parsed: dict[str, object] = {}
+    if rest and not rest[0].startswith("-"):
+        parsed["id"] = rest.pop(0)
+    parsed["name"] = _parse_flag_value(rest, "--name")
+    parsed["description"] = _parse_flag_value(rest, "--description")
+    parsed["kind"] = _parse_flag_value(rest, "--kind")
+    parsed["domain_prefill_source"] = _parse_flag_value(rest, "--domain-prefill-source")
+    parsed["status"] = _parse_flag_value(rest, "--status")
+    parsed["reason"] = _parse_flag_value(rest, "--reason")
+    if not parsed.get("id"):
+        parsed["id"] = _parse_flag_value(rest, "--id")
+
+    if rest:
+        UI.warn(f"Unrecognised arguments ignored: {rest}")
+
+    from otaman_cli.registries import cli_persona
+    return cli_persona.dispatch(action, parsed)
+
+
 def cmd_set_agent(args: list[str]) -> int:
     """DEPRECATED: otaman set-agent no longer mutates any file.
 
@@ -4090,6 +4247,9 @@ def cmd_help() -> int:
   {C.GREEN}cleanup{C.RESET} [--dry-run]            Archive old, fully-acked bus messages
   {C.GREEN}blocked{C.RESET} --list               List blocked tasks for the current agent
   {C.GREEN}blocked{C.RESET} --clear <slug>        Remove a blocked task entry (idempotent)
+  {C.GREEN}outcome{C.RESET} <action> [...]        Program outcome registry (JTBD); actions: add, list, show, history, promote, demote, retire, request-estimate, accept-cost, reject-cost
+  {C.GREEN}solution{C.RESET} <action> [...]       Program solution registry; actions: add, list, show, history, propose, promote-to-complete, discard
+  {C.GREEN}persona{C.RESET} <action> [...]        Program persona registry; actions: add, list, show, retire
   {C.GREEN}set-agent{C.RESET} <name>              DEPRECATED — see 'otaman set-agent --help' for migration
 
 {C.BOLD}Workflow & specs:{C.RESET}
@@ -4219,6 +4379,16 @@ def main() -> int:
     command = args[0]
     rest = args[1:]
 
+    # Registry commands have rich per-action flags that the generic flag loop
+    # below would mishandle. Dispatch them BEFORE the generic loop with the
+    # raw argv intact (the cmd_* functions parse their own flags).
+    if command == "outcome":
+        return cmd_outcome(rest)
+    if command == "solution":
+        return cmd_solution(rest)
+    if command == "persona":
+        return cmd_persona(rest)
+
     # Extract flags
     fmt = "markdown"
     reviewer = "all"
@@ -4333,6 +4503,12 @@ def main() -> int:
         "models": lambda: cmd_models(rest),
         "set-agent": lambda: cmd_set_agent(positional),
         "blocked": lambda: cmd_blocked(positional, list_mode=blocked_list, clear_slug=blocked_clear),
+        # outcome/solution/persona are dispatched BEFORE this dict by the early
+        # branch in main() so flags survive the generic loop. These entries are
+        # retained for discoverability (help-coverage test scans this dict).
+        "outcome": lambda: cmd_outcome(rest),
+        "solution": lambda: cmd_solution(rest),
+        "persona": lambda: cmd_persona(rest),
         "presale": lambda: cmd_presale(positional),
         "retrospective": lambda: cmd_retrospective(positional),
         "discovery": lambda: cmd_discovery_phase(positional),
