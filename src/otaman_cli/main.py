@@ -3,7 +3,7 @@
 
 Usage:
     otaman scan [<path>] [--dry-run] [--name N] [--otaman-dir P]   Scan repos + create otaman folder
-    otaman init [<config>] [--dry-run] [--skip-doctor] [--update] [--shell]   Initialize .agents/ from platform.yaml
+    otaman init [<config>] [--dry-run] [--skip-doctor] [--update] [--shell]   Initialize an otaman project. Creates platform.yaml if none exists.
     otaman migrate [<name>]           Migrate to dedicated otaman folder
     otaman launcher <target>          Scaffold a launcher folder with connection profiles
     otaman install-cli [--apply]      Put `otaman` on PATH (symlink on POSIX, setx on Windows)
@@ -799,8 +799,104 @@ def _cmd_init_update() -> int:
     UI.kv("Skipped", str(skipped))
     return 0
 
+def _detect_sibling_git_repos(cwd: Path) -> list[Path]:
+    """Find git repos one level up from *cwd* (excluding cwd itself)."""
+    parent = cwd.parent
+    if parent == cwd:
+        return []
+    repos: list[Path] = []
+    try:
+        for child in parent.iterdir():
+            if child == cwd or not child.is_dir():
+                continue
+            if (child / ".git").exists():
+                repos.append(child)
+    except OSError:
+        return []
+    return repos
+
+
+def _init_preflight(args: list[str]) -> int | None:
+    """Detect state and route bare `otaman init` to scan or program-init wizard.
+
+    Returns:
+        - None: pre-flight skipped or passed; cmd_init should continue normally
+        - int: pre-flight handled the command; cmd_init should return this value
+    """
+    # Only pre-flight bare `otaman init` (no explicit config arg)
+    if args:
+        return None
+
+    cwd = Path.cwd()
+    if (cwd / "platform.yaml").exists():
+        return None  # normal init path will pick it up
+
+    # Non-TTY: print improved error and exit
+    if not sys.stdin.isatty():
+        UI.error("No platform.yaml found.")
+        UI.muted("Interactive setup unavailable (non-TTY). Create platform.yaml first:")
+        UI.muted("  otaman scan .                  — detect existing repos")
+        UI.muted("  otaman onboard program-init    — interactive wizard")
+        return 2
+
+    sibling_repos = _detect_sibling_git_repos(cwd)
+    cwd_is_git = (cwd / ".git").exists()
+
+    print()
+    if sibling_repos:
+        n = len(sibling_repos)
+        suffix = "" if n == 1 else "s"
+        print(f"  Found {n} git repo{suffix} in parent directory.")
+        try:
+            answer = input(f"  Scan and generate platform.yaml from them? [Y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if answer in ("", "y", "yes"):
+            return cmd_scan([str(cwd)])
+        # User declined scan; fall through to wizard prompt
+
+    print("  No platform.yaml found.")
+    try:
+        answer = input("  Start a new project with the interactive wizard? [Y/n]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return 0
+    if answer not in ("", "y", "yes"):
+        UI.muted("Run `otaman init` again when you're ready.")
+        return 0
+
+    # Build a Namespace matching the program-init parser's expectations
+    import argparse as _argparse
+    from otaman_cli.onboard.program_init import run_program_init
+    ns = _argparse.Namespace(
+        program=None,
+        questions_yaml=None,
+        mode=None,
+        dry_run=False,
+        output_dir=None,
+    )
+
+    # Pass single-repo hint to the wizard via env var (task 1.3)
+    prior_hint = os.environ.get("OTAMAN_INIT_CWD_IS_GIT")
+    if cwd_is_git:
+        os.environ["OTAMAN_INIT_CWD_IS_GIT"] = "1"
+    try:
+        return run_program_init(ns)
+    finally:
+        if prior_hint is None:
+            os.environ.pop("OTAMAN_INIT_CWD_IS_GIT", None)
+        else:
+            os.environ["OTAMAN_INIT_CWD_IS_GIT"] = prior_hint
+
+
 def cmd_init(args: list[str], dry_run: bool = False, skip_doctor: bool = False, update: bool = False, shell: bool = False) -> int:
-    """Initialize .agents/ from platform.yaml.
+    """Initialize an otaman project. Creates platform.yaml if none exists.
+
+    With no platform.yaml in cwd, detects context and routes to:
+      - `otaman scan .` if git repos are detected one level up
+      - the interactive program-init wizard otherwise
+    Non-TTY stdin skips routing and prints an instructional error.
 
     With --update: patches existing .otaman files across all platform repos
     to write the agent: <owner> field and regenerates launch commands with
@@ -816,6 +912,11 @@ def cmd_init(args: list[str], dry_run: bool = False, skip_doctor: bool = False, 
     # --update mode: patch .otaman agent: fields across all repos and exit
     if update:
         return _cmd_init_update()
+
+    # Pre-flight: smart-init routing when no platform.yaml present (task 1.1, 1.2)
+    preflight_rc = _init_preflight(args)
+    if preflight_rc is not None:
+        return preflight_rc
 
     config = args[0] if args else "platform.yaml"
     config_path = Path(config).resolve()
@@ -3969,7 +4070,7 @@ def cmd_help() -> int:
 
 {C.BOLD}Setup & maintenance:{C.RESET}
   {C.GREEN}scan{C.RESET} [path] [--otaman-dir D]    Scan repos, create otaman folder with draft config
-  {C.GREEN}init{C.RESET} [config]                 Initialize .agents/ from platform.yaml (idempotent)
+  {C.GREEN}init{C.RESET} [config]                 Initialize an otaman project. Creates platform.yaml if none exists.
   {C.GREEN}migrate{C.RESET} [name]                Migrate legacy layout to dedicated otaman folder
   {C.GREEN}clone{C.RESET} <source> [--target D]    Clone all repos from otaman config (git URL, SSH, local)
   {C.GREEN}doctor{C.RESET}                        Check environment readiness (git, runtimes, CLI, tmux, MCP)

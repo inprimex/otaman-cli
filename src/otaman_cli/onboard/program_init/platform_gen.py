@@ -103,7 +103,12 @@ def _build_platform_yaml(answers: dict[str, Any]) -> dict[str, Any]:
         "extra": extra_skills,
     }
 
-    doc["repos"] = [{"name": f"{program_name}-specs", "path": primary_repo, "owner": "spec-agent"}]
+    # Single-repo case (cwd is itself a git repo): wizard's primary_repo == ".";
+    # use a generic main-agent owner and program-name (not -specs suffix).
+    if primary_repo == ".":
+        doc["repos"] = [{"name": program_name, "path": ".", "owner": "main-agent"}]
+    else:
+        doc["repos"] = [{"name": f"{program_name}-specs", "path": primary_repo, "owner": "spec-agent"}]
 
     if companion_business:
         doc["repos"].append({
