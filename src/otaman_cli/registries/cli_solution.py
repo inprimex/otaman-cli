@@ -151,7 +151,49 @@ def cmd_add(args: dict[str, Any]) -> int:
     UI.ok(f"Added solution: {args['id']} for outcome {args['outcome']}")
     UI.muted(f"  size: {t_shirt or '-'}  effort-days: {effort_days or '-'}  status: Considering")
     UI.muted(f"File: {path}")
-    # Auto-triage integration deferred to Phase 3 (task 7.2)
+
+    # Task 7.2: auto-triage integration. Run after write when:
+    #   - the parent outcome exists and has impact set
+    #   - triage is enabled in platform.yaml (default true)
+    triage_cfg = platform.processes.outcomes.triage
+    if not triage_cfg.enabled:
+        return 0
+
+    outcome_path = resolve_registry_path(root, "outcomes")
+    if outcome_path is None or not outcome_path.is_file():
+        return 0
+    outcomes_raw = yaml_load(outcome_path) or {}
+    parent = next(
+        (o for o in outcomes_raw.get("outcomes", []) if o.get("id") == args["outcome"]),
+        None,
+    )
+    if parent is None or parent.get("impact") is None:
+        return 0  # G.3: skip when impact is unset
+
+    from otaman_cli.registries import triage as _triage
+
+    weights = dict(triage_cfg.impact_weights)
+    ranked = _triage.rank_solutions(parent, raw["solutions"], weights)
+    if not ranked:
+        return 0  # G.3: all-discarded or all missing effort
+    chosen = ranked[0]
+    alternatives_results = ranked[1:]
+    rationale = _triage.build_rationale(chosen, alternatives_results, parent)
+
+    msg = bus_messages.build_solution_recommendation(
+        outcome_id=parent["id"],
+        recommended_solution=chosen.solution_id,
+        score=round(chosen.score, 4),
+        rationale=rationale,
+        alternatives=[
+            {"id": a.solution_id, "score": round(a.score, 4),
+             "effort-days": a.effort_days}
+            for a in alternatives_results
+        ],
+        from_actor=actor,
+    )
+    _emit_bus(root, msg)
+    UI.muted(f"Triage: recommended {chosen.solution_id} (score {chosen.score:.2f})")
     return 0
 
 

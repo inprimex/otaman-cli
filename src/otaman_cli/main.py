@@ -2505,6 +2505,32 @@ def cmd_assign(args: list[str]) -> int:
         for c in created:
             UI.muted(c)
 
+    # Task 4.2: @solution:<id> annotation scan + validation against solutions.yaml
+    from otaman_cli.registries.assign_annotations import (
+        resolve_tasks_md_path,
+        scan_tasks_md,
+    )
+    tasks_md = resolve_tasks_md_path(target)
+    if tasks_md is not None:
+        findings = scan_tasks_md(tasks_md, root)
+        if findings.has_findings:
+            print()
+            UI.subheader("Solution annotations (@solution:)")
+            by_id: dict[str, list] = {}
+            for ann in findings.annotations:
+                by_id.setdefault(ann.solution_id, []).append(ann)
+            for sol_id, anns in sorted(by_id.items()):
+                marker = "✓" if sol_id in findings.valid_ids else "✗"
+                UI.bullet(f"{marker} {sol_id} — {len(anns)} task(s)")
+                if sol_id in findings.missing_ids:
+                    UI.muted(f"    not found in solutions.yaml")
+            if findings.missing_ids:
+                print()
+                UI.warn(
+                    f"{len(findings.missing_ids)} unknown solution id(s) referenced. "
+                    "Either add via `otaman solution add` or fix the annotation."
+                )
+
     return 0
 
 
