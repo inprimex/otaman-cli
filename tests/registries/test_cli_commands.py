@@ -421,6 +421,71 @@ def test_persona_invalid_kind_rejected(project: Path) -> None:
 # Role advisory warning (Mode 1: proceeds with warning)
 
 
+def test_solution_add_with_impact_emits_recommendation(project: Path) -> None:
+    """Task 7.2: when parent outcome has impact, `solution add` emits
+    a solution-recommendation bus message via auto-triage."""
+    _run(
+        project, "outcome", "add", "JTBD-1-x",
+        "--as-a", "u", "--i-want-to", "t",
+        "--incremental-outcome", "x", "--so-i-can", "y",
+        "--impact", "L",
+    )
+    rc = _run(
+        project, "solution", "add", "SOL-1-foo",
+        "--outcome", "JTBD-1-x",
+        "--description", "x",
+        "--t-shirt", "Small",  # → 3 effort-days
+    )
+    assert rc.returncode == 0, rc.stderr or rc.stdout
+    assert "Triage: recommended SOL-1-foo" in rc.stdout
+
+    msgs = _active_bus_messages(project, "solution-recommendation")
+    assert len(msgs) == 1
+    txt = msgs[0].read_text(encoding="utf-8")
+    assert "SOL-1-foo" in txt
+    assert "recommended-solution: SOL-1-foo" in txt
+    # impact L (weight 5) / effort 3 = 1.6667 → rounded 1.67
+    assert "score: 1.6667" in txt or "1.667" in txt
+
+
+def test_solution_add_without_impact_skips_triage(project: Path) -> None:
+    """G.3: outcome.impact null → no recommendation emitted."""
+    _run(
+        project, "outcome", "add", "JTBD-1-x",
+        "--as-a", "u", "--i-want-to", "t",
+        "--incremental-outcome", "x", "--so-i-can", "y",
+        # no --impact set
+    )
+    rc = _run(
+        project, "solution", "add", "SOL-1-foo",
+        "--outcome", "JTBD-1-x", "--description", "x", "--t-shirt", "Small",
+    )
+    assert rc.returncode == 0
+    msgs = _active_bus_messages(project, "solution-recommendation")
+    assert len(msgs) == 0
+
+
+def test_solution_add_recommendation_picks_cheapest(project: Path) -> None:
+    """Two candidates with different effort — triage picks cheapest."""
+    _run(
+        project, "outcome", "add", "JTBD-1-x",
+        "--as-a", "u", "--i-want-to", "t",
+        "--incremental-outcome", "x", "--so-i-can", "y",
+        "--impact", "M",
+    )
+    _run(
+        project, "solution", "add", "SOL-1-expensive",
+        "--outcome", "JTBD-1-x", "--description", "x", "--t-shirt", "Large",  # 15d
+    )
+    rc = _run(
+        project, "solution", "add", "SOL-2-cheap",
+        "--outcome", "JTBD-1-x", "--description", "y", "--t-shirt", "Small",  # 3d
+    )
+    assert rc.returncode == 0
+    # SOL-2-cheap has the higher score (3/3=1.0 vs 3/15=0.2) → recommended now
+    assert "recommended SOL-2-cheap" in rc.stdout
+
+
 def test_unauthorized_actor_emits_warning_but_proceeds(project: Path, monkeypatch) -> None:
     # role-assignments has cpo:human, but actor is "stranger" (no cpo role)
     env = {**os.environ, "OTAMAN_AGENT": "stranger"}
