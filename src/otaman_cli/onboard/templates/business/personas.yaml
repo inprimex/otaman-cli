@@ -1,0 +1,4 @@
+# Personas registry — user/role personas referenced by outcomes.
+# Authored via `otaman persona add`.
+# Schema: otaman-specs/openspec/changes/outcome-and-solution-registries/design.md Appendix C
+personas: []

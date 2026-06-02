@@ -1,0 +1,4 @@
+# Outcomes registry — JTBD-formatted business outcomes.
+# Authored by cpo-agent via `otaman outcome add`.
+# Schema: otaman-specs/openspec/changes/outcome-and-solution-registries/design.md Appendix A
+outcomes: []

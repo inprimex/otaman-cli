@@ -36,6 +36,7 @@ from otaman_cli.onboard.program_init.git_init import create_gitignore, ensure_gi
 from otaman_cli.onboard.program_init.guidance import print_guidance
 from otaman_cli.onboard.program_init.platform_gen import update_platform_yaml, write_platform_yaml
 from otaman_cli.onboard.program_init.scaffold import ScaffoldResult, compute_companion_repos, scaffold_companion_repos
+from otaman_cli.onboard.scaffold_ce import scaffold_companion_repos_ce, ScaffoldError
 
 # Default question YAML search path (relative to otaman-meta sibling checkout)
 _DEFAULT_QUESTIONS_REL = "../otaman-meta/onboarding/program-init-questions.yaml"
@@ -429,18 +430,48 @@ def run_program_init(args: argparse.Namespace) -> int:
                 _ok("Initial commit created.")
 
     # ── 7c. scaffold companion repos ─────────────────────────────────────────
+    # CE path (in-process; no bridge) — always used in Mode 1 + CE edition.
+    # EE bridge path is tried only when edition == 'ee' AND the bridge module
+    # is importable; otherwise we fall back to CE so a fresh install always
+    # produces a workable program (ce-companion-repos-scaffold).
     if companion_repos:
         _note(f"Scaffolding companion repos: {', '.join(companion_repos)} …")
         dry_run = getattr(args, "dry_run", False)
-        result: ScaffoldResult = scaffold_companion_repos(
-            program_name, companion_repos, answers, dry_run=dry_run
-        )
-        for repo in result.scaffolded:
-            _ok(f"Scaffolded {repo}")
-        for repo in result.skipped:
-            _note(f"Already exists, skipped: {repo}")
-        for err in result.errors:
-            _warn(err)
+        use_bridge = False
+        if edition == "ee":
+            try:
+                import otaman_bridge.scaffold as _bridge_scaffold  # noqa: F401
+                use_bridge = True
+            except ImportError:
+                _note("EE bridge module not available; falling back to CE scaffolder.")
+
+        if use_bridge:
+            result: ScaffoldResult = scaffold_companion_repos(
+                program_name, companion_repos, answers, dry_run=dry_run
+            )
+            for repo in result.scaffolded:
+                _ok(f"Scaffolded {repo}")
+            for repo in result.skipped:
+                _note(f"Already exists, skipped: {repo}")
+            for err in result.errors:
+                _warn(err)
+        else:
+            try:
+                ce_result = scaffold_companion_repos_ce(
+                    program_slug=program_name,
+                    processes=processes,
+                    meta_dir=specs_dir,
+                    program_name=answers.get("description") or program_name,
+                    dry_run=dry_run,
+                    repo_kinds=companion_repos,
+                )
+            except ScaffoldError as exc:
+                _error(str(exc))
+            else:
+                for repo in ce_result.created:
+                    _ok(f"Scaffolded {repo.kind} at {repo.path} (owner: {repo.owner})")
+                for repo in ce_result.skipped:
+                    _note(f"Already exists, skipped: {repo.path} — {repo.skipped_reason}")
 
     # ── 8. post-init guidance ─────────────────────────────────────────────────
     print_guidance(answers, program_name)

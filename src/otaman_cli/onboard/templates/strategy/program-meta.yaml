@@ -1,0 +1,9 @@
+# Program identity stub — strategy artifacts root.
+# Update with stakeholder details, vision statement, and links to the
+# pitch deck / business plan / GTM artifacts as they are authored.
+program:
+  slug: "{{ program_slug }}"
+  name: "{{ program_name }}"
+  description: ""
+  stakeholders: []
+  artifacts: []

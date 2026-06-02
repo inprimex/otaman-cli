@@ -1,0 +1,4 @@
+# Solutions registry — CTO-proposed candidate solutions per outcome.
+# Authored via `otaman solution add`.
+# Schema: otaman-specs/openspec/changes/outcome-and-solution-registries/design.md Appendix B
+solutions: []

@@ -1,0 +1,23 @@
+# {{ program_name }} — Strategy Repo
+
+**Owner**: `cofounder-agent`
+**Program**: `{{ program_slug }}`
+**Sibling specs repo**: `../{{ program_slug }}-specs/`
+
+This repo hosts the program's **strategy artifacts**:
+
+- `program-meta.yaml` — top-level program identity (name, description, stakeholders)
+- Pitch deck drafts, business plan, GTM, financial projections, market analyses (added over time)
+
+## Workflow
+
+Strategy artifacts are authored by the cofounder role through the `otaman strategy` /
+`otaman:cofounder-agent` flow. Specific authoring commands are added as the strategy
+process matures.
+
+## Ownership rules
+
+- This repo is owned by **`cofounder-agent`** — read/write freely
+- Other agents may read but should not write directly
+- Access is intentionally narrower than the business or specs repos — strategy
+  often contains confidential financial / market positioning
