@@ -87,7 +87,11 @@ def _builtin_questions() -> list[dict[str, Any]]:
         },
         {
             "id": "primary_repo", "step": "identity", "type": "text",
-            "label": "Primary repo path (specs repo)",
+            "label": "Path to the primary repo (where platform.yaml + .agents/ live)",
+            "help": (
+                "Filesystem path — absolute, relative to current dir, or '.' for "
+                "current dir. Examples: '.', './my-specs', '~/projects/x/x-specs'"
+            ),
             # Single-repo default: when cmd_init detects cwd is a git repo, it
             # sets OTAMAN_INIT_CWD_IS_GIT=1 so the wizard can suggest "." here.
             "default": "." if os.environ.get("OTAMAN_INIT_CWD_IS_GIT") else "",
@@ -320,9 +324,12 @@ def run_program_init(args: argparse.Namespace) -> int:
     prefill = checkpoint.answers if checkpoint else {}
     completed_steps = checkpoint.completed_steps if checkpoint else []
 
-    # We need a checkpoint name before running — ask for program_name first if unknown
+    # We need a checkpoint name before running — ask for program_name first if unknown.
+    # Inject the early answer into prefill so run_questions doesn't re-ask it
+    # (questions.py line 498: `if q_id in answers: continue`).
     if not ckpt_slug:
         ckpt_slug = _ask_program_name_early(questions)
+        prefill = {**prefill, "program_name": ckpt_slug}
 
     active_checkpoint = checkpoint or Checkpoint.new(ckpt_slug)
 
