@@ -890,6 +890,131 @@ def _init_preflight(args: list[str]) -> int | None:
             os.environ["OTAMAN_INIT_CWD_IS_GIT"] = prior_hint
 
 
+def cmd_init_companion_repos(rest: list[str]) -> int:
+    """`otaman init companion-repos` — CE-mode in-process scaffolder.
+
+    Flags:
+        --program SLUG         Program slug (default: from platform.yaml in cwd)
+        --repos KIND[,KIND]    Kinds to scaffold (business, strategy);
+                               default: derived from program.processes
+        --dry-run              Print plan; no filesystem writes
+        --force                Re-scaffold even if target exists (with confirmation)
+    """
+    from otaman_cli.identity import find_project_root
+    from otaman_cli.onboard.scaffold_ce import (
+        ScaffoldError,
+        scaffold_companion_repos_ce,
+    )
+
+    # Parse flags from the raw rest
+    program = None
+    repos_arg: str | None = None
+    dry_run = False
+    force = False
+    i = 0
+    while i < len(rest):
+        token = rest[i]
+        if token == "--program" and i + 1 < len(rest):
+            program = rest[i + 1]; i += 2
+        elif token == "--repos" and i + 1 < len(rest):
+            repos_arg = rest[i + 1]; i += 2
+        elif token in ("--dry-run", "--check"):
+            dry_run = True; i += 1
+        elif token == "--force":
+            force = True; i += 1
+        else:
+            i += 1
+
+    # Locate the meta dir (where platform.yaml lives)
+    root = find_project_root()
+    if root is None:
+        UI.error("No platform.yaml found in cwd or any ancestor.")
+        UI.muted("Run `otaman init` first to create the program.")
+        return 2
+    platform_yaml = root / "platform.yaml"
+    if not platform_yaml.is_file():
+        UI.error(f"platform.yaml not found at {platform_yaml}")
+        return 2
+
+    # Read program slug + processes from platform.yaml when --program not given
+    try:
+        import yaml as _yaml
+        config = _yaml.safe_load(platform_yaml.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        UI.error(f"Failed to read platform.yaml: {exc}")
+        return 2
+
+    if program is None:
+        program = config.get("project") or config.get("program", {}).get("slug")
+        if not program:
+            UI.error("Could not infer program slug from platform.yaml.")
+            UI.muted("Pass --program SLUG explicitly.")
+            return 2
+
+    # Derive repo kinds: explicit --repos > processes-based default
+    repo_kinds: list[str] | None = None
+    if repos_arg:
+        repo_kinds = [r.strip() for r in repos_arg.split(",") if r.strip()]
+        if repo_kinds == ["all"]:
+            repo_kinds = ["business", "strategy"]
+
+    processes_raw = config.get("processes") or {}
+    if isinstance(processes_raw, dict):
+        processes = [k for k, v in processes_raw.items() if v]
+    elif isinstance(processes_raw, list):
+        processes = list(processes_raw)
+    else:
+        processes = []
+
+    program_name = (
+        config.get("description")
+        or config.get("project")
+        or program
+    )
+
+    # --force prompt (skipped on non-TTY or --dry-run)
+    if force and not dry_run and sys.stdin.isatty():
+        UI.warn(f"--force will REMOVE existing companion repo directories for {program}.")
+        try:
+            answer = input("  Continue? [y/N]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = "n"
+        if answer not in ("y", "yes"):
+            UI.muted("Aborted.")
+            return 0
+
+    UI.header("Scaffold companion repos" + (" (dry-run)" if dry_run else ""))
+    try:
+        result = scaffold_companion_repos_ce(
+            program_slug=program,
+            processes=processes,
+            meta_dir=root,
+            program_name=program_name,
+            force=force,
+            dry_run=dry_run,
+            repo_kinds=repo_kinds,
+        )
+    except ScaffoldError as exc:
+        UI.error(str(exc))
+        return 1
+
+    if not result.repos:
+        UI.muted("No companion repos to scaffold (no qualifying processes enabled).")
+        return 0
+
+    for repo in result.created:
+        marker = "would create" if dry_run else "Scaffolded"
+        UI.ok(f"{marker} {repo.kind} at {repo.path} (owner: {repo.owner})")
+    for repo in result.skipped:
+        UI.muted(f"Skipped {repo.path} — {repo.skipped_reason}")
+
+    if dry_run:
+        UI.muted("Dry-run: no files written. Re-run without --dry-run to apply.")
+    elif result.platform_yaml_updated:
+        UI.ok("platform.yaml repos[] updated")
+    return 0
+
+
 def cmd_init(args: list[str], dry_run: bool = False, skip_doctor: bool = False, update: bool = False, shell: bool = False) -> int:
     """Initialize an otaman project. Creates platform.yaml if none exists.
 
@@ -4254,6 +4379,7 @@ def cmd_help() -> int:
 {C.BOLD}Setup & maintenance:{C.RESET}
   {C.GREEN}scan{C.RESET} [path] [--otaman-dir D]    Scan repos, create otaman folder with draft config
   {C.GREEN}init{C.RESET} [config]                 Initialize an otaman project. Creates platform.yaml if none exists.
+  {C.GREEN}init companion-repos{C.RESET} [opts]     Scaffold business/strategy companion repos (CE local; no bridge)
   {C.GREEN}migrate{C.RESET} [name]                Migrate legacy layout to dedicated otaman folder
   {C.GREEN}clone{C.RESET} <source> [--target D]    Clone all repos from otaman config (git URL, SSH, local)
   {C.GREEN}doctor{C.RESET}                        Check environment readiness (git, runtimes, CLI, tmux, MCP)
@@ -4414,6 +4540,12 @@ def main() -> int:
         return cmd_solution(rest)
     if command == "persona":
         return cmd_persona(rest)
+
+    # `otaman init companion-repos` — sub-action with its own flags
+    # (--program / --repos / --dry-run / --force).  Dispatch raw before the
+    # generic flag loop, same reason as the registry commands above.
+    if command == "init" and rest and rest[0] == "companion-repos":
+        return cmd_init_companion_repos(rest[1:])
 
     # Extract flags
     fmt = "markdown"

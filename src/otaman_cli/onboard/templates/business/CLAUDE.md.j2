@@ -1,0 +1,30 @@
+# {{ program_name }} — Business Repo
+
+**Owner**: `cpo-agent`
+**Program**: `{{ program_slug }}`
+**Sibling specs repo**: `../{{ program_slug }}-specs/`
+
+This repo hosts the program's **business-layer registries**:
+
+| File | Purpose | Owner |
+|---|---|---|
+| `outcomes.yaml` | JTBD-formatted business outcomes (CPO/CEO authority) | cpo-agent |
+| `solutions.yaml` | CTO-proposed candidate solutions per outcome | cto-agent |
+| `personas.yaml` | User/role personas referenced by outcomes | cpo-agent |
+
+## Workflow
+
+1. **Author outcomes**: `otaman outcome add JTBD-N-slug --as-a … --i-want-to … --so-i-can …`
+2. **Promote to backlog**: `otaman outcome promote JTBD-N-slug`
+3. **Request CTO estimate**: `otaman outcome request-estimate JTBD-N-slug`
+4. **CTO proposes solutions**: `otaman solution add SOL-N-slug --outcome JTBD-N-slug --description … --t-shirt …`
+5. **CEO accepts cost**: `otaman outcome accept-cost JTBD-N-slug --solution SOL-N-slug`
+
+See the parent specs repo for the full process model.
+
+## Ownership rules
+
+- This repo is owned by **`cpo-agent`** — read/write freely
+- Other agents may read but should not write directly
+- All status mutations go through the `otaman outcome`/`solution`/`persona` CLI commands
+- The CLI maintains the `transitions[]` audit trail; do not hand-edit it

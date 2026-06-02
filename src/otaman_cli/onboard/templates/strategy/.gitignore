@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Confidential drafts (untracked by default; commit explicitly when ready)
+*.draft.md
+*.draft.yaml
+
+# Otaman runtime state
+.otaman/sessions/
+.otaman/last-user-activity
