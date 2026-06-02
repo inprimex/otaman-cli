@@ -288,10 +288,16 @@ def _ask_checkbox(q: dict[str, Any], answers: dict[str, Any]) -> list[str]:
     options = _resolve_options(q, answers)
     defaults = q.get("default") or []
     if _Q_AVAILABLE:
+        # questionary 2.x: pre-select via Choice(..., checked=True), not default=[list].
+        # `default` is now a SINGLE value used for initial focus only.
+        choices = [
+            questionary.Choice(opt, checked=(opt in defaults)) for opt in options
+        ]
+        focus_default = defaults[0] if defaults and defaults[0] in options else None
         result = questionary.checkbox(
             q["label"],
-            choices=options,
-            default=defaults,
+            choices=choices,
+            default=focus_default,
             instruction=q.get("help") or "(space to toggle, enter to confirm)",
         ).ask()
         return result or []
