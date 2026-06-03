@@ -134,14 +134,18 @@ def _build_platform_yaml(answers: dict[str, Any]) -> dict[str, Any]:
         }
 
     # program-init-claude-profile: optional claude.config_dir under program.
-    # Empty answer → field omitted entirely (launcher falls back to env / default).
-    claude_config_dir = (answers.get("claude_config_dir") or "").strip()
-    if claude_config_dir:
-        program_block = doc.setdefault("program", {})
-        if not isinstance(program_block, dict):
-            program_block = {}
-            doc["program"] = program_block
-        program_block.setdefault("claude", {})["config_dir"] = claude_config_dir
+    # NOTE: platform-schema.yaml in otaman-core does not yet accept a
+    # top-level `program:` block. Writing it here breaks `otaman init`
+    # validation. Waiting on core-agent to extend the schema; once they do,
+    # restore the original write logic. For now: collect the answer (so the
+    # wizard prompt isn't lost UX), but do not emit the field — launcher
+    # falls back to $CLAUDE_CONFIG_DIR / ~/.claude as before.
+    # Once schema supports `program:` top-level, restore:
+    #     claude_config_dir = (answers.get("claude_config_dir") or "").strip()
+    #     if claude_config_dir:
+    #         program_block = doc.setdefault("program", {})
+    #         ...
+    pass  # noqa: schema-gated
 
     return doc
 
