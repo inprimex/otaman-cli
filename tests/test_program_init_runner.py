@@ -54,6 +54,7 @@ class TestRunnerEndToEnd:
             "test-app",        # program_name
             "Test application",  # description
             str(tmp_path / "test-app" / "test-app-specs"),  # primary_repo
+            "",                # claude_config_dir (optional; blank = absent)
             "",                # domains (blank = defaults)
             "",                # roles
             "",                # processes
@@ -186,6 +187,7 @@ class TestStrategyOptIn:
             "strat-app",          # program_name
             "Strategy test",      # description
             str(tmp_path / "strat-app" / "strat-app-specs"),  # primary_repo
+            "",                   # claude_config_dir (optional; blank = absent)
             "",                   # domains
             "5",                  # roles → cofounder (5th option in list: CEO CPO CTO BA cofounder)
             "",                   # role_cofounder (blank)

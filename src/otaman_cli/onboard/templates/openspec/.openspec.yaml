@@ -1,0 +1,5 @@
+# OpenSpec configuration — bootstrap by `otaman scan` (no OpenSpec detected).
+# Customize as needed; full reference at https://github.com/openspec/openspec
+version: "1"
+metadata:
+  spec_layout: openspec
