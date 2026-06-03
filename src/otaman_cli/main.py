@@ -2687,6 +2687,37 @@ def cmd_assign(args: list[str]) -> int:
                     "Either add via `otaman solution add` or fix the annotation."
                 )
 
+        # Task 3.1 (auto-session-spawn): mode annotations [headless]/[interactive]
+        # in task lines. Report counts in the assign summary so the user can
+        # eyeball how many tasks the spawn-decision component will pick up
+        # vs. how many still need explicit annotation.
+        try:
+            from otaman_cli.hitl.mode_annotations import (
+                ModeAnnotationError,
+                ModeSummary,
+                scan_tasks_md as _mode_scan,
+            )
+            try:
+                _mode_result = _mode_scan(tasks_md)
+            except ModeAnnotationError as exc:
+                print()
+                UI.error(f"Mode annotation error in tasks.md: {exc}")
+                return 1
+            if _mode_result is not None:
+                _tasks_mode, _summary = _mode_result
+                if _summary.headless or _summary.explicit_count or _summary.default_count:
+                    print()
+                    UI.subheader("Task modes ([headless] / [interactive])")
+                    UI.bullet(f"[headless]     {_summary.headless} task(s)")
+                    UI.bullet(f"[interactive]  {_summary.interactive} task(s)")
+                    if _summary.default_count:
+                        UI.muted(
+                            f"  ({_summary.default_count} defaulted to [interactive] "
+                            "— add explicit annotations to silence)"
+                        )
+        except Exception as _mode_exc:
+            UI.warn(f"Mode annotation scan skipped: {_mode_exc}")
+
     return 0
 
 
@@ -3942,6 +3973,23 @@ def _parse_dependencies(deps: list[str]) -> list[dict]:
     return out
 
 
+def cmd_hitl(args: list[str]) -> int:
+    """`otaman hitl <action> [...]` — HITL stack (request-human-review / human-decision)."""
+    if not args:
+        UI.error("Usage: otaman hitl <action> [options]")
+        UI.muted("Actions: list | next | take <id>")
+        return 1
+    action, *rest_args = args
+    rest = list(rest_args)
+    parsed: dict[str, object] = {}
+    if rest and not rest[0].startswith("-"):
+        parsed["id"] = rest.pop(0)
+    if rest:
+        UI.warn(f"Unrecognised arguments ignored: {rest}")
+    from otaman_cli.hitl import commands as _hitl
+    return _hitl.dispatch(action, parsed)
+
+
 def cmd_outcome(args: list[str]) -> int:
     """`otaman outcome <action> [...]` — dispatches to cli_outcome.dispatch."""
     if not args:
@@ -4430,6 +4478,7 @@ def cmd_help() -> int:
   {C.GREEN}cleanup{C.RESET} [--dry-run]            Archive old, fully-acked bus messages
   {C.GREEN}blocked{C.RESET} --list               List blocked tasks for the current agent
   {C.GREEN}blocked{C.RESET} --clear <slug>        Remove a blocked task entry (idempotent)
+  {C.GREEN}hitl{C.RESET} <action> [...]           HITL stack: list pending review requests, next, take <id>
   {C.GREEN}outcome{C.RESET} <action> [...]        Program outcome registry (JTBD); actions: add, list, show, history, promote, demote, retire, request-estimate, accept-cost, reject-cost
   {C.GREEN}solution{C.RESET} <action> [...]       Program solution registry; actions: add, list, show, history, propose, promote-to-complete, discard
   {C.GREEN}persona{C.RESET} <action> [...]        Program persona registry; actions: add, list, show, retire
@@ -4578,6 +4627,10 @@ def main() -> int:
     if command == "init" and rest and rest[0] == "companion-repos":
         return cmd_init_companion_repos(rest[1:])
 
+    # `otaman hitl <action>` — human-in-the-loop stack (auto-session-spawn §3).
+    if command == "hitl":
+        return cmd_hitl(rest)
+
     # Extract flags
     fmt = "markdown"
     reviewer = "all"
@@ -4695,6 +4748,7 @@ def main() -> int:
         # outcome/solution/persona are dispatched BEFORE this dict by the early
         # branch in main() so flags survive the generic loop. These entries are
         # retained for discoverability (help-coverage test scans this dict).
+        "hitl": lambda: cmd_hitl(rest),
         "outcome": lambda: cmd_outcome(rest),
         "solution": lambda: cmd_solution(rest),
         "persona": lambda: cmd_persona(rest),
