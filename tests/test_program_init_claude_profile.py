@@ -77,19 +77,50 @@ def test_whitespace_only_claude_config_dir_omits_field():
     assert "claude" not in program
 
 
-def test_populated_claude_config_dir_held_until_schema_supports_program_block():
-    """platform-schema.yaml in otaman-core doesn't yet accept a top-level
-    `program:` block. Until core-agent extends the schema, the wizard
-    still ASKS the question (so the UX/prompts are stable for users), but
-    `_build_platform_yaml` does NOT emit the field — that would fail
-    `otaman init` validation. When core-agent ships the schema extension,
-    the write path is restored and this test gets re-enabled to verify
-    `doc["program"]["claude"]["config_dir"] == "~/.claude-myprog"`."""
-    from otaman_cli.onboard.program_init.platform_gen import _build_platform_yaml
+def test_populated_claude_config_dir_emitted_as_comment_block(tmp_path):
+    """While platform-schema.yaml in otaman-core lacks a top-level `program:`
+    key, the wizard preserves the user's CLAUDE_CONFIG_DIR answer as a
+    COMMENTED YAML block in the generated platform.yaml — visible to users,
+    ignored by the validator. Once core-agent extends the schema, this
+    flips to a live YAML key."""
+    from otaman_cli.onboard.program_init.platform_gen import (
+        _build_platform_yaml,
+        _claude_config_dir_comment_block,
+        write_platform_yaml,
+    )
 
+    # _build_platform_yaml still doesn't add the live key (schema-gated)
     doc = _build_platform_yaml(_base_answers(claude_config_dir="~/.claude-myprog"))
-    # Field is intentionally NOT emitted while schema is gating
     assert "program" not in doc
+
+    # ... but write_platform_yaml appends a commented block to the output file
+    output_path = tmp_path / "platform.yaml"
+    write_platform_yaml(_base_answers(claude_config_dir="~/.claude-myprog"), output_path)
+    raw = output_path.read_text(encoding="utf-8")
+    assert "# program:" in raw
+    assert "~/.claude-myprog" in raw
+    assert "schema-gated" in raw
+
+    # And the parsed YAML still has no `program:` key — validator-safe
+    import yaml as _y
+    parsed = _y.safe_load(raw)
+    assert "program" not in parsed
+
+
+def test_claude_config_dir_comment_block_helper_empty_answer():
+    """Helper returns empty string for empty/whitespace answers."""
+    from otaman_cli.onboard.program_init.platform_gen import _claude_config_dir_comment_block
+    assert _claude_config_dir_comment_block({}) == ""
+    assert _claude_config_dir_comment_block({"claude_config_dir": ""}) == ""
+    assert _claude_config_dir_comment_block({"claude_config_dir": "   "}) == ""
+
+
+def test_claude_config_dir_comment_block_helper_populated():
+    from otaman_cli.onboard.program_init.platform_gen import _claude_config_dir_comment_block
+    out = _claude_config_dir_comment_block({"claude_config_dir": "~/.claude-x"})
+    assert "# program:" in out
+    assert "~/.claude-x" in out
+    assert "# config_dir" in out or "config_dir:" in out
 
 
 # ---------------------------------------------------------------------------

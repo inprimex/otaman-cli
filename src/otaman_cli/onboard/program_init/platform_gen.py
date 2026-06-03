@@ -41,6 +41,31 @@ def _make_ruamel() -> Any:
 
 # --------------------------------------------------------------------------- builders
 
+def _claude_config_dir_comment_block(answers: dict[str, Any]) -> str:
+    """Build the YAML comment block that surfaces `program.claude.config_dir`.
+
+    Returns an empty string when the wizard answer was empty/whitespace.
+    Otherwise returns a multi-line comment block ready to append to the
+    generated platform.yaml. The block is gated by schema support and
+    becomes a live YAML key once core-agent extends platform-schema.yaml.
+    """
+    value = (answers.get("claude_config_dir") or "").strip()
+    if not value:
+        return ""
+    return (
+        "\n"
+        "# program:                          # ── uncomment after otaman-core schema extension\n"
+        "#   claude:\n"
+        f"#     config_dir: {value!r}\n"
+        "# ──────────────────────────────────────────────────────────────────────────────\n"
+        "# Status: schema-gated. `program.claude.config_dir` preserves the\n"
+        "# user's CLAUDE_CONFIG_DIR profile so the first session reuses an\n"
+        "# existing OAuth login. Pick-up by launch_resolve.py is already wired;\n"
+        "# just uncomment the block above once otaman-core accepts a top-level\n"
+        "# `program:` key (tracked: cli-agent → core-agent 20260603T103644).\n"
+    )
+
+
 def _build_platform_yaml(answers: dict[str, Any]) -> dict[str, Any]:
     """Convert the answers dict into a conforming platform.yaml structure.
 
@@ -133,19 +158,14 @@ def _build_platform_yaml(answers: dict[str, Any]) -> dict[str, Any]:
             "organisation": answers.get("organisation_name", ""),
         }
 
-    # program-init-claude-profile: optional claude.config_dir under program.
-    # NOTE: platform-schema.yaml in otaman-core does not yet accept a
-    # top-level `program:` block. Writing it here breaks `otaman init`
-    # validation. Waiting on core-agent to extend the schema; once they do,
-    # restore the original write logic. For now: collect the answer (so the
-    # wizard prompt isn't lost UX), but do not emit the field — launcher
-    # falls back to $CLAUDE_CONFIG_DIR / ~/.claude as before.
-    # Once schema supports `program:` top-level, restore:
-    #     claude_config_dir = (answers.get("claude_config_dir") or "").strip()
-    #     if claude_config_dir:
-    #         program_block = doc.setdefault("program", {})
-    #         ...
-    pass  # noqa: schema-gated
+    # program-init-claude-profile: schema-gated.  When the wizard answer
+    # is non-empty, we surface the path as a COMMENTED YAML block in the
+    # generated platform.yaml (visible to the user; ignored by the
+    # validator).  Once core-agent extends `platform-schema.yaml` to accept
+    # a top-level `program:` key, switch back to the active form:
+    #     program_block = doc.setdefault("program", {})
+    #     program_block.setdefault("claude", {})["config_dir"] = value
+    # See cli-agent → core-agent message 20260603T103644.
 
     return doc
 
@@ -173,7 +193,10 @@ def write_platform_yaml(answers: dict[str, Any], output_path: Path) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     buf = io.StringIO()
     yaml.dump(root, buf)
-    output_path.write_text(buf.getvalue(), encoding="utf-8")
+    output_text = buf.getvalue()
+    # Append schema-gated comment block when claude_config_dir is non-empty
+    output_text += _claude_config_dir_comment_block(answers)
+    output_path.write_text(output_text, encoding="utf-8")
     return output_path
 
 
@@ -202,6 +225,7 @@ def update_platform_yaml(answers: dict[str, Any], existing_path: Path) -> Path:
 
     out_buf = io.StringIO()
     yaml.dump(existing_doc, out_buf)
+    out_buf.write(_claude_config_dir_comment_block(answers))
     existing_path.write_text(out_buf.getvalue(), encoding="utf-8")
     return existing_path
 

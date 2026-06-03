@@ -152,10 +152,10 @@ def test_scaffold_openspec_returns_existing_path_idempotently(tmp_path: Path):
 # update_draft
 
 
-def test_update_draft_adds_specs_repo_but_skips_launcher_until_schema_ready(tmp_path: Path):
-    """Schema in otaman-core doesn't yet accept top-level `launcher:`. Until
-    core-agent extends it, post_scan must NOT emit the block (would fail
-    `otaman init` validation). The detection path stays for diagnostics."""
+def test_update_draft_adds_specs_repo_and_launcher_comment_block(tmp_path: Path):
+    """Launcher is emitted as a COMMENTED YAML block (schema-gated, visible
+    in raw text, invisible to the YAML parser/validator). When core-agent
+    extends platform-schema.yaml, this flips to a real YAML key."""
     draft = tmp_path / "platform.yaml.draft"
     _write_draft(draft)
     update_draft(
@@ -164,13 +164,17 @@ def test_update_draft_adds_specs_repo_but_skips_launcher_until_schema_ready(tmp_
             "name": "myprog-specs", "path": "../myprog-specs",
             "owner": "spec-agent", "description": "specs",
         },
-        add_launcher=True,  # caller still requests it
+        add_launcher=True,
     )
-    doc = _pyyaml.safe_load(draft.read_text(encoding="utf-8"))
+    raw = draft.read_text(encoding="utf-8")
+    doc = _pyyaml.safe_load(raw)
     names = [r["name"] for r in doc["repos"]]
     assert "myprog-specs" in names
-    # Launcher block NOT emitted — schema-gated
+    # Real YAML key NOT present (would break validator until schema lands)
     assert "launcher" not in doc
+    # But the placeholder IS visible to humans reading the draft
+    assert "# launcher:" in raw
+    assert "# Status: schema-gated" in raw
     assert doc["specs"]["path"] == "../myprog-specs"
 
 
@@ -201,7 +205,7 @@ def test_update_draft_does_not_duplicate_specs_repo(tmp_path: Path):
 # run() — non-TTY path
 
 
-def test_run_non_tty_skips_scaffolding_and_holds_launcher_for_schema(tmp_path: Path):
+def test_run_non_tty_emits_launcher_comment_skips_scaffolding(tmp_path: Path):
     scan_root = tmp_path
     otaman_dir = scan_root / "myprog-otaman"
     otaman_dir.mkdir()
@@ -214,11 +218,14 @@ def test_run_non_tty_skips_scaffolding_and_holds_launcher_for_schema(tmp_path: P
     # No prompts, no scaffolding
     assert result.specs_repo_created is None
     assert result.openspec_scaffolded is None
-    # Launcher emission is currently schema-gated (see update_draft note);
-    # the gap is detected but the block is NOT written.
-    assert result.launcher_block_added is False
-    doc = _pyyaml.safe_load(draft.read_text(encoding="utf-8"))
-    assert "launcher" not in doc
+    # Launcher is emitted as a YAML COMMENT block (schema-gated). The
+    # parsed doc still doesn't have a `launcher:` key (validator-safe), but
+    # the raw text shows the placeholder for the user to review.
+    assert result.launcher_block_added is True
+    raw = draft.read_text(encoding="utf-8")
+    doc = _pyyaml.safe_load(raw)
+    assert "launcher" not in doc            # real YAML key absent
+    assert "# launcher:" in raw              # comment placeholder present
     # And the skip reasons are recorded
     assert any("non-TTY" in s for s in result.skipped)
 
@@ -291,13 +298,15 @@ def test_run_interactive_scaffolds_specs_and_openspec(tmp_path: Path, monkeypatc
     assert (scan_root / "myprog-specs" / "CLAUDE.md").is_file()
     assert result.openspec_scaffolded == scan_root / "myprog-specs" / "openspec"
     assert (scan_root / "myprog-specs" / "openspec" / ".openspec.yaml").is_file()
-    # Launcher is schema-gated — not emitted yet
-    assert result.launcher_block_added is False
+    # Launcher emitted as comment block — flag flips to True
+    assert result.launcher_block_added is True
 
-    doc = _pyyaml.safe_load(draft.read_text(encoding="utf-8"))
+    raw = draft.read_text(encoding="utf-8")
+    doc = _pyyaml.safe_load(raw)
     assert any(r["name"] == "myprog-specs" for r in doc["repos"])
     assert doc["specs"]["format"] == "openspec"
-    assert "launcher" not in doc
+    assert "launcher" not in doc       # not a live YAML key
+    assert "# launcher:" in raw         # comment placeholder is there
 
 
 def test_run_interactive_user_declines_specs(tmp_path: Path, monkeypatch):
@@ -314,5 +323,5 @@ def test_run_interactive_user_declines_specs(tmp_path: Path, monkeypatch):
     )
     assert result.specs_repo_created is None
     assert any("declined" in s for s in result.skipped)
-    # Launcher schema-gated — not added even though gap is detected
-    assert result.launcher_block_added is False
+    # Launcher comment block emitted regardless of specs choice
+    assert result.launcher_block_added is True
