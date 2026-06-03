@@ -559,6 +559,37 @@ def cmd_scan(args: list[str], update: bool = False, maestro_dir: str | None = No
             UI.muted(f"[dry-run] would write draft config to: {draft}")
             UI.muted("Re-run without --dry-run to apply.")
         elif draft:
+            # otaman-scan-ux-hardening (2026-06-03): post-process the draft to
+            # fill the gaps discover-repos can't address on its own — missing
+            # specs repo, missing launcher block, no OpenSpec scaffold.
+            try:
+                from otaman_cli.onboard.post_scan import run as _post_scan_run
+                draft_path = Path(draft)
+                m_dir_str = report.get("maestro_dir", "")
+                otaman_dir_for_post = Path(m_dir_str) if m_dir_str else draft_path.parent
+                program_slug_for_post = (
+                    otaman_dir_for_post.name.removesuffix("-otaman").removesuffix("-maestro")
+                    or resolved.name
+                )
+                _ps_result = _post_scan_run(
+                    draft_path=draft_path,
+                    scan_root=resolved,
+                    otaman_dir=otaman_dir_for_post,
+                    program_slug=program_slug_for_post,
+                )
+                if _ps_result.specs_repo_created:
+                    UI.ok(f"Created specs repo: {_ps_result.specs_repo_created}")
+                if _ps_result.specs_repo_lifted:
+                    UI.ok(f"Lifted existing specs repo: {_ps_result.specs_repo_lifted}")
+                if _ps_result.openspec_scaffolded:
+                    UI.ok(f"Scaffolded OpenSpec: {_ps_result.openspec_scaffolded}")
+                if _ps_result.launcher_block_added:
+                    UI.ok("Added launcher block to platform.yaml.draft (review and customise)")
+                for s in _ps_result.skipped:
+                    UI.muted(f"  skipped: {s}")
+            except Exception as _post_exc:
+                UI.warn(f"Post-scan UX hardening skipped: {_post_exc}")
+
             UI.ok(f"Draft config written to: {draft}")
             m_dir = report.get("maestro_dir", "")
             if m_dir:
@@ -835,8 +866,8 @@ def _init_preflight(args: list[str]) -> int | None:
     if not sys.stdin.isatty():
         UI.error("No platform.yaml found.")
         UI.muted("Interactive setup unavailable (non-TTY). Create platform.yaml first:")
-        UI.muted("  otaman scan .                  — detect existing repos")
-        UI.muted("  otaman onboard program-init    — interactive wizard")
+        UI.muted("  otaman scan .                  — detect existing repos + draft config")
+        UI.muted("  otaman init                    — interactive wizard (run from a TTY)")
         return 2
 
     sibling_repos = _detect_sibling_git_repos(cwd)

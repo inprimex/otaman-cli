@@ -1,0 +1,25 @@
+# {{ program_name }} — Specs Repo
+
+**Owner**: `spec-agent`
+**Program**: `{{ program_slug }}`
+**Sibling meta repo**: `../{{ program_slug }}-otaman/`
+
+This repo hosts the program's **technical specifications**:
+
+- `openspec/` — OpenSpec-format capability specs, change proposals, ADRs (when enabled)
+- Capability specs as the source of truth for what the platform delivers
+- Change proposals authored here by `spec-agent` after `/otaman:propose` approval
+
+## Workflow
+
+- **Agents propose changes**: any agent runs `/otaman:propose` → spec-change-request lands on the bus
+- **Human approves**: `/otaman:approve` → spec-agent authors the artifacts in this repo
+- **Tasks dispatched**: `otaman assign <change>` maps tasks to repo owners; assignees implement in their own repos
+
+This repo is intentionally narrow — it holds specs, not code. Implementation lives in the code repos referenced by `platform.yaml repos[]`.
+
+## Ownership rules
+
+- This repo is owned by **`spec-agent`** — read/write freely
+- Other agents may read but should not write spec artifacts directly
+- All spec authoring goes through the propose → approve → spec-author flow
