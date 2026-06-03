@@ -847,6 +847,26 @@ def _detect_sibling_git_repos(cwd: Path) -> list[Path]:
     return repos
 
 
+def _detect_scan_draft(cwd: Path) -> list[Path]:
+    """Find ``<subdir>/platform.yaml.draft`` files directly under *cwd*.
+
+    Returned paths point at the draft file itself (not the parent dir).
+    Drafts are produced by ``otaman scan`` and live in the
+    ``<program>-otaman/`` subdir by convention.
+    """
+    drafts: list[Path] = []
+    try:
+        for child in cwd.iterdir():
+            if not child.is_dir():
+                continue
+            candidate = child / "platform.yaml.draft"
+            if candidate.is_file():
+                drafts.append(candidate)
+    except OSError:
+        return []
+    return drafts
+
+
 def _init_preflight(args: list[str]) -> int | None:
     """Detect state and route bare `otaman init` to scan or program-init wizard.
 
@@ -862,12 +882,50 @@ def _init_preflight(args: list[str]) -> int | None:
     if (cwd / "platform.yaml").exists():
         return None  # normal init path will pick it up
 
+    # Smart pickup: an `otaman scan` left a draft in <subdir>/platform.yaml.draft.
+    # Recognise it so the user doesn't have to manually `mv` before re-running.
+    drafts = _detect_scan_draft(cwd)
+    if len(drafts) == 1 and sys.stdin.isatty():
+        draft_path = drafts[0]
+        rel = draft_path.relative_to(cwd)
+        print()
+        print(f"  Found scan draft: ./{rel}")
+        try:
+            answer = input("  Promote to platform.yaml and finalize init? [Y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if answer in ("", "y", "yes"):
+            target = draft_path.with_name("platform.yaml")
+            if target.exists():
+                UI.error(f"{target} already exists; refusing to overwrite.")
+                UI.muted("Resolve manually or delete the existing file and re-run.")
+                return 1
+            draft_path.rename(target)
+            UI.ok(f"Promoted draft → {target}")
+            return cmd_init([str(target)])
+        # else: user declined; fall through to existing options
+    elif len(drafts) > 1 and sys.stdin.isatty():
+        # Multiple drafts — don't auto-pick. Surface them for the user.
+        print()
+        UI.warn(f"Found {len(drafts)} scan drafts; not sure which to use:")
+        for d in drafts:
+            UI.muted(f"  {d.relative_to(cwd)}")
+        UI.muted("Run `otaman init <path-to-draft>` explicitly, or move one of ")
+        UI.muted("them to ./platform.yaml first.")
+
     # Non-TTY: print improved error and exit
     if not sys.stdin.isatty():
         UI.error("No platform.yaml found.")
         UI.muted("Interactive setup unavailable (non-TTY). Create platform.yaml first:")
         UI.muted("  otaman scan .                  — detect existing repos + draft config")
         UI.muted("  otaman init                    — interactive wizard (run from a TTY)")
+        if drafts:
+            UI.muted("")
+            UI.muted(f"  Existing scan draft(s) found:")
+            for d in drafts:
+                UI.muted(f"    {d.relative_to(cwd)}")
+            UI.muted("  Finalize one with: mv <draft> <draft-dir>/platform.yaml")
         return 2
 
     sibling_repos = _detect_sibling_git_repos(cwd)
