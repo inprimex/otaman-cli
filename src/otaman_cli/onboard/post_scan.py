@@ -41,6 +41,26 @@ _YAML.indent(mapping=2, sequence=4, offset=2)
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
+# Launcher placeholder emitted as a YAML comment block. The schema in
+# otaman-core doesn't yet accept a top-level `launcher:` key, so we ship
+# this as documentation rather than active config until that extension
+# lands. Tracked: cli-agent → core-agent message 20260603T103644.
+_LAUNCHER_COMMENT_BLOCK = '''
+# launcher:                       # ── uncomment after otaman-core schema extension
+#   local:
+#     enabled: true               # default; local-mode launches use this
+#   ssh:
+#     enabled: false              # flip to true and fill in host + repo_path
+#     host: user@host.example.com
+#     repo_path: /path/on/remote
+# ──────────────────────────────────────────────────────────────────────────────
+# Status: schema-gated. Once `platform-schema.yaml` in otaman-core accepts
+# a top-level `launcher:` block, uncomment the lines above and re-run
+# `otaman init` — the launcher CLI plumbing (launch_resolve.py + accounts.py)
+# is already wired up and will pick it up automatically.
+'''
+
+
 @dataclass
 class PostScanGaps:
     """Result of `analyze_draft` — which UX gaps the draft has."""
@@ -302,13 +322,17 @@ def update_draft(
         # set_specs_format_openspec can override below)
         doc.setdefault("specs", {})["path"] = add_specs_repo["path"]
 
-    if add_launcher and "launcher" not in doc:
-        # NOTE: platform-schema.yaml in otaman-core does not yet accept a
-        # top-level `launcher:` block. Emitting it here would fail the
-        # validator at `otaman init` time (see Roman's 2026-06-03 repro).
-        # Waiting on core-agent to extend the schema; once they do, restore:
-        #   doc["launcher"] = _default_launcher_block()
-        pass
+    # launcher: until otaman-core extends platform-schema.yaml to accept a
+    # top-level `launcher:` key, emit the block as a COMMENT only.  This
+    # works around both:
+    #   - plugin-agent's discover_repos.py emitting `launcher:` live (commit
+    #     b6b1da6, 2026-06-03) — we strip it here and re-emit as comment
+    #   - our own post_scan add_launcher request — same comment treatment
+    # Once core-agent ships the schema extension (cli-agent → core-agent
+    # message 20260603T103644), switch this branch back to writing live YAML:
+    #     doc["launcher"] = _default_launcher_block()
+    existing_launcher = doc.pop("launcher", None) if "launcher" in doc else None
+    launcher_comment_needed = bool(existing_launcher) or add_launcher
 
     if set_specs_format_openspec is not None:
         otaman_dir = draft_path.parent
@@ -323,6 +347,9 @@ def update_draft(
 
     with draft_path.open("w", encoding="utf-8") as f:
         _YAML.dump(doc, f)
+    if launcher_comment_needed:
+        with draft_path.open("a", encoding="utf-8") as f:
+            f.write(_LAUNCHER_COMMENT_BLOCK)
 
 
 # ---------------------------------------------------------------------------
@@ -421,9 +448,12 @@ def run(
         add_launcher=gaps.launcher_block_missing,
         set_specs_format_openspec=openspec_dir,
     )
-    # gaps.launcher_block_missing detection retained for diagnostics — but
-    # actual emission is gated by schema support (see update_draft note).
-    # result.launcher_block_added stays False until core-agent extends the schema.
+    if gaps.launcher_block_missing:
+        # We emitted the launcher as a YAML COMMENT block — visible to user,
+        # invisible to the validator. result.launcher_block_added reflects
+        # this comment-emission, not a live YAML key. When core-agent
+        # extends the schema, this becomes a real YAML key emission.
+        result.launcher_block_added = True
 
     return result
 
