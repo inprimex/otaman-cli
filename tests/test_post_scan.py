@@ -152,10 +152,10 @@ def test_scaffold_openspec_returns_existing_path_idempotently(tmp_path: Path):
 # update_draft
 
 
-def test_update_draft_adds_specs_repo_and_launcher_comment_block(tmp_path: Path):
-    """Launcher is emitted as a COMMENTED YAML block (schema-gated, visible
-    in raw text, invisible to the YAML parser/validator). When core-agent
-    extends platform-schema.yaml, this flips to a real YAML key."""
+def test_update_draft_adds_specs_repo_and_launcher(tmp_path: Path):
+    """Live launcher: emission — otaman-core PR #13 (commit 598a947) added
+    top-level support to platform-schema.yaml so we can emit it as a real
+    YAML key again."""
     draft = tmp_path / "platform.yaml.draft"
     _write_draft(draft)
     update_draft(
@@ -166,15 +166,12 @@ def test_update_draft_adds_specs_repo_and_launcher_comment_block(tmp_path: Path)
         },
         add_launcher=True,
     )
-    raw = draft.read_text(encoding="utf-8")
-    doc = _pyyaml.safe_load(raw)
+    doc = _pyyaml.safe_load(draft.read_text(encoding="utf-8"))
     names = [r["name"] for r in doc["repos"]]
     assert "myprog-specs" in names
-    # Real YAML key NOT present (would break validator until schema lands)
-    assert "launcher" not in doc
-    # But the placeholder IS visible to humans reading the draft
-    assert "# launcher:" in raw
-    assert "# Status: schema-gated" in raw
+    assert "launcher" in doc
+    assert doc["launcher"]["local"]["enabled"] is True
+    assert doc["launcher"]["ssh"]["enabled"] is False
     assert doc["specs"]["path"] == "../myprog-specs"
 
 
@@ -205,7 +202,7 @@ def test_update_draft_does_not_duplicate_specs_repo(tmp_path: Path):
 # run() — non-TTY path
 
 
-def test_run_non_tty_emits_launcher_comment_skips_scaffolding(tmp_path: Path):
+def test_run_non_tty_adds_launcher_but_skips_scaffolding(tmp_path: Path):
     scan_root = tmp_path
     otaman_dir = scan_root / "myprog-otaman"
     otaman_dir.mkdir()
@@ -218,14 +215,10 @@ def test_run_non_tty_emits_launcher_comment_skips_scaffolding(tmp_path: Path):
     # No prompts, no scaffolding
     assert result.specs_repo_created is None
     assert result.openspec_scaffolded is None
-    # Launcher is emitted as a YAML COMMENT block (schema-gated). The
-    # parsed doc still doesn't have a `launcher:` key (validator-safe), but
-    # the raw text shows the placeholder for the user to review.
+    # Live launcher: emission (schema accepts it since otaman-core PR #13)
     assert result.launcher_block_added is True
-    raw = draft.read_text(encoding="utf-8")
-    doc = _pyyaml.safe_load(raw)
-    assert "launcher" not in doc            # real YAML key absent
-    assert "# launcher:" in raw              # comment placeholder present
+    doc = _pyyaml.safe_load(draft.read_text(encoding="utf-8"))
+    assert "launcher" in doc
     # And the skip reasons are recorded
     assert any("non-TTY" in s for s in result.skipped)
 
@@ -298,15 +291,12 @@ def test_run_interactive_scaffolds_specs_and_openspec(tmp_path: Path, monkeypatc
     assert (scan_root / "myprog-specs" / "CLAUDE.md").is_file()
     assert result.openspec_scaffolded == scan_root / "myprog-specs" / "openspec"
     assert (scan_root / "myprog-specs" / "openspec" / ".openspec.yaml").is_file()
-    # Launcher emitted as comment block — flag flips to True
     assert result.launcher_block_added is True
 
-    raw = draft.read_text(encoding="utf-8")
-    doc = _pyyaml.safe_load(raw)
+    doc = _pyyaml.safe_load(draft.read_text(encoding="utf-8"))
     assert any(r["name"] == "myprog-specs" for r in doc["repos"])
     assert doc["specs"]["format"] == "openspec"
-    assert "launcher" not in doc       # not a live YAML key
-    assert "# launcher:" in raw         # comment placeholder is there
+    assert "launcher" in doc
 
 
 def test_run_interactive_user_declines_specs(tmp_path: Path, monkeypatch):
@@ -323,5 +313,5 @@ def test_run_interactive_user_declines_specs(tmp_path: Path, monkeypatch):
     )
     assert result.specs_repo_created is None
     assert any("declined" in s for s in result.skipped)
-    # Launcher comment block emitted regardless of specs choice
+    # Launcher still added — no prompt needed for that
     assert result.launcher_block_added is True
