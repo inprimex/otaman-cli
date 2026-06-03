@@ -77,11 +77,19 @@ def test_whitespace_only_claude_config_dir_omits_field():
     assert "claude" not in program
 
 
-def test_populated_claude_config_dir_writes_field_with_tilde_preserved():
+def test_populated_claude_config_dir_held_until_schema_supports_program_block():
+    """platform-schema.yaml in otaman-core doesn't yet accept a top-level
+    `program:` block. Until core-agent extends the schema, the wizard
+    still ASKS the question (so the UX/prompts are stable for users), but
+    `_build_platform_yaml` does NOT emit the field — that would fail
+    `otaman init` validation. When core-agent ships the schema extension,
+    the write path is restored and this test gets re-enabled to verify
+    `doc["program"]["claude"]["config_dir"] == "~/.claude-myprog"`."""
     from otaman_cli.onboard.program_init.platform_gen import _build_platform_yaml
 
     doc = _build_platform_yaml(_base_answers(claude_config_dir="~/.claude-myprog"))
-    assert doc["program"]["claude"]["config_dir"] == "~/.claude-myprog"
+    # Field is intentionally NOT emitted while schema is gating
+    assert "program" not in doc
 
 
 # ---------------------------------------------------------------------------

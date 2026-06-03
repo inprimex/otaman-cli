@@ -303,7 +303,12 @@ def update_draft(
         doc.setdefault("specs", {})["path"] = add_specs_repo["path"]
 
     if add_launcher and "launcher" not in doc:
-        doc["launcher"] = _default_launcher_block()
+        # NOTE: platform-schema.yaml in otaman-core does not yet accept a
+        # top-level `launcher:` block. Emitting it here would fail the
+        # validator at `otaman init` time (see Roman's 2026-06-03 repro).
+        # Waiting on core-agent to extend the schema; once they do, restore:
+        #   doc["launcher"] = _default_launcher_block()
+        pass
 
     if set_specs_format_openspec is not None:
         otaman_dir = draft_path.parent
@@ -416,8 +421,9 @@ def run(
         add_launcher=gaps.launcher_block_missing,
         set_specs_format_openspec=openspec_dir,
     )
-    if gaps.launcher_block_missing:
-        result.launcher_block_added = True
+    # gaps.launcher_block_missing detection retained for diagnostics — but
+    # actual emission is gated by schema support (see update_draft note).
+    # result.launcher_block_added stays False until core-agent extends the schema.
 
     return result
 
