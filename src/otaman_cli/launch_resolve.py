@@ -142,6 +142,7 @@ def resolve(
     # platform.yaml for repos list
     platform_path = maestro_root / "platform.yaml"
     repos: list[str] = []
+    platform: dict[str, Any] = {}
     if platform_path.exists():
         platform = _load_yaml(platform_path)
         for r in platform.get("repos", []) or []:
@@ -152,6 +153,20 @@ def resolve(
             name = r.get("name")
             if name:
                 repos.append(name)
+
+    # program-init-claude-profile precedence:
+    #   1. per-account override (resolved above)
+    #   2. program.claude.config_dir from platform.yaml  ← THIS
+    #   3. $CLAUDE_CONFIG_DIR shell env (no export → shell wins)
+    #   4. Claude default ~/.claude (no export → Claude handles)
+    if not config_dir_raw:
+        program_block = platform.get("program") or {}
+        claude_block = program_block.get("claude") if isinstance(program_block, dict) else None
+        if isinstance(claude_block, dict):
+            program_claude_dir = claude_block.get("config_dir") or claude_block.get("config-dir") or ""
+            if program_claude_dir:
+                config_dir_raw = program_claude_dir
+                config_dir_expanded = expand_config_dir(program_claude_dir, shell)
 
     secrets = load_dotenv(maestro_root)
 

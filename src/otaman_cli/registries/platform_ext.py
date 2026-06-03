@@ -109,6 +109,14 @@ class Release(BaseModel):
     description: str = ""
 
 
+class ClaudeConfig(BaseModel):
+    """Optional Claude-specific program settings (program-init-claude-profile)."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    config_dir: str | None = Field(default=None, alias="config-dir")
+
+
 class ProgramExtensions(BaseModel):
     """The `program:` block under platform.yaml. Extra keys allowed."""
 
@@ -122,6 +130,8 @@ class ProgramExtensions(BaseModel):
         default_factory=lambda: dict(DEFAULT_T_SHIRT_SCALE),
         alias="t-shirt-scale",
     )
+    # program-init-claude-profile: optional Claude profile config_dir
+    claude: ClaudeConfig | None = None
 
     @field_validator("releases")
     @classmethod
