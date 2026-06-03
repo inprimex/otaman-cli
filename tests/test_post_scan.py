@@ -315,3 +315,36 @@ def test_run_interactive_user_declines_specs(tmp_path: Path, monkeypatch):
     assert any("declined" in s for s in result.skipped)
     # Launcher still added — no prompt needed for that
     assert result.launcher_block_added is True
+
+
+# ---------------------------------------------------------------------------
+# E2E bugfix 2: specs.path is relative, not absolute, even for sibling dirs
+
+
+def test_update_draft_specs_path_is_relative_for_sibling_dirs(tmp_path: Path):
+    """When the openspec dir is a sibling-parent (e.g. <root>/foo-specs/openspec
+    relative to <root>/foo-otaman/), specs.path should be `../foo-specs/openspec`,
+    not an absolute filesystem path. Path.relative_to refuses to go UP; we use
+    os.path.relpath instead."""
+    from otaman_cli.onboard.post_scan import update_draft
+
+    scan_root = tmp_path / "scan-root"
+    scan_root.mkdir()
+    otaman_dir = scan_root / "myprog-otaman"
+    otaman_dir.mkdir()
+    specs_dir = scan_root / "myprog-specs"
+    specs_dir.mkdir()
+    openspec_dir = specs_dir / "openspec"
+    openspec_dir.mkdir()
+
+    draft = otaman_dir / "platform.yaml.draft"
+    _write_draft(draft)
+
+    update_draft(draft, set_specs_format_openspec=openspec_dir)
+
+    doc = _pyyaml.safe_load(draft.read_text(encoding="utf-8"))
+    # Expect a relative path going UP one level then into the specs sibling
+    assert doc["specs"]["path"] == "../myprog-specs/openspec", (
+        f"specs.path should be relative; got {doc['specs']['path']!r}"
+    )
+    assert doc["specs"]["format"] == "openspec"

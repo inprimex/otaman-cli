@@ -166,3 +166,25 @@ def test_existing_platform_yaml_skips_draft_check(tmp_cwd: Path):
          mock.patch("builtins.input", side_effect=AssertionError("must not prompt")):
         rc = cli_main._init_preflight([])
     assert rc is None
+
+
+# ---------------------------------------------------------------------------
+# E2E bugfix 1: cwd is changed to meta dir before cmd_init runs
+
+
+def test_init_preflight_chdir_into_meta_dir_before_cmd_init(tmp_cwd: Path):
+    """When promoting a draft, cwd must move into the meta dir so downstream
+    steps (`_cmd_init_update`, generate-agent-config) resolve project root."""
+    import os as _os
+    draft = _draft(tmp_cwd, subdir="myprog-otaman")
+    expected_cwd_after = draft.parent.resolve()
+
+    with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=True), \
+         mock.patch("builtins.input", return_value="y"), \
+         mock.patch("otaman_cli.main.cmd_init", return_value=0):
+        cli_main._init_preflight([])
+
+    assert Path(_os.getcwd()).resolve() == expected_cwd_after, (
+        f"cwd should be the meta dir after preflight promotes the draft. "
+        f"Expected {expected_cwd_after}, got {_os.getcwd()}"
+    )
