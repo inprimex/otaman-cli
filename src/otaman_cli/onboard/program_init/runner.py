@@ -98,6 +98,20 @@ def _builtin_questions() -> list[dict[str, Any]]:
             "default": "." if os.environ.get("OTAMAN_INIT_CWD_IS_GIT") else "",
             "output_mapping": "repos[0].path",
         },
+        # program-init-claude-profile (2026-06-02): pre-fill an existing
+        # Claude profile so the first session reuses the OAuth login.
+        # Empty answer → field omitted from platform.yaml → launcher
+        # falls back to $CLAUDE_CONFIG_DIR shell env / ~/.claude default.
+        {
+            "id": "claude_config_dir", "step": "identity", "type": "text",
+            "label": "Claude profile path (CLAUDE_CONFIG_DIR; preserves OAuth session)",
+            "help": (
+                "Optional. Leave empty to defer to $CLAUDE_CONFIG_DIR or ~/.claude. "
+                "Examples: ~/.claude  ~/.claude-myprogram"
+            ),
+            "default": "",
+            "output_mapping": "program.claude.config_dir",
+        },
         {
             "id": "domains", "step": "identity", "type": "checkbox",
             "label": "Target domain(s)",

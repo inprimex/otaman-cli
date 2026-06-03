@@ -133,6 +133,16 @@ def _build_platform_yaml(answers: dict[str, Any]) -> dict[str, Any]:
             "organisation": answers.get("organisation_name", ""),
         }
 
+    # program-init-claude-profile: optional claude.config_dir under program.
+    # Empty answer → field omitted entirely (launcher falls back to env / default).
+    claude_config_dir = (answers.get("claude_config_dir") or "").strip()
+    if claude_config_dir:
+        program_block = doc.setdefault("program", {})
+        if not isinstance(program_block, dict):
+            program_block = {}
+            doc["program"] = program_block
+        program_block.setdefault("claude", {})["config_dir"] = claude_config_dir
+
     return doc
 
 
