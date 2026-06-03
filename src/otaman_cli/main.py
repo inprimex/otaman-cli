@@ -903,6 +903,11 @@ def _init_preflight(args: list[str]) -> int | None:
                 return 1
             draft_path.rename(target)
             UI.ok(f"Promoted draft → {target}")
+            # Smart-init was invoked from the parent dir (sibling to the meta
+            # folder). Downstream steps (`_cmd_init_update`, generate-agent-
+            # config) use cwd-walk to find the project root; chdir into the
+            # meta folder so they resolve correctly.
+            os.chdir(target.parent)
             return cmd_init([str(target)])
         # else: user declined; fall through to existing options
     elif len(drafts) > 1 and sys.stdin.isatty():

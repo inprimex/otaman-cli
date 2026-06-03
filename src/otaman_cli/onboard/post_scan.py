@@ -24,6 +24,7 @@ scripts), preserving the legacy scan behaviour for automation.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -313,10 +314,15 @@ def update_draft(
 
     if set_specs_format_openspec is not None:
         otaman_dir = draft_path.parent
+        # Path.relative_to refuses to go UP; use os.path.relpath for
+        # sibling directories like `<scan_root>/<program>-specs/openspec`
+        # relative to `<scan_root>/<program>-otaman/`.
         try:
-            rel = set_specs_format_openspec.relative_to(otaman_dir)
-            specs_path = f"./{rel.as_posix()}"
-        except ValueError:
+            specs_path = os.path.relpath(set_specs_format_openspec, otaman_dir)
+            specs_path = specs_path.replace(os.sep, "/")
+            if not specs_path.startswith(("..", "./", "/")):
+                specs_path = f"./{specs_path}"
+        except (ValueError, OSError):
             specs_path = str(set_specs_format_openspec)
         doc.setdefault("specs", {})
         doc["specs"]["path"] = specs_path
