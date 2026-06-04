@@ -1859,6 +1859,11 @@ def cmd_check(args: list[str], hide_broadcast_hours: int | None = None) -> int:
                 "subject": subject,
                 "file": f.name,
                 "stem": f.stem,
+                # inter-agent-request-response-contract (tasks 2.1, 2.2)
+                "expects_response": bool(fm.get("expects-response")),
+                "response_effort": fm.get("response-effort"),
+                "response_deadline": fm.get("response-deadline"),
+                "reply_to": fm.get("reply-to"),
             })
         except (OSError, yaml.YAMLError):
             continue
@@ -1884,10 +1889,25 @@ def cmd_check(args: list[str], hide_broadcast_hours: int | None = None) -> int:
                 return False
         pending = [m for m in pending if not _is_old_broadcast(m)]
 
+    # Task 2.1: tiebreaker sort within priority band — expects-response,
+    # response-effort, timestamp. See response_contract.make_sort_key.
+    from otaman_cli.response_contract import (
+        deadline_is_imminent as _deadline_imminent,
+        make_sort_key as _sort_key,
+    )
+    pending.sort(key=_sort_key)
+
     if pending:
         for m in pending:
             broadcast_label = " (broadcast)" if m.get("to") == "all" else ""
-            UI.bullet(f"{m['id']} from {UI.agent(m['from'])} [{UI.priority(m['priority'])}]{broadcast_label}")
+            # Task 2.2: surface [DEADLINE] indicator for imminent response-deadline
+            deadline_label = ""
+            if _deadline_imminent(m.get("response_deadline")):
+                deadline_label = f" {C.RED}[DEADLINE {m['response_deadline']}]{C.RESET}"
+            UI.bullet(
+                f"{m['id']} from {UI.agent(m['from'])} "
+                f"[{UI.priority(m['priority'])}]{broadcast_label}{deadline_label}"
+            )
             print(f"    {m['subject']}")
             UI.muted(f"{m['type']} | {m['timestamp']} | {m['stem']}")
             print()
@@ -2022,6 +2042,36 @@ def cmd_ack(args: list[str], status: str = "resolved") -> int:
         UI.warn(f"{len(matches)} messages match '{pattern}'.")
         UI.muted("Be more specific, or use 'otaman ack --all' to ack all pending.")
         return 1
+
+    # Task 2.3 advisory: when resolving a message that expects a response,
+    # warn if no outbound reply with reply-to: <this-id> exists.  Do not block.
+    if status == "resolved":
+        from otaman_cli.response_contract import has_outbound_reply as _has_reply
+        import yaml as _yaml
+        for msg_file in matches:
+            try:
+                head = msg_file.read_text(encoding="utf-8")[:2048]
+            except OSError:
+                continue
+            fm_match = re.match(r"^---\n(.+?)\n---", head, re.DOTALL)
+            if not fm_match:
+                continue
+            try:
+                fm = _yaml.safe_load(fm_match.group(1))
+            except Exception:
+                continue
+            if not isinstance(fm, dict):
+                continue
+            if not fm.get("expects-response"):
+                continue
+            msg_id = str(fm.get("id") or msg_file.stem)
+            if _has_reply(active_dir, in_reply_to_id=msg_id, from_agent=agent):
+                continue
+            UI.warn(
+                "this message expects a response but no reply has been sent. "
+                "Ack as 'read' instead, or send a reply first."
+            )
+            UI.muted(f"  message: {msg_file.stem}")
 
     for msg_file in matches:
         ack_file = acks_dir / f"{msg_file.stem}.{agent}.ack"
