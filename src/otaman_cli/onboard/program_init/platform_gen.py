@@ -83,7 +83,19 @@ def _build_platform_yaml(answers: dict[str, Any]) -> dict[str, Any]:
     if role_assignments:
         doc["role_assignments"] = role_assignments
 
-    doc["processes"] = {p: True for p in processes}
+    # Schema-correct nesting: processes live under `program:` per
+    # outcome-and-solution-registries/design.md Appendix D, NOT at the top
+    # level (platform-schema.yaml rejects unknown top-level keys).  Empty
+    # list → omit the block entirely.
+    if processes:
+        program_block = doc.setdefault("program", {})
+        if not isinstance(program_block, dict):
+            program_block = {}
+            doc["program"] = program_block
+        # Each process gets the minimal {enabled: true} shape; the
+        # registry-specific sub-config (path, triage, etc.) is filled in
+        # later via `otaman init --update` or hand-edit per design.md.
+        program_block["processes"] = {p: {"enabled": True} for p in processes}
 
     doc["currency"] = {
         "code": currency_code,

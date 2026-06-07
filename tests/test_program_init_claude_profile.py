@@ -229,3 +229,109 @@ def test_non_tty_path_produces_no_claude_field(tmp_path: Path, monkeypatch: pyte
     doc = _build_platform_yaml(_base_answers())
     program = doc.get("program") or {}
     assert "claude" not in program
+
+
+# ---------------------------------------------------------------------------
+# Schema-validation regression — post-condition that the wizard's output
+# actually passes `otaman validate`. (Self-review 2026-06-07 found that
+# `processes:` was being written at the top level, which the schema rejects.
+# This test guards against any future field-name / nesting drift.)
+
+
+@pytest.mark.xfail(
+    reason=(
+        "Self-review 2026-06-07 found 8 additional top-level keys the wizard "
+        "emits that platform-schema.yaml rejects: currency, description, "
+        "edition, mode, releases, roles, skills, triage. Fixing these "
+        "requires either schema extension (otaman-core, read-only here) or a "
+        "broader wizard restructure to nest under program: — tracked in the "
+        "cli-agent → spec-agent audit-request message 20260607T-wizard-emit-mismatch. "
+        "This test stays xfail until the gap closes."
+    ),
+    strict=False,
+)
+def test_wizard_output_passes_platform_schema_validation(tmp_path, monkeypatch):
+    """End-to-end post-condition: the platform.yaml the wizard writes must
+    pass otaman-core's platform-schema.yaml validator. Catches the bug class
+    where the wizard emits valid-looking YAML that the validator rejects.
+    """
+    from otaman_cli.onboard.program_init.platform_gen import write_platform_yaml
+
+    # Realistic answer set — one of each interesting kind (processes,
+    # claude config, currency, releases, repos[]).
+    answers = _base_answers(
+        program_name="schematest",
+        primary_repo="./schematest-specs",
+        processes=["outcomes", "solutions"],
+        claude_config_dir="~/.claude-schematest",
+        roles=["CTO", "CPO"],
+        currency_code="USD",
+        currency_symbol="$",
+        currency_decimals=2,
+        probability_scale="t-shirt",
+        impact_scale="t-shirt",
+        releases=["MVP"],
+        skill_profile="software-development-default",
+        git_platform="local",
+        secret_backend="env-file",
+    )
+    output = tmp_path / "platform.yaml"
+    write_platform_yaml(answers, output)
+
+    # Validate against the real schema (otaman-core).  No mocking — this is
+    # the integration boundary that the previous bug slipped past.
+    from otaman_core.validate_platform import (
+        SCHEMA_PATH,
+        load_yaml,
+        validate_with_jsonschema,
+    )
+    config = load_yaml(output)
+    schema = load_yaml(SCHEMA_PATH)
+    errors = validate_with_jsonschema(config, schema)
+    assert errors == [], (
+        "Wizard output failed schema validation:\n"
+        + "\n".join(f"  - {e}" for e in errors)
+        + f"\n\nGenerated platform.yaml:\n{output.read_text(encoding='utf-8')}"
+    )
+
+
+def test_wizard_processes_nested_under_program_key(tmp_path):
+    """Specific to the 2026-06-07 fix: processes must be at
+    `program.processes.<name>.enabled: true`, NOT a top-level `processes:` key.
+    """
+    from otaman_cli.onboard.program_init.platform_gen import write_platform_yaml
+    import yaml as _y
+
+    answers = _base_answers(
+        program_name="ptest",
+        processes=["outcomes", "vocabulary"],
+    )
+    output = tmp_path / "platform.yaml"
+    write_platform_yaml(answers, output)
+    doc = _y.safe_load(output.read_text(encoding="utf-8"))
+
+    # Must NOT be at top level
+    assert "processes" not in doc, (
+        "Top-level `processes:` rejected by platform-schema.yaml. "
+        "Must nest under `program.processes`."
+    )
+    # MUST be nested under program with the {enabled: true} shape per design.md
+    assert "program" in doc
+    assert "processes" in doc["program"]
+    assert doc["program"]["processes"]["outcomes"] == {"enabled": True}
+    assert doc["program"]["processes"]["vocabulary"] == {"enabled": True}
+
+
+def test_wizard_omits_processes_block_when_none_opted_in(tmp_path):
+    """No processes selected → no `program.processes` block written."""
+    from otaman_cli.onboard.program_init.platform_gen import write_platform_yaml
+    import yaml as _y
+
+    answers = _base_answers(program_name="noproc", processes=[])
+    output = tmp_path / "platform.yaml"
+    write_platform_yaml(answers, output)
+    doc = _y.safe_load(output.read_text(encoding="utf-8"))
+
+    # processes is either absent, or program has no processes key
+    program = doc.get("program") or {}
+    assert "processes" not in program
