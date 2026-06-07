@@ -42,8 +42,10 @@ def cmd_project_remove(name: str, *, delete_remote: bool = False) -> int:
         UI.error(f"Repo not found: {name}")
         return 1
 
+    # Spec Q6: --delete-remote refuses in non-TTY.  Order matters — only
+    # check TTY once we've confirmed the repo exists, so unknown-repo
+    # errors report unknown-repo, not TTY (better operator UX).
     if delete_remote:
-        # Spec Q6: non-TTY → reject explicit-confirmation operation
         if not sys.stdin.isatty():
             UI.error("--delete-remote requires interactive TTY (refusing in non-TTY).")
             UI.muted("  Remove the local entry first with: otaman project remove <name>")

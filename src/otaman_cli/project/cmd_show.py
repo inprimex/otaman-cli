@@ -30,10 +30,13 @@ def cmd_project_show(name: str) -> int:
     UI.header(f"Repo: {name}")
     print(f"  Name:        {entry.get('name')}")
     print(f"  Owner:       {entry.get('owner', '-')}")
-    print(f"  Status:      {entry.get('status', 'active')}")
+    print(f"  Status:      {'inactive' if entry.get('disabled') else 'active'}")
     print(f"  Path:        {entry.get('path', '-')}")
-    if entry.get("url"):
-        print(f"  URL:         {entry['url']}")
+    # Schema field is `remote:`; legacy/spec-style `url:` also accepted for
+    # programs that hand-edited platform.yaml before the field-name unified.
+    remote_url = entry.get("remote") or entry.get("url")
+    if remote_url:
+        print(f"  Remote:      {remote_url}")
     if entry.get("description"):
         print(f"  Description: {entry['description']}")
     if entry.get("tech"):

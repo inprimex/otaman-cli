@@ -163,6 +163,8 @@ def _make_local_git_repo(parent: Path, name: str, with_remote: str | None = None
 
 
 def test_assign_existing_git_repo_with_origin(project: Path):
+    """Origin URL is stored under the schema-accepted `remote:` field
+    (not `url:`, which was the spec's term but doesn't validate)."""
     new_repo = _make_local_git_repo(
         project.parent, "new-svc",
         with_remote="https://github.com/org/new-svc.git",
@@ -173,15 +175,43 @@ def test_assign_existing_git_repo_with_origin(project: Path):
     entry = find_repo(data, "new-svc")
     assert entry is not None
     assert entry["owner"] == "ops-agent"
-    assert entry["url"] == "https://github.com/org/new-svc.git"
+    assert entry["remote"] == "https://github.com/org/new-svc.git"
+    # NOT under `url:` — that would break otaman-core schema validation
+    assert "url" not in entry
 
 
-def test_assign_existing_git_repo_no_remote_skips_url(project: Path):
+def test_assign_runs_otaman_init_and_writes_dot_otaman_marker(project: Path):
+    """Spec scenario 10.5: AND `otaman init` runs in `../my-service`.
+    
+    The post-assign `_cmd_init_update()` call must write the per-repo
+    `.otaman` marker with `agent: <owner>` so identity resolution from
+    inside the assigned repo works without falling back to the deprecated
+    .agents/current-agent file.
+    """
+    new_repo = _make_local_git_repo(
+        project.parent, "deploy-svc",
+        with_remote="https://github.com/org/deploy-svc.git",
+    )
+    rc = _run(project, "project", "assign", str(new_repo), "--owner", "deploy-agent")
+    assert rc.returncode == 0, rc.stderr or rc.stdout
+
+    # The .otaman marker must be present (file shape: "agent: deploy-agent" line)
+    marker = new_repo / ".otaman"
+    assert marker.exists(), f"`.otaman` marker missing in {new_repo} after assign"
+    if marker.is_file():
+        text = marker.read_text(encoding="utf-8")
+        assert "agent: deploy-agent" in text, (
+            f"`.otaman` marker present but missing `agent: deploy-agent` line:\n{text}"
+        )
+
+
+def test_assign_existing_git_repo_no_remote_skips_remote_field(project: Path):
     new_repo = _make_local_git_repo(project.parent, "no-remote-svc")
     rc = _run(project, "project", "assign", str(new_repo), "--owner", "ops-agent")
     assert rc.returncode == 0, rc.stderr or rc.stdout
     entry = find_repo(load_platform_yaml(project), "no-remote-svc")
     assert entry is not None
+    assert "remote" not in entry
     assert "url" not in entry
 
 
@@ -219,9 +249,9 @@ def test_assign_rejects_already_registered_path(project: Path):
 
 
 def test_list_default_shows_active_only(project: Path):
-    # Disable existing-svc first
+    # Disable existing-svc first (via the schema-accepted `disabled` field)
     data = load_platform_yaml(project)
-    find_repo(data, "existing-svc")["status"] = "inactive"
+    find_repo(data, "existing-svc")["disabled"] = True
     save_platform_yaml(project, data)
     rc = _run(project, "project", "list")
     assert rc.returncode == 0
@@ -231,11 +261,12 @@ def test_list_default_shows_active_only(project: Path):
 
 def test_list_status_all_shows_everything(project: Path):
     data = load_platform_yaml(project)
-    find_repo(data, "existing-svc")["status"] = "inactive"
+    find_repo(data, "existing-svc")["disabled"] = True
     save_platform_yaml(project, data)
     rc = _run(project, "project", "list", "--status", "all")
     assert rc.returncode == 0
     assert "existing-svc" in rc.stdout
+    # Status column derived from `disabled:`; user-facing label = 'inactive'
     assert "inactive" in rc.stdout
 
 
@@ -288,7 +319,9 @@ def test_update_multiple_fields_one_command(project: Path):
     assert rc.returncode == 0
     e = find_repo(load_platform_yaml(project), "existing-svc")
     assert e["owner"] == "ops"
-    assert e["url"] == "https://example.com/repo"
+    # --url flag maps to schema-accepted `remote:` field
+    assert e["remote"] == "https://example.com/repo"
+    assert "url" not in e
 
 
 def test_update_no_flags_errors(project: Path):
@@ -307,14 +340,19 @@ def test_update_unknown_repo_errors(project: Path):
 
 
 def test_disable_then_enable_round_trip(project: Path):
+    """Uses schema-accepted `disabled: bool` (not `status:`); user-facing
+    CLI surface still says disable/enable."""
     rc = _run(project, "project", "disable", "existing-svc")
     assert rc.returncode == 0
-    assert find_repo(load_platform_yaml(project), "existing-svc")["status"] == "inactive"
+    entry = find_repo(load_platform_yaml(project), "existing-svc")
+    assert entry["disabled"] is True
+    # And NO `status:` field — that would break otaman-core schema validation
+    assert "status" not in entry
 
     rc = _run(project, "project", "enable", "existing-svc")
     assert rc.returncode == 0
     entry = find_repo(load_platform_yaml(project), "existing-svc")
-    assert "status" not in entry  # field dropped on enable
+    assert "disabled" not in entry  # field dropped on enable
 
 
 def test_disable_changes_default_list_visibility(project: Path):
@@ -349,6 +387,16 @@ def test_remove_delete_remote_non_tty_rejected(project: Path):
     rc = _run(project, "project", "remove", "existing-svc", "--delete-remote")
     assert rc.returncode != 0
     assert "TTY" in (rc.stdout + rc.stderr)
+
+
+def test_remove_delete_remote_unknown_repo_reports_unknown_not_tty(project: Path):
+    """Order-of-checks: unknown repo errors with 'not found', not 'TTY required'.
+    Otherwise the operator sees a misleading error and may waste time finding a TTY."""
+    rc = _run(project, "project", "remove", "no-such-svc", "--delete-remote")
+    assert rc.returncode != 0
+    msg = (rc.stdout + rc.stderr).lower()
+    assert "not found" in msg
+    assert "tty" not in msg, f"TTY error reported for unknown repo: {msg!r}"
 
 
 # ---------------------------------------------------------------------------

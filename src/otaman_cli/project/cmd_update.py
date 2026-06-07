@@ -29,9 +29,11 @@ def cmd_project_update(
     if not name:
         UI.error("Usage: otaman project update <name> [--owner|--path|--url|--description]")
         return 1
+    # Build fields dict; map user-facing --url flag onto the schema-accepted
+    # `remote:` key on the platform.yaml repo entry.
     fields: dict[str, Any] = {
         k: v for k, v in {
-            "owner": owner, "path": path, "url": url, "description": description,
+            "owner": owner, "path": path, "remote": url, "description": description,
         }.items() if v is not None
     }
     if not fields:

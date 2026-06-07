@@ -12,10 +12,14 @@ from otaman_cli.project._platform import (
 )
 
 
-def _toggle(name: str, *, target_status: str | None) -> int:
-    """Shared body for disable/enable. *target_status* is 'inactive' or None.
+def _toggle(name: str, *, disable: bool) -> int:
+    """Shared body for disable/enable.
 
-    None removes the `status:` key (returns to default-active).
+    Uses the schema-accepted `disabled: bool` field on the repo entry.
+    `disable=True` sets `disabled: true`; `disable=False` removes the key
+    (default-active is implicit). Spec uses `status:` terminology in the
+    CLI surface, but the platform-schema only accepts `disabled:` — see
+    cli-agent → spec-agent message 20260607T-status-vs-disabled-mismatch.
     """
     if not name:
         UI.error("Usage: otaman project disable|enable <name>")
@@ -34,14 +38,14 @@ def _toggle(name: str, *, target_status: str | None) -> int:
         UI.error(f"Repo not found: {name}")
         return 1
 
-    if target_status is None:
+    if not disable:
         # enable: drop the key entirely so default-active is implicit
-        if "status" in entry:
-            del entry["status"]
+        if "disabled" in entry:
+            del entry["disabled"]
         commit_msg = f"chore(platform): enable repo {name}"
         action = "enable"
     else:
-        entry["status"] = target_status
+        entry["disabled"] = True
         commit_msg = f"chore(platform): disable repo {name}"
         action = "disable"
 
@@ -54,11 +58,11 @@ def _toggle(name: str, *, target_status: str | None) -> int:
 
 
 def cmd_project_disable(name: str) -> int:
-    return _toggle(name, target_status="inactive")
+    return _toggle(name, disable=True)
 
 
 def cmd_project_enable(name: str) -> int:
-    return _toggle(name, target_status=None)
+    return _toggle(name, disable=False)
 
 
 __all__ = ["cmd_project_disable", "cmd_project_enable"]

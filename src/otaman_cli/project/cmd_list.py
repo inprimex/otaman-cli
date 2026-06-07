@@ -11,11 +11,14 @@ from otaman_cli.project._platform import load_platform_yaml
 
 
 def _normalised_status(entry: dict[str, Any]) -> str:
-    """Default status is `active`. Honours an explicit `status: inactive`."""
-    s = entry.get("status")
-    if not s:
-        return "active"
-    return str(s).lower()
+    """Map the schema-accepted `disabled: bool` to a user-facing status string.
+
+    `disabled: true` → 'inactive'.  Absent or `disabled: false` → 'active'.
+    The CLI surface keeps the `--status active|inactive|all` terminology
+    (more readable than `--disabled`); the on-disk representation uses
+    `disabled:` because that's what platform-schema.yaml accepts.
+    """
+    return "inactive" if entry.get("disabled") else "active"
 
 
 def cmd_project_list(status: str = "active") -> int:

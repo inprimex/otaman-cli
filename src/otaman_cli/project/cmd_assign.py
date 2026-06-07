@@ -39,24 +39,6 @@ def _detect_origin_url(repo_path: Path) -> str | None:
     return url or None
 
 
-def _path_already_registered(data: dict, abs_path: Path) -> dict | None:
-    """Return the existing repos[] entry whose resolved path equals *abs_path*."""
-    repos = data.get("repos") or []
-    for entry in repos:
-        if not isinstance(entry, dict):
-            continue
-        # Repo paths are stored relative to platform.yaml's directory
-        # (the otaman/meta root). Resolve here for comparison.
-        entry_path = entry.get("path") or ""
-        if not entry_path:
-            continue
-        # We need the meta root context — caller passes it via comparison
-        # of absolute paths only (already-resolved).
-        if str(abs_path) == entry_path:
-            return entry
-    return None
-
-
 def cmd_project_assign(
     target: str,
     *,
@@ -120,15 +102,36 @@ def cmd_project_assign(
     }
     origin = _detect_origin_url(repo_path)
     if origin:
-        entry["url"] = origin
+        # Schema-accepted field is `remote:` (platform-schema.yaml repo entry).
+        # CLI surface uses `--url` for user-facing readability, but on-disk
+        # representation must use `remote:` to pass otaman-core validation.
+        entry["remote"] = origin
 
     append_repo(data, entry)
     save_platform_yaml(root, data)
     UI.ok(f"Registered {repo_name} (owner: {owner}, path: {path_field})")
     if origin:
-        UI.muted(f"  url: {origin}")
+        UI.muted(f"  remote: {origin}")
     else:
-        UI.muted("  no remote origin detected; url field omitted")
+        UI.muted("  no remote origin detected; remote field omitted")
+
+    # Spec 10.5: run `otaman init` in the assigned repo so the per-repo
+    # .otaman marker (with `agent: <owner>` field) gets written. Without
+    # this step, downstream identity resolution from inside the assigned
+    # repo would fall back to the deprecated current-agent file.
+    import os as _os
+    from otaman_cli.main import _cmd_init_update
+    prev_cwd = _os.getcwd()
+    try:
+        _os.chdir(root)
+        init_rc = _cmd_init_update()
+        if init_rc != 0:
+            UI.warn(
+                f"`otaman init --update` returned {init_rc}; "
+                ".otaman marker may not be set for {repo_name}."
+            )
+    finally:
+        _os.chdir(prev_cwd)
 
     # Commit (best-effort; surface error but don't roll back the file write)
     rc, out = git_commit_platform_yaml(
