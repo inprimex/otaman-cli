@@ -73,10 +73,19 @@ class TestBuildPlatformYaml:
         assert "acme-platform-strategy" not in names
 
     def test_processes_map(self):
+        """Processes are nested under `program.processes` (schema requires it).
+        Each process gets the `{enabled: true}` shape per
+        outcome-and-solution-registries/design.md Appendix D — not the
+        old `{name: True}` flat form (which was at top level + rejected
+        by platform-schema.yaml as additionalProperties)."""
         doc = _build_platform_yaml(_BASE_ANSWERS)
-        assert doc["processes"]["outcomes"] is True
-        assert doc["processes"]["risks"] is True
-        assert "strategy" not in doc["processes"]
+        # Top-level processes: key must NOT exist (schema rejects it)
+        assert "processes" not in doc
+        # Nested under program: with the {enabled: true} shape
+        program = doc["program"]
+        assert program["processes"]["outcomes"] == {"enabled": True}
+        assert program["processes"]["risks"] == {"enabled": True}
+        assert "strategy" not in program["processes"]
 
     def test_ee_section_absent_for_ce(self):
         doc = _build_platform_yaml(_BASE_ANSWERS)
