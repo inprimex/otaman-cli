@@ -194,7 +194,7 @@ class TestPrintReport:
         out = capsys.readouterr().out
         assert "claude-code" in out
         assert "NOT FOUND" in out
-        assert "ce-bootstrap.sh --org=myorg --install-harness=claude-code" in out
+        assert "sudo bash ce-bootstrap.sh --org=myorg --install-harness=claude-code" in out
 
     def test_upgrade_hint_for_too_old(self, capsys):
         _print_org_harness_report("myorg", [{
@@ -206,7 +206,7 @@ class TestPrintReport:
             "path": "/home/u/.local/bin/claude",
         }])
         out = capsys.readouterr().out
-        assert "--upgrade-harness=claude-code" in out
+        assert "sudo bash ce-bootstrap.sh --org=myorg --upgrade-harness=claude-code" in out
 
     def test_ok_line_includes_version(self, capsys):
         _print_org_harness_report("myorg", [{
