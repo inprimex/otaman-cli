@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import io
 import os
+import shutil
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,6 +68,7 @@ class GeneratorResult:
     launch_ps1: Path
     gitignore: Path
     launcher_dir: Path
+    platform_yaml_copy: Path | None = None
 
 
 def _ruamel_dump(settings: LaunchSettings) -> str:
@@ -97,11 +99,21 @@ def _render_template(name: str, settings: LaunchSettings) -> str:
     )
 
 
-def generate(settings: LaunchSettings, output_dir: Path) -> GeneratorResult:
-    """Write all five launcher files to *output_dir* (creates it if missing).
+def generate(
+    settings: LaunchSettings,
+    output_dir: Path,
+    *,
+    platform_yaml_source: Path | None = None,
+) -> GeneratorResult:
+    """Write all launcher files to *output_dir* (creates it if missing).
 
-    Returns paths for caller reporting. Existing files are overwritten;
-    callers responsible for prompting/--force gating.
+    When *platform_yaml_source* is given and the file exists, also copy it
+    into ``launcher/platform.yaml`` so the folder is self-contained — a
+    developer can copy ``launcher/`` to a new machine and have everything
+    needed in one place (otaman-init-dev-scaffold amendment #1).
+
+    Existing files OVERWRITTEN; callers responsible for prompting/--force
+    gating.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -110,6 +122,7 @@ def generate(settings: LaunchSettings, output_dir: Path) -> GeneratorResult:
     launch_sh = output_dir / "launch.sh"
     launch_ps1 = output_dir / "launch.ps1"
     gitignore = output_dir / ".gitignore"
+    platform_copy: Path | None = None
 
     # 1. launch-settings.yaml (live config)
     settings_yaml.write_text(_ruamel_dump(settings), encoding="utf-8")
@@ -129,6 +142,14 @@ def generate(settings: LaunchSettings, output_dir: Path) -> GeneratorResult:
     # 5. .gitignore (excludes the local override)
     gitignore.write_text(_GITIGNORE, encoding="utf-8")
 
+    # 6. platform.yaml copy (otaman-init-dev-scaffold amendment #1)
+    if platform_yaml_source is not None and platform_yaml_source.is_file():
+        # Only copy if source != target (skip self-copy when launcher_dir
+        # already contains platform.yaml — defensive)
+        platform_copy = output_dir / "platform.yaml"
+        if platform_yaml_source.resolve() != platform_copy.resolve():
+            shutil.copy2(platform_yaml_source, platform_copy)
+
     return GeneratorResult(
         settings_yaml=settings_yaml,
         local_example=local_example,
@@ -136,6 +157,7 @@ def generate(settings: LaunchSettings, output_dir: Path) -> GeneratorResult:
         launch_ps1=launch_ps1,
         gitignore=gitignore,
         launcher_dir=output_dir,
+        platform_yaml_copy=platform_copy,
     )
 
 

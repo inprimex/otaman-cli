@@ -180,6 +180,126 @@ class TestEndToEnd:
         assert (launcher / "launch.sh").is_file()
         assert (launcher / "launch.ps1").is_file()
         assert (launcher / ".gitignore").is_file()
+        # otaman-init-dev-scaffold amendment #1: platform.yaml copied into launcher/
+        assert (launcher / "platform.yaml").is_file()
+        assert (launcher / "platform.yaml").read_text() == platform_yaml.read_text()
+
+
+# ---------------------------------------------------------------- amendments
+class TestAmendmentPlatformYamlCopy:
+    """otaman-init-dev-scaffold amendment #1 — platform.yaml in launcher/."""
+
+    def test_generator_copies_platform_yaml(self, tmp_path: Path):
+        src = tmp_path / "platform.yaml"
+        src.write_text("project: copy-test\n", encoding="utf-8")
+        s = default_settings(project_name="copy-test", extra_agent_names=["spec-agent"])
+        out = tmp_path / "launcher"
+        r = generate(s, out, platform_yaml_source=src)
+        assert r.platform_yaml_copy is not None
+        assert r.platform_yaml_copy.is_file()
+        assert r.platform_yaml_copy.read_text() == src.read_text()
+
+    def test_generator_omits_copy_when_source_absent(self, tmp_path: Path):
+        s = default_settings(project_name="no-copy", extra_agent_names=["spec-agent"])
+        r = generate(s, tmp_path / "launcher", platform_yaml_source=None)
+        assert r.platform_yaml_copy is None
+        assert not (tmp_path / "launcher" / "platform.yaml").exists()
+
+    def test_generator_handles_missing_source_file(self, tmp_path: Path):
+        """Source path given but file doesn't exist — silent no-op, no crash."""
+        s = default_settings(project_name="ghost", extra_agent_names=["spec-agent"])
+        r = generate(s, tmp_path / "launcher", platform_yaml_source=tmp_path / "missing.yaml")
+        assert r.platform_yaml_copy is None
+
+
+class TestAmendmentMetaAgent:
+    """otaman-init-dev-scaffold amendment #2 — orchestration meta-agent locked-on."""
+
+    def test_default_settings_includes_meta_agent_locked(self):
+        s = default_settings(
+            project_name="proj",
+            meta_agent_name="ehrbridge-meta-agent",
+            extra_agent_names=["cpo-agent"],
+        )
+        names_enabled = {a.name: a.enabled for a in s.agents}
+        assert names_enabled["spec-agent"] is True
+        assert names_enabled["ehrbridge-meta-agent"] is True
+        assert names_enabled["cpo-agent"] is False
+
+    def test_default_settings_dedupes_meta_against_extras(self):
+        # Meta-agent name also appears in extras → should not double-add
+        s = default_settings(
+            project_name="proj",
+            meta_agent_name="meta",
+            extra_agent_names=["meta", "other"],
+        )
+        meta_entries = [a for a in s.agents if a.name == "meta"]
+        assert len(meta_entries) == 1
+        assert meta_entries[0].enabled is True
+
+    def test_yes_flag_with_meta_agent(self, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda *_: (_ for _ in ()).throw(AssertionError("no prompts in --yes")))
+        s = run_wizard(
+            project_name="proj",
+            platform_agent_names=["spec-agent", "cpo-agent"],
+            meta_agent_name="proj-meta-agent",
+            yes=True,
+        )
+        enabled_names = [a.name for a in s.agents if a.enabled]
+        assert "spec-agent" in enabled_names
+        assert "proj-meta-agent" in enabled_names
+
+    def test_scaffold_helper_detects_meta_agent_from_platform_yaml(self, tmp_path: Path):
+        """Integration: platform.yaml with `agents: [{role: orchestration}]` →
+        meta-agent shows up enabled in generated launch-settings.yaml."""
+        platform_yaml = tmp_path / "platform.yaml"
+        platform_yaml.write_text(
+            "project: meta-test\n"
+            "version: \"1.0\"\n"
+            "mode: 1\n"
+            "edition: ce\n"
+            "roles: [main]\n"
+            "currency: {code: USD, symbol: '$', decimal_places: 2}\n"
+            "triage: {probability_scale: t-shirt, impact_scale: t-shirt}\n"
+            "releases: [MVP]\n"
+            "skills: {profile: software-development-default, extra: []}\n"
+            "repos:\n"
+            "  - {name: meta-test-specs, path: ., owner: spec-agent}\n"
+            "agents:\n"
+            "  - {name: meta-test-meta-agent, role: orchestration}\n",
+            encoding="utf-8",
+        )
+        from otaman_cli.main import _scaffold_launcher_after_init
+        _scaffold_launcher_after_init(platform_yaml, yes=True)
+
+        live = yaml.safe_load((tmp_path / "launcher" / "launch-settings.yaml").read_text())
+        names = {a["name"]: a["enabled"] for a in live["agents"]}
+        assert names.get("spec-agent") is True
+        assert names.get("meta-test-meta-agent") is True
+
+    def test_scaffold_helper_graceful_when_no_agents_field(self, tmp_path: Path):
+        """platform.yaml without `agents:` list → only spec-agent locked."""
+        platform_yaml = tmp_path / "platform.yaml"
+        platform_yaml.write_text(
+            "project: no-meta\n"
+            "version: \"1.0\"\n"
+            "mode: 1\n"
+            "edition: ce\n"
+            "roles: [main]\n"
+            "currency: {code: USD, symbol: '$', decimal_places: 2}\n"
+            "triage: {probability_scale: t-shirt, impact_scale: t-shirt}\n"
+            "releases: [MVP]\n"
+            "skills: {profile: software-development-default, extra: []}\n"
+            "repos:\n"
+            "  - {name: no-meta-specs, path: ., owner: spec-agent}\n",
+            encoding="utf-8",
+        )
+        from otaman_cli.main import _scaffold_launcher_after_init
+        _scaffold_launcher_after_init(platform_yaml, yes=True)
+
+        live = yaml.safe_load((tmp_path / "launcher" / "launch-settings.yaml").read_text())
+        names = [a["name"] for a in live["agents"] if a["enabled"]]
+        assert names == ["spec-agent"]
 
 
 # ---------------------------------------------------------------- task 3.4

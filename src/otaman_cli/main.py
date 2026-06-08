@@ -1135,6 +1135,21 @@ def _scaffold_launcher_after_init(platform_yaml: Path, *, yes: bool) -> None:
             if owner and owner not in agent_names:
                 agent_names.append(owner)
 
+    # otaman-init-dev-scaffold amendment #2: detect the orchestration
+    # meta-agent declared in platform.yaml (agents[*].role == "orchestration")
+    # and pre-populate it as a locked enabled entry alongside spec-agent.
+    # Graceful no-op when platform.yaml has no `agents:` list yet (current
+    # schema state — the field is on its way via a separate spec change).
+    meta_agent_name: str | None = None
+    agents_field = config.get("agents")
+    if isinstance(agents_field, list):
+        for a in agents_field:
+            if isinstance(a, dict) and a.get("role") == "orchestration":
+                name = a.get("name")
+                if isinstance(name, str) and name:
+                    meta_agent_name = name
+                    break
+
     print()
     if yes:
         UI.muted("Generating launcher/ (--yes; all defaults)")
@@ -1143,6 +1158,7 @@ def _scaffold_launcher_after_init(platform_yaml: Path, *, yes: bool) -> None:
     settings = _run_wizard(
         project_name=project_name,
         platform_agent_names=agent_names,
+        meta_agent_name=meta_agent_name,
         yes=yes,
     )
 
@@ -1160,7 +1176,7 @@ def _scaffold_launcher_after_init(platform_yaml: Path, *, yes: bool) -> None:
         if live:
             preserved_local = text
 
-    result = _generate(settings, output_dir)
+    result = _generate(settings, output_dir, platform_yaml_source=platform_yaml)
     if preserved_local is not None:
         local_path.write_text(preserved_local, encoding="utf-8")
         UI.muted(f"  preserved existing {local_path.name} (had user content)")
@@ -1169,6 +1185,8 @@ def _scaffold_launcher_after_init(platform_yaml: Path, *, yes: bool) -> None:
     UI.ok(f"launch-settings.local.yaml {result.local_example.relative_to(output_dir.parent)}" if preserved_local is None else "")
     UI.ok(f"launch.sh                  {result.launch_sh.relative_to(output_dir.parent)} (chmod +x)")
     UI.ok(f"launch.ps1                 {result.launch_ps1.relative_to(output_dir.parent)}")
+    if result.platform_yaml_copy is not None:
+        UI.ok(f"platform.yaml              {result.platform_yaml_copy.relative_to(output_dir.parent)}")
     UI.ok(f".gitignore                 {result.gitignore.relative_to(output_dir.parent)}")
 
 
