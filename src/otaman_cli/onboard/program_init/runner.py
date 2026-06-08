@@ -487,6 +487,19 @@ def run_program_init(args: argparse.Namespace) -> int:
                 for repo in ce_result.skipped:
                     _note(f"Already exists, skipped: {repo.path} — {repo.skipped_reason}")
 
+    # ── 7d. launcher scaffold (otaman-init-dev-scaffold) ──────────────────────
+    # Generate `launcher/` alongside platform.yaml so the program is ready
+    # to launch with `bash launcher/launch.sh` (or .ps1 on Windows). We
+    # default to non-interactive (--yes) inside program-init because the
+    # wizard is already long; users can re-run `otaman init` in the meta
+    # repo to customize connection mode / agent set / tmux layout.
+    if not getattr(args, "dry_run", False):
+        try:
+            from otaman_cli.main import _scaffold_launcher_after_init
+            _scaffold_launcher_after_init(platform_out, yes=True)
+        except Exception as _launcher_exc:
+            _note(f"Launcher scaffold skipped: {_launcher_exc}")
+
     # ── 8. post-init guidance ─────────────────────────────────────────────────
     print_guidance(answers, program_name)
 

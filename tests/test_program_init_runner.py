@@ -89,6 +89,13 @@ class TestRunnerEndToEnd:
         ckpt = tmp_path / "state" / "test-app" / ".init-state.yaml"
         assert not ckpt.exists()
 
+        # otaman-init-dev-scaffold: launcher/ generated alongside platform.yaml
+        launcher = platform.parent / "launcher"
+        assert (launcher / "launch-settings.yaml").is_file()
+        assert (launcher / "launch.sh").is_file()
+        assert (launcher / "launch.ps1").is_file()
+        assert (launcher / ".gitignore").is_file()
+
     def test_resume_from_checkpoint(self, tmp_path, monkeypatch):
         """Checkpoint with identity step completed → should skip identity questions."""
         from otaman_cli.onboard.program_init.checkpoint import Checkpoint
