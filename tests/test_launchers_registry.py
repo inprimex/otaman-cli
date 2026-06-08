@@ -267,7 +267,7 @@ class TestMaestroUpgrade:
         assert "ssh user@host" in r.stdout
         # Both pull and init paths should appear
         assert "git pull" in r.stdout
-        assert "maestro.py init" in r.stdout
+        assert "bash -l -c 'otaman init'" in r.stdout
 
     def test_dry_run_skip_pull(
         self, isolated_registry: Path, tmp_path: Path
@@ -277,7 +277,7 @@ class TestMaestroUpgrade:
         r = self._run(["upgrade", "--dry-run", "--skip-pull"], isolated_registry)
         assert r.returncode == 0
         assert "git pull" not in r.stdout
-        assert "maestro.py init" in r.stdout
+        assert "bash -l -c 'otaman init'" in r.stdout
 
     def test_dry_run_skip_init(
         self, isolated_registry: Path, tmp_path: Path
@@ -287,7 +287,7 @@ class TestMaestroUpgrade:
         r = self._run(["upgrade", "--dry-run", "--skip-init"], isolated_registry)
         assert r.returncode == 0
         assert "git pull" in r.stdout
-        assert "maestro.py init" not in r.stdout
+        assert "bash -l -c 'otaman init'" not in r.stdout
 
     def test_missing_launcher_folder_reports_failure(
         self, isolated_registry: Path, tmp_path: Path
