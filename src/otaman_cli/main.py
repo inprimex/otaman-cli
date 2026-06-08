@@ -3837,7 +3837,7 @@ def cmd_upgrade(args: list[str]) -> int:
       1. Read its launch-settings.yaml + active connection
       2. If remote (ssh/mesh): SSH to the host, run
          ``cd <ssh_plugin_path> && git pull`` then ``cd <ssh_remote_root>
-         && python3 cli/maestro.py init``  (legacy: uses plugin entry-point directly)
+         && bash -l -c 'otaman init'`` (login shell loads ~/.local/bin)
       3. If local: run the same commands locally
       4. Report success / failure per launcher
 
@@ -4002,15 +4002,19 @@ def _upgrade_one(
             UI.muted("    (skipping git pull -- no ssh_plugin_path configured)")
 
         if not skip_init:
-            # Use python3 -m so we don't depend on `otaman` being on PATH on
-            # the remote (nvm/login-shell dance is fragile in non-interactive
-            # SSH). The plugin path is already known.
+            # Non-interactive SSH does NOT load ~/.bashrc, so `~/.local/bin`
+            # (where pip --user installs otaman) is not on PATH. `bash -l`
+            # loads the login profile (~/.bash_profile / ~/.profile), which
+            # does include ~/.local/bin. Earlier attempt used
+            # `python3 <plugin>/cli/maestro.py init` but that entry-point
+            # never existed (legacy reference), so the upgrade silently
+            # failed on every SSH launcher. Reported by plugin-agent 2026-06-08.
             if not plugin_path:
                 UI.warn("    Cannot run otaman init -- no ssh_plugin_path configured")
                 return 3
             remote = (
                 f"cd {maestro_root} && "
-                f"python3 {plugin_path}/cli/maestro.py init"  # legacy: plugin entry-point not yet renamed
+                f"bash -l -c 'otaman init'"
             )
             full = ssh_cmd + [remote]
             UI.muted(f"    Run: {' '.join(full)}")
