@@ -156,6 +156,21 @@ def _build_platform_yaml(answers: dict[str, Any]) -> dict[str, Any]:
             doc["program"] = program_block
         program_block.setdefault("claude", {})["config_dir"] = claude_config_dir
 
+    # bus-cc-routing task 2.5 — default routing rules.  spec-agent always
+    # CC'd on messages to human; cpo-agent additionally CC'd on high/urgent
+    # only when a cpo-agent repo is configured.
+    routing_rules = [{"when": {"to": "human"}, "cc": ["spec-agent"]}]
+    has_cpo = any(
+        isinstance(r, dict) and r.get("owner") == "cpo-agent"
+        for r in doc.get("repos") or []
+    )
+    if has_cpo:
+        routing_rules.append({
+            "when": {"to": "human", "priority": ["high", "urgent"]},
+            "cc": ["cpo-agent"],
+        })
+    doc["bus"] = {"routing_rules": routing_rules}
+
     return doc
 
 
