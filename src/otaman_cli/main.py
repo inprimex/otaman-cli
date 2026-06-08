@@ -1109,7 +1109,70 @@ def cmd_init_companion_repos(rest: list[str]) -> int:
     return 0
 
 
-def cmd_init(args: list[str], dry_run: bool = False, skip_doctor: bool = False, update: bool = False, shell: bool = False) -> int:
+def _scaffold_launcher_after_init(platform_yaml: Path, *, yes: bool) -> None:
+    """Run the launcher scaffolder (otaman-init-dev-scaffold spec) after the
+    platform-init step succeeds.  Re-runs are idempotent — overwrites the
+    generated files; the gitignored local-overrides file is preserved if it
+    already has user content (the wizard's example is only emitted on first
+    init when no local file exists).
+    """
+    import yaml as _yaml
+    from otaman_cli.init.generator import generate as _generate
+    from otaman_cli.init.wizard import run_wizard as _run_wizard
+
+    output_dir = platform_yaml.parent / "launcher"
+
+    # Derive project name + agent names from the just-validated platform.yaml
+    try:
+        config = _yaml.safe_load(platform_yaml.read_text(encoding="utf-8")) or {}
+    except Exception:
+        config = {}
+    project_name = str(config.get("project") or "otaman-project")
+    agent_names: list[str] = []
+    for r in config.get("repos") or []:
+        if isinstance(r, dict) and r.get("owner"):
+            owner = str(r["owner"])
+            if owner and owner not in agent_names:
+                agent_names.append(owner)
+
+    print()
+    if yes:
+        UI.muted("Generating launcher/ (--yes; all defaults)")
+    else:
+        UI.header("Launcher scaffold (otaman-init-dev-scaffold)")
+    settings = _run_wizard(
+        project_name=project_name,
+        platform_agent_names=agent_names,
+        yes=yes,
+    )
+
+    # Preserve an existing launch-settings.local.yaml (user may have customised it);
+    # the generator always overwrites the commented example.
+    local_path = output_dir / "launch-settings.local.yaml"
+    preserved_local: str | None = None
+    if local_path.is_file():
+        text = local_path.read_text(encoding="utf-8")
+        # If file has any non-comment content, preserve it
+        live = any(
+            line.strip() and not line.strip().startswith("#")
+            for line in text.splitlines()
+        )
+        if live:
+            preserved_local = text
+
+    result = _generate(settings, output_dir)
+    if preserved_local is not None:
+        local_path.write_text(preserved_local, encoding="utf-8")
+        UI.muted(f"  preserved existing {local_path.name} (had user content)")
+
+    UI.ok(f"launch-settings.yaml      {result.settings_yaml.relative_to(output_dir.parent)}")
+    UI.ok(f"launch-settings.local.yaml {result.local_example.relative_to(output_dir.parent)}" if preserved_local is None else "")
+    UI.ok(f"launch.sh                  {result.launch_sh.relative_to(output_dir.parent)} (chmod +x)")
+    UI.ok(f"launch.ps1                 {result.launch_ps1.relative_to(output_dir.parent)}")
+    UI.ok(f".gitignore                 {result.gitignore.relative_to(output_dir.parent)}")
+
+
+def cmd_init(args: list[str], dry_run: bool = False, skip_doctor: bool = False, update: bool = False, shell: bool = False, yes: bool = False) -> int:
     """Initialize an otaman project. Creates platform.yaml if none exists.
 
     With no platform.yaml in cwd, detects context and routes to:
@@ -1180,6 +1243,15 @@ def cmd_init(args: list[str], dry_run: bool = False, skip_doctor: bool = False, 
     print()
     print("Writing agent: fields to repo .otaman files...")
     _cmd_init_update()
+
+    # otaman-init-dev-scaffold: generate launcher/ folder alongside platform.yaml
+    # (launch-settings.yaml + launch-settings.local.yaml + launch.sh + launch.ps1
+    # + .gitignore).  Prompts for connection mode + agents + tmux layout unless
+    # --yes is passed.
+    try:
+        _scaffold_launcher_after_init(config_path, yes=yes)
+    except Exception as _scaffold_exc:
+        UI.warn(f"Launcher scaffold skipped: {_scaffold_exc}")
 
     if skip_doctor:
         print()
@@ -4849,6 +4921,7 @@ def main() -> int:
     maestro_dir: str | None = None
     project_name_override: str | None = None
     shell_flag = False
+    yes_flag = False
     positional: list[str] = []
 
     i = 0
@@ -4867,6 +4940,9 @@ def main() -> int:
             i += 1
         elif rest[i] == "--shell":
             shell_flag = True
+            i += 1
+        elif rest[i] in ("--yes", "-y"):
+            yes_flag = True
             i += 1
         elif rest[i] == "--dry-run":
             dry_run = True
@@ -4912,7 +4988,7 @@ def main() -> int:
 
     commands = {
         "scan": lambda: cmd_scan(positional, update=update, maestro_dir=maestro_dir, dry_run=dry_run, project_name_override=project_name_override),
-        "init": lambda: cmd_init(positional, dry_run=dry_run, skip_doctor=skip_doctor, update=update, shell=shell_flag),
+        "init": lambda: cmd_init(positional, dry_run=dry_run, skip_doctor=skip_doctor, update=update, shell=shell_flag, yes=yes_flag),
         "clone": lambda: cmd_clone(positional, target=maestro_dir or ""),
         "doctor": lambda: cmd_doctor(positional),
         "status": lambda: cmd_status(positional),
