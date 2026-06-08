@@ -22,14 +22,30 @@ from otaman_cli.init.schema import (
 SPEC_AGENT = "spec-agent"
 
 
-def default_settings(*, project_name: str, extra_agent_names: list[str] | None = None) -> LaunchSettings:
-    """Build a `LaunchSettings` populated with all defaults — no prompts."""
+def default_settings(
+    *,
+    project_name: str,
+    extra_agent_names: list[str] | None = None,
+    meta_agent_name: str | None = None,
+) -> LaunchSettings:
+    """Build a `LaunchSettings` populated with all defaults — no prompts.
+
+    *meta_agent_name* is the orchestration meta-agent declared in
+    `platform.yaml` (role: orchestration).  When given, it is included as
+    a locked enabled entry alongside `spec-agent` (otaman-init-dev-scaffold
+    amendment #2).  When None, only `spec-agent` is locked.
+    """
+    locked = {SPEC_AGENT}
     agents = [AgentEntry(name=SPEC_AGENT, enabled=True)]
+    if meta_agent_name and meta_agent_name not in locked:
+        agents.append(AgentEntry(name=meta_agent_name, enabled=True))
+        locked.add(meta_agent_name)
     for name in extra_agent_names or []:
-        if name == SPEC_AGENT:
+        if name in locked:
             continue
         # Extras present in platform.yaml but not auto-enabled — user can flip
         agents.append(AgentEntry(name=name, enabled=False))
+        locked.add(name)
     return LaunchSettings(
         version=1,
         connection=Connection(mode="local"),
@@ -66,8 +82,10 @@ def _print_connection_help() -> None:
     print("  • mesh   — agents distributed across machines via otaman mesh network")
 
 
-def _print_agent_help(extras: list[str]) -> None:
+def _print_agent_help(extras: list[str], *, meta_agent_name: str | None = None) -> None:
     print("  ◉ spec-agent   (mandatory — cannot be deselected)")
+    if meta_agent_name and meta_agent_name != SPEC_AGENT:
+        print(f"  ◉ {meta_agent_name}   (mandatory orchestration meta-agent — cannot be deselected)")
     if extras:
         print(f"  Additional agents from platform.yaml (default: disabled): {', '.join(extras)}")
         print("  Type comma-separated names to enable them, or blank to accept defaults.")
@@ -77,19 +95,28 @@ def run_wizard(
     *,
     project_name: str,
     platform_agent_names: Iterable[str] | None = None,
+    meta_agent_name: str | None = None,
     yes: bool = False,
 ) -> LaunchSettings:
     """Run the wizard and return a populated LaunchSettings.
 
     `--yes` mode skips all prompts and returns defaults.  Interactive mode
     prints the design-defined explanations before each prompt.
-    spec-agent is hard-locked in both paths.
+    spec-agent and the orchestration meta-agent (when present) are
+    hard-locked in both paths.
     """
-    extras = [a for a in (platform_agent_names or []) if a != SPEC_AGENT]
+    locked = {SPEC_AGENT}
+    if meta_agent_name:
+        locked.add(meta_agent_name)
+    extras = [a for a in (platform_agent_names or []) if a not in locked]
 
     if yes:
-        # Non-interactive: all defaults, spec-agent enabled, no extras enabled
-        return default_settings(project_name=project_name, extra_agent_names=extras)
+        # Non-interactive: all defaults, locked agents enabled, no extras enabled
+        return default_settings(
+            project_name=project_name,
+            extra_agent_names=extras,
+            meta_agent_name=meta_agent_name,
+        )
 
     print()
     print("  Project name (used as tmux session prefix)")
@@ -111,11 +138,13 @@ def run_wizard(
 
     print()
     print("  Agents to launch")
-    _print_agent_help(extras)
+    _print_agent_help(extras, meta_agent_name=meta_agent_name)
     raw = _prompt("Additional agents to enable (comma-separated, blank for none)")
     enabled_extras = {a.strip() for a in raw.split(",") if a.strip()}
 
     agents = [AgentEntry(name=SPEC_AGENT, enabled=True)]
+    if meta_agent_name and meta_agent_name != SPEC_AGENT:
+        agents.append(AgentEntry(name=meta_agent_name, enabled=True))
     for extra in extras:
         agents.append(AgentEntry(name=extra, enabled=extra in enabled_extras))
 
