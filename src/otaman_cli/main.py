@@ -10,7 +10,7 @@ Usage:
     otaman git-host [detect|list|check|add|pr|post-review]  Git host integration (PRs, comments)
     otaman models [--diff|--suggest]  Show model/effort defaults; --diff vs platform.yaml overrides
     otaman clone <source>             Clone all repos + init + doctor
-    otaman doctor                     Check environment readiness
+    otaman doctor [--org <name>]      Check environment readiness; --org adds CE harness check
     otaman status [<repo>]            Cross-repo status dashboard
     otaman check [<agent>]            Check messages for an agent
     otaman ack <msg> [--read|--resolved]   Acknowledge a bus message
@@ -1351,8 +1351,185 @@ def cmd_clone(args: list[str], target: str = "") -> int:
     return 1 if failed else 0
 
 
-def cmd_doctor(args: list[str]) -> int:
-    """Check environment readiness — git, runtimes, CLI tools, MCP."""
+def _parse_version_tuple(text: str) -> tuple[int, ...] | None:
+    """Parse a version string into a tuple of ints; return None on failure.
+
+    Strips a leading ``v`` and takes only the first whitespace-delimited token
+    (handles outputs like ``v2.3.1 (Anthropic)``).  Stops at the first
+    non-numeric segment so suffixes like ``-beta`` don't crash the comparison.
+    """
+    if not text:
+        return None
+    token = text.strip().split()[0] if text.strip() else ""
+    if token.startswith("v") or token.startswith("V"):
+        token = token[1:]
+    parts: list[int] = []
+    for seg in token.split("."):
+        digits = ""
+        had_non_digit = False
+        for ch in seg:
+            if ch.isdigit():
+                digits += ch
+            else:
+                had_non_digit = True
+                break
+        if not digits:
+            break
+        parts.append(int(digits))
+        if had_non_digit:
+            # Stop at the first prerelease/build segment (e.g. "0-beta")
+            break
+    return tuple(parts) if parts else None
+
+
+def _check_org_harnesses(root: Path, org_name: str) -> tuple[int, list[dict]]:
+    """ce-bootstrap-harness-deps task 3.1 — verify harness binaries on an org user's PATH.
+
+    Returns (rc, results) where rc is 0 if all harnesses pass, 1 if any fail or
+    a precondition is unmet (org not declared, no system_user, no runner.harnesses).
+    `results` is a list of dicts with keys: harness_id, binary, status (ok/missing/
+    too_old), version, path, error.
+    """
+    import yaml as _yaml
+
+    platform_yaml = root / "platform.yaml"
+    if not platform_yaml.is_file():
+        return 1, [{"status": "error", "error": f"platform.yaml not found at {platform_yaml}"}]
+
+    try:
+        config = _yaml.safe_load(platform_yaml.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        return 1, [{"status": "error", "error": f"failed to parse platform.yaml: {exc}"}]
+
+    orgs = config.get("orgs") or {}
+    if not isinstance(orgs, dict) or org_name not in orgs:
+        return 1, [{
+            "status": "error",
+            "error": f"org '{org_name}' not declared in platform.yaml `orgs:` block",
+        }]
+    org_entry = orgs[org_name]
+    if not isinstance(org_entry, dict):
+        return 1, [{"status": "error", "error": f"orgs.{org_name} must be a mapping"}]
+    system_user = org_entry.get("system_user")
+    if not system_user or not isinstance(system_user, str):
+        return 1, [{
+            "status": "error",
+            "error": f"orgs.{org_name}.system_user is required (a Unix user name)",
+        }]
+
+    # Resolve the org user's home directory via pwd (more precise than expanduser,
+    # which returns the literal ~name when the user is missing).
+    import pwd as _pwd
+    try:
+        org_home = Path(_pwd.getpwnam(system_user).pw_dir)
+    except KeyError:
+        return 1, [{
+            "status": "error",
+            "error": f"system user '{system_user}' does not exist on this host",
+        }]
+
+    runner = config.get("runner") or {}
+    harnesses = runner.get("harnesses") if isinstance(runner, dict) else None
+    if not isinstance(harnesses, list) or not harnesses:
+        return 1, [{
+            "status": "error",
+            "error": "no runner.harnesses declared in platform.yaml",
+        }]
+
+    results: list[dict] = []
+    all_ok = True
+    for h in harnesses:
+        if not isinstance(h, dict):
+            continue
+        hid = h.get("id") or ""
+        binary = h.get("binary") or ""
+        min_version = h.get("min_version")
+        if not hid or not binary:
+            continue
+
+        bin_path = org_home / ".local" / "bin" / binary
+        entry = {
+            "harness_id": hid,
+            "binary": binary,
+            "path": str(bin_path),
+            "min_version": min_version,
+        }
+
+        if not bin_path.exists() or not os.access(bin_path, os.X_OK):
+            entry["status"] = "missing"
+            all_ok = False
+            results.append(entry)
+            continue
+
+        if min_version:
+            try:
+                proc = subprocess.run(
+                    [str(bin_path), "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                ver_text = (proc.stdout or proc.stderr or "").strip()
+            except Exception as exc:
+                entry["status"] = "version_check_failed"
+                entry["error"] = str(exc)
+                all_ok = False
+                results.append(entry)
+                continue
+
+            actual = _parse_version_tuple(ver_text)
+            required = _parse_version_tuple(str(min_version))
+            entry["version"] = ver_text.splitlines()[0] if ver_text else ""
+            if actual is None or required is None:
+                entry["status"] = "version_unparseable"
+                all_ok = False
+            elif actual < required:
+                entry["status"] = "too_old"
+                all_ok = False
+            else:
+                entry["status"] = "ok"
+        else:
+            # No min_version pinned — presence is sufficient
+            entry["status"] = "ok"
+
+        results.append(entry)
+
+    return (0 if all_ok else 1), results
+
+
+def _print_org_harness_report(org_name: str, results: list[dict]) -> None:
+    """Pretty-print the harness check results for `otaman doctor --org <name>`."""
+    print()
+    UI.header(f"Org Harness Check: {org_name}")
+    for r in results:
+        if r.get("status") == "error":
+            UI.error(r.get("error", "unknown error"))
+            continue
+        hid = r.get("harness_id", "")
+        binary = r.get("binary", "")
+        status = r.get("status", "")
+        version = r.get("version", "")
+        if status == "ok":
+            tail = f" {version}" if version else ""
+            print(f"  {UI.badge('OK', C.GREEN)}  {hid}  {binary}{tail}")
+        elif status == "missing":
+            print(f"  {UI.badge('FAIL', C.RED)}  {hid}  {binary}  NOT FOUND")
+            print(f"        run: ce-bootstrap.sh --org={org_name} --install-harness={hid}")
+        elif status == "too_old":
+            print(f"  {UI.badge('FAIL', C.RED)}  {hid}  {binary}  {version} (min: {r.get('min_version')})")
+            print(f"        run: ce-bootstrap.sh --org={org_name} --upgrade-harness={hid}")
+        else:
+            print(f"  {UI.badge('FAIL', C.RED)}  {hid}  {binary}  {status}: {r.get('error', '')}")
+
+
+def cmd_doctor(args: list[str], *, org: str | None = None) -> int:
+    """Check environment readiness — git, runtimes, CLI tools, MCP.
+
+    When ``org`` is given (CLI ``--org <name>``), additionally verify that each
+    binary declared in ``platform.yaml`` ``runner.harnesses`` is installed and
+    executable for that org's system user (ce-bootstrap-harness-deps task 3.1).
+    The harness check is additive — all existing checks still run.
+    """
     root = Path(args[0]).resolve() if args else find_project_root()
     if not root:
         UI.error("Not in an otaman project")
@@ -1471,7 +1648,15 @@ def cmd_doctor(args: list[str]) -> int:
     else:
         UI.error(f"{p} passed, {w} warnings, {f_} failed — fix issues above")
 
-    return 1 if report["summary"]["failed"] > 0 else 0
+    base_rc = 1 if report["summary"]["failed"] > 0 else 0
+
+    # ce-bootstrap-harness-deps task 3.1 — additive `--org` harness check
+    if org:
+        org_rc, results = _check_org_harnesses(root, org)
+        _print_org_harness_report(org, results)
+        return 1 if (base_rc or org_rc) else 0
+
+    return base_rc
 
 
 def cmd_status(args: list[str]) -> int:
@@ -4944,6 +5129,7 @@ def main() -> int:
     project_name_override: str | None = None
     shell_flag = False
     yes_flag = False
+    org_name: str | None = None
     positional: list[str] = []
 
     i = 0
@@ -4966,6 +5152,9 @@ def main() -> int:
         elif rest[i] in ("--yes", "-y"):
             yes_flag = True
             i += 1
+        elif rest[i] == "--org" and i + 1 < len(rest):
+            org_name = rest[i + 1]
+            i += 2
         elif rest[i] == "--dry-run":
             dry_run = True
             i += 1
@@ -5012,7 +5201,7 @@ def main() -> int:
         "scan": lambda: cmd_scan(positional, update=update, maestro_dir=maestro_dir, dry_run=dry_run, project_name_override=project_name_override),
         "init": lambda: cmd_init(positional, dry_run=dry_run, skip_doctor=skip_doctor, update=update, shell=shell_flag, yes=yes_flag),
         "clone": lambda: cmd_clone(positional, target=maestro_dir or ""),
-        "doctor": lambda: cmd_doctor(positional),
+        "doctor": lambda: cmd_doctor(positional, org=org_name),
         "status": lambda: cmd_status(positional),
         "check": lambda: cmd_check(positional, hide_broadcast_hours=hide_broadcast_hours),
         "read": lambda: cmd_read(positional),
