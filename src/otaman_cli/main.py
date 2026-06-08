@@ -1514,10 +1514,10 @@ def _print_org_harness_report(org_name: str, results: list[dict]) -> None:
             print(f"  {UI.badge('OK', C.GREEN)}  {hid}  {binary}{tail}")
         elif status == "missing":
             print(f"  {UI.badge('FAIL', C.RED)}  {hid}  {binary}  NOT FOUND")
-            print(f"        run: ce-bootstrap.sh --org={org_name} --install-harness={hid}")
+            print(f"        run: sudo bash ce-bootstrap.sh --org={org_name} --install-harness={hid}")
         elif status == "too_old":
             print(f"  {UI.badge('FAIL', C.RED)}  {hid}  {binary}  {version} (min: {r.get('min_version')})")
-            print(f"        run: ce-bootstrap.sh --org={org_name} --upgrade-harness={hid}")
+            print(f"        run: sudo bash ce-bootstrap.sh --org={org_name} --upgrade-harness={hid}")
         else:
             print(f"  {UI.badge('FAIL', C.RED)}  {hid}  {binary}  {status}: {r.get('error', '')}")
 
