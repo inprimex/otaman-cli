@@ -2659,7 +2659,51 @@ def cmd_check(args: list[str], hide_broadcast_hours: int | None = None) -> int:
     if pending:
         UI.muted("Use `otaman read <msg-stem>` to read a message")
         UI.muted("Use `otaman ack <msg-stem>` to acknowledge a message")
+
+    # agent-status-presence task 1.10 — fleet section.
+    _check_render_fleet(root)
+
     return 0
+
+
+def _check_render_fleet(root: Path) -> None:
+    """Append fleet summary to `otaman check` output.
+
+    Per design Q4:
+      - Omit section entirely when all agents idle OR agent_presence is false
+      - One-line compact summary when any agent is non-idle but none blocked
+      - Full table when any agent is blocked
+    """
+    try:
+        from otaman_cli.status import State, get_backend, is_agent_presence_enabled
+    except Exception:
+        return
+    if not is_agent_presence_enabled(root):
+        return
+    try:
+        records = get_backend(root).read_all()
+    except NotImplementedError:
+        return
+    except Exception:
+        return
+    non_idle = [r for r in records if r.state != State.IDLE]
+    if not non_idle:
+        return
+
+    has_blocked = any(r.state == State.BLOCKED for r in records)
+    if has_blocked:
+        # Full table — reuse the fleet command for consistency
+        print()
+        cmd_fleet_status([])
+        return
+
+    # Compact one-liner
+    parts: list[str] = []
+    for r in non_idle:
+        tag = r.task or r.change or "—"
+        parts.append(f"{r.agent} {r.state.value} ({tag})")
+    print()
+    UI.muted(f"Fleet: {' · '.join(parts)}")
 
 
 def cmd_ack(args: list[str], status: str = "resolved") -> int:
@@ -2767,7 +2811,116 @@ def cmd_ack(args: list[str], status: str = "resolved") -> int:
         ack_file.write_text(status + "\n", encoding="utf-8")
         UI.ok(f"Acked: {msg_file.stem} -> {status}")
 
+    # agent-status-presence task 1.6 — when a `task-assignment` is acked,
+    # auto-write `working` status with task/change parsed from the message.
+    # Best-effort: any parsing failure leaves task/change null.
+    _status_hook_after_ack(root, agent, matches)
+
     return 0
+
+
+def _status_hook_after_ack(root: Path, agent: str, msg_files: list[Path]) -> None:
+    """agent-status-presence task 1.6 — set `working` after acking a task-assignment.
+
+    For each acked message: if `type: task-assignment`, parse task + change from
+    the body (best-effort) and write a `working` status record.  Multiple
+    task-assignments in one ack call → first one wins (rare path; matches
+    spec's "fires when acked message is type: task-assignment" wording).
+    """
+    try:
+        from otaman_cli.status import (
+            AgentStatus, State, get_backend, is_agent_presence_enabled,
+        )
+    except Exception:
+        return
+    if not is_agent_presence_enabled(root):
+        return
+
+    import yaml as _yaml
+    for f in msg_files:
+        try:
+            text = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        fm_match = re.match(r"^---\n(.+?)\n---", text, re.DOTALL)
+        if not fm_match:
+            continue
+        try:
+            fm = _yaml.safe_load(fm_match.group(1))
+        except Exception:
+            continue
+        if not isinstance(fm, dict) or fm.get("type") != "task-assignment":
+            continue
+
+        body = text[fm_match.end():] if fm_match else ""
+        task, change = _parse_task_and_change_from_body(body)
+        backend = get_backend(root)
+        existing = backend.read(agent)
+        from datetime import datetime, timezone
+        now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+        # State change → reset since; same state → preserve.
+        since = existing.since if (existing and existing.state == State.WORKING) else now_iso
+        try:
+            backend.write(AgentStatus(
+                agent=agent, state=State.WORKING,
+                task=task, change=change,
+                since=since, updated_at=now_iso,
+            ))
+        except Exception:
+            pass
+        return  # first task-assignment in this ack batch is enough
+
+
+def _parse_task_and_change_from_body(body: str) -> tuple[str | None, str | None]:
+    """Best-effort: pull task + change from a task-assignment body.
+
+    Heuristic order (matches plugin-agent's task-assignment templates):
+      1. `**Task:** <N.M ...>` or `**Tasks:** <N.M ...>`
+      2. `**Change:** <slug>` (sometimes appears in design / task assignment)
+      3. `### N.M — <text>` heading (first occurrence) → use heading text
+      4. Change slug: a line starting with `**Spec:**` or path hint
+    Returns (task, change), either may be None.
+    """
+    task: str | None = None
+    change: str | None = None
+    if not body:
+        return task, change
+
+    for line in body.splitlines()[:80]:
+        s = line.strip()
+        if not s:
+            continue
+        if task is None:
+            m = re.match(r"^\*\*Tasks?:\*\*\s+(.+)$", s)
+            if m:
+                task = m.group(1).strip()[:120]
+                continue
+        if task is None:
+            m = re.match(r"^###\s+(\d+(?:\.\d+)+)\s+[—-]?\s*(.+)$", s)
+            if m:
+                task = f"{m.group(1)} {m.group(2)}"[:120]
+                continue
+        if change is None:
+            m = re.match(r"^\*\*Change:\*\*\s+(.+)$", s)
+            if m:
+                change = m.group(1).strip().split()[0]
+                continue
+        if change is None:
+            m = re.match(r"^\*\*Spec:\*\*\s+`?([\w/.\-]+)`?", s)
+            if m:
+                raw = m.group(1)
+                # If it's a path like openspec/changes/<slug>/..., extract the slug
+                parts = raw.split("/")
+                if "changes" in parts:
+                    idx = parts.index("changes")
+                    if idx + 1 < len(parts):
+                        change = parts[idx + 1]
+                        continue
+                change = raw
+                continue
+        if task is not None and change is not None:
+            break
+    return task, change
 
 
 def cmd_cleanup(args: list[str], dry_run: bool = False) -> int:
@@ -3146,7 +3299,129 @@ status: pending
                 blocked_file.unlink()
             UI.ok(f"Unblocked: Removed blocked entry for {change_name}")
 
+    # agent-status-presence task 1.7 — write idle if all this agent's tasks
+    # for the change are complete; otherwise write working (task=null).
+    _status_hook_after_complete(root, agent, change_name)
+
     return 0
+
+
+def _status_hook_after_complete(root: Path, agent: str, change_name: str) -> None:
+    """agent-status-presence task 1.7 — refresh agent status after `complete`.
+
+    Inspect the change's tasks.md for unchecked items assigned to this agent.
+    - any unchecked → write `working` with task=null, change=<this change>
+    - none unchecked → write `idle`
+
+    Best-effort: silently no-op on any failure (file missing, parse error, etc.).
+    """
+    try:
+        from otaman_cli.status import (
+            AgentStatus, State, get_backend, is_agent_presence_enabled,
+        )
+    except Exception:
+        return
+    if not is_agent_presence_enabled(root):
+        return
+
+    tasks_md = _find_tasks_md_for_change(root, change_name)
+    if not tasks_md or not tasks_md.is_file():
+        return
+
+    try:
+        text = tasks_md.read_text(encoding="utf-8")
+    except OSError:
+        return
+
+    # An "unchecked task for this agent" looks like one of:
+    #   - [ ] 1.2 @otaman-cli ...
+    #   - [ ] 1.2 ... (under a "## @otaman-cli" header)
+    # Be conservative: count anything `- [ ]` whose line OR enclosing section
+    # mentions this agent's @-handle.
+    handle = f"@otaman-{agent.replace('-agent', '')}" if agent.endswith("-agent") else f"@{agent}"
+    current_section_handle: str | None = None
+    has_unchecked = False
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        # Section header: `## @otaman-cli` or `## @<handle>`
+        if line.startswith("## ") and "@" in line:
+            current_section_handle = line.split("@", 1)[1].split()[0]
+            current_section_handle = "@" + current_section_handle.rstrip()
+        if line.startswith("- [ ]"):
+            mine = (
+                handle in line
+                or (current_section_handle and current_section_handle.lower() == handle.lower())
+                or f"@{agent}" in line
+            )
+            if mine:
+                has_unchecked = True
+                break
+
+    backend = get_backend(root)
+    existing = backend.read(agent)
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    if has_unchecked:
+        # working with task=null (per spec); preserve since if already working
+        since = existing.since if (existing and existing.state == State.WORKING) else now_iso
+        new_status = AgentStatus(
+            agent=agent, state=State.WORKING,
+            task=None, change=change_name,
+            since=since, updated_at=now_iso,
+        )
+    else:
+        # idle clears everything
+        since = existing.since if (existing and existing.state == State.IDLE) else now_iso
+        new_status = AgentStatus(
+            agent=agent, state=State.IDLE,
+            task=None, change=None, outcome=None, blocked_by=None,
+            since=since, updated_at=now_iso,
+        )
+
+    try:
+        backend.write(new_status)
+    except Exception:
+        pass
+
+
+def _find_tasks_md_for_change(root: Path, change_name: str) -> Path | None:
+    """Locate `openspec/changes/<change>/tasks.md` in the specs repo.
+
+    Resolution order:
+      1. ../<root>-specs/openspec/changes/<change>/tasks.md
+      2. Any directory `repos[].path` with name ending `-specs`
+      3. Sibling sister directory `<project>-specs` of the meta repo
+      4. Direct path: ../otaman-specs/openspec/changes/<change>/tasks.md
+    """
+    import yaml as _yaml
+    candidates: list[Path] = []
+    pyaml = root / "platform.yaml"
+    if pyaml.is_file():
+        try:
+            doc = _yaml.safe_load(pyaml.read_text(encoding="utf-8")) or {}
+        except Exception:
+            doc = {}
+        repos = doc.get("repos") if isinstance(doc, dict) else None
+        if isinstance(repos, list):
+            for r in repos:
+                if not isinstance(r, dict):
+                    continue
+                p = r.get("path")
+                name = r.get("name") or ""
+                if not p:
+                    continue
+                if "specs" in str(name):
+                    abs_p = (root / str(p)).resolve()
+                    candidates.append(abs_p / "openspec" / "changes" / change_name / "tasks.md")
+    # Fallback: well-known sibling `otaman-specs`
+    candidates.append((root.parent / "otaman-specs" / "openspec" / "changes" / change_name / "tasks.md").resolve())
+    # Project-specs sibling
+    candidates.append((root.parent / f"{root.name}-specs" / "openspec" / "changes" / change_name / "tasks.md").resolve())
+    for c in candidates:
+        if c.is_file():
+            return c
+    return None
 
 
 def cmd_approve(args: list[str], action: str = "list", comment: str = "") -> int:
@@ -4672,8 +4947,19 @@ def _upgrade_one(
     return 2
 
 
-def cmd_blocked(args: list[str], list_mode: bool = False, clear_slug: str = "") -> int:
-    """List or clear blocked tasks for the current agent."""
+def cmd_blocked(
+    args: list[str],
+    list_mode: bool = False,
+    clear_slug: str = "",
+    blocked_by: str | None = None,
+) -> int:
+    """List, clear, or register blocked tasks for the current agent.
+
+    `otaman blocked --list`           — list blocked entries
+    `otaman blocked --clear <slug>`   — remove a blocked entry
+    `otaman blocked <slug> [--blocked-by NAME]`  — register a new blocked entry
+                                                   and set status (task 1.8)
+    """
     root = find_project_root()
     if not root:
         UI.error("Not in an otaman project")
@@ -4723,10 +5009,70 @@ def cmd_blocked(args: list[str], list_mode: bool = False, clear_slug: str = "") 
         UI.ok(f"Cleared blocked task: {clear_slug}")
         return 0
 
-    UI.error("Specify --list or --clear <slug>")
+    # agent-status-presence task 1.8 — register a new blocked entry +
+    # set status. `otaman blocked <slug> [--blocked-by NAME]`.
+    if args:
+        slug = args[0].strip()
+        if not slug:
+            UI.error("Empty blocked slug")
+            return 1
+        from datetime import datetime, timezone
+        now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+        by = blocked_by or "human"
+        entry = (
+            f"## Blocked: {slug}\n"
+            f"- **Blocked since**: {now_iso}\n"
+            f"- **Blocked by**: {by}\n"
+        )
+        blocked_file.parent.mkdir(parents=True, exist_ok=True)
+        existing = blocked_file.read_text(encoding="utf-8") if blocked_file.is_file() else ""
+        if f"## Blocked: {slug}" in existing:
+            UI.muted(f"Already blocked: {slug} (no change)")
+        else:
+            new_text = (existing.rstrip("\n") + "\n\n" + entry) if existing.strip() else entry
+            blocked_file.write_text(new_text, encoding="utf-8")
+            UI.ok(f"Registered blocked task: {slug}")
+            UI.muted(f"  blocked_by: {by}")
+
+        # Status hook — write blocked state
+        _status_hook_after_blocked(root, agent, slug, by)
+        return 0
+
+    UI.error("Specify --list, --clear <slug>, or pass a slug to register")
     UI.muted("  otaman blocked --list")
     UI.muted("  otaman blocked --clear <slug>")
+    UI.muted("  otaman blocked <slug> [--blocked-by NAME]")
     return 1
+
+
+def _status_hook_after_blocked(root: Path, agent: str, slug: str, by: str) -> None:
+    """agent-status-presence task 1.8 — write `blocked` status after `otaman blocked <slug>`."""
+    try:
+        from otaman_cli.status import (
+            AgentStatus, State, get_backend, is_agent_presence_enabled,
+        )
+    except Exception:
+        return
+    if not is_agent_presence_enabled(root):
+        return
+
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    backend = get_backend(root)
+    existing = backend.read(agent)
+    since = existing.since if (existing and existing.state == State.BLOCKED) else now_iso
+    # Preserve existing task/change so the operator sees what triggered the block
+    task = existing.task if existing else slug
+    change = existing.change if existing else None
+    try:
+        backend.write(AgentStatus(
+            agent=agent, state=State.BLOCKED,
+            task=task, change=change, blocked_by=by,
+            since=since, updated_at=now_iso,
+        ))
+    except Exception:
+        pass
 
 
 def _parse_flag_value(rest: list[str], flag: str, *, default: str | None = None) -> str | None:
@@ -5540,6 +5886,7 @@ def main() -> int:
     hide_broadcast_hours: int | None = None
     blocked_list = False
     blocked_clear = ""
+    blocked_by_value: str | None = None
     maestro_dir: str | None = None
     project_name_override: str | None = None
     shell_flag = False
@@ -5593,6 +5940,9 @@ def main() -> int:
             i += 1
         elif rest[i] == "--clear" and i + 1 < len(rest):
             blocked_clear = rest[i + 1]
+            i += 2
+        elif rest[i] == "--blocked-by" and i + 1 < len(rest):
+            blocked_by_value = rest[i + 1]
             i += 2
         elif rest[i] == "--read":
             ack_status = "read"
@@ -5648,7 +5998,7 @@ def main() -> int:
         "git-host": lambda: cmd_git_host(rest),
         "models": lambda: cmd_models(rest),
         "set-agent": lambda: cmd_set_agent(positional),
-        "blocked": lambda: cmd_blocked(positional, list_mode=blocked_list, clear_slug=blocked_clear),
+        "blocked": lambda: cmd_blocked(positional, list_mode=blocked_list, clear_slug=blocked_clear, blocked_by=blocked_by_value),
         # outcome/solution/persona are dispatched BEFORE this dict by the early
         # branch in main() so flags survive the generic loop. These entries are
         # retained for discoverability (help-coverage test scans this dict).
