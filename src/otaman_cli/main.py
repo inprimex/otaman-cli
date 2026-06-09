@@ -3914,6 +3914,52 @@ def _normalize_ce_platform_yaml_for_validation(config_path: Path) -> tuple[Path,
             )
             changed = True
 
+    # 4. CE-runtime top-level keys (ce-org-agent-bootstrap follow-up;
+    # extends task 4.1 per deploy-agent's 2026-06-09 question).  The core
+    # schema has `additionalProperties: false` at root, so these would
+    # otherwise force a hard error.  Treat them as opaque pass-through —
+    # the CLI doesn't validate their contents; runner-agent reads them.
+    # Pending core-agent extending platform-schema.yaml to declare these
+    # as first-class root keys.
+    _CE_RUNTIME_STRIPPED_KEYS = ("runner", "terminal", "agent_bootstrap")
+    stripped_ce_keys: list[str] = []
+    for k in _CE_RUNTIME_STRIPPED_KEYS:
+        if k in doc:
+            doc.pop(k, None)
+            stripped_ce_keys.append(k)
+    if stripped_ce_keys:
+        hints.append(
+            f"platform.yaml: CE-runtime top-level keys present "
+            f"({', '.join(stripped_ce_keys)}) — accepted as pass-through "
+            "for validation. The core schema does not yet declare them; "
+            "extension tracked separately."
+        )
+        changed = True
+
+    # 5. Empty / missing `repos:` for fresh CE org-dir scaffolds.  The
+    # schema requires `repos: minItems: 1`, but a freshly-bootstrapped
+    # org dir has no programs yet.  Detect "CE org-dir scaffold" mode by
+    # the presence of stripped CE-runtime keys OR explicitly-empty repos
+    # alongside any of those keys originally.  Inject a single synthetic
+    # placeholder repo into the validation copy so the schema check
+    # passes; the on-disk file remains empty.
+    if not isinstance(doc.get("repos"), list) or len(doc.get("repos") or []) == 0:
+        if stripped_ce_keys:
+            # Schema requires name to match ^[A-Za-z][A-Za-z0-9._-]{1,63}$
+            # and owner to match ^[a-z][a-z0-9-]{1,63}$.
+            doc["repos"] = [{
+                "name": "ce-org-placeholder",
+                "path": ".",
+                "owner": "ops-agent",
+            }]
+            hints.append(
+                "platform.yaml: empty/missing `repos:` accepted for fresh "
+                "CE org-dir scaffold. Programs will populate `repos:` as "
+                "they are added; canonical files should list at least "
+                "one repo."
+            )
+            changed = True
+
     if not changed:
         return config_path, hints
 
