@@ -11,7 +11,8 @@ Usage:
     otaman models [--diff|--suggest]  Show model/effort defaults; --diff vs platform.yaml overrides
     otaman clone <source>             Clone all repos + init + doctor
     otaman doctor [--org <name>]      Check environment readiness; --org adds CE harness check
-    otaman status [<repo>]            Cross-repo status dashboard
+    otaman status [--blocked] [--agent NAME] [--json]   Fleet status (or --repos for cross-repo view)
+    otaman set-status <state>         Update this agent's status (working|blocked|waiting|idle)
     otaman check [<agent>]            Check messages for an agent
     otaman ack <msg> [--read|--resolved]   Acknowledge a bus message
     otaman cleanup [--dry-run]        Archive old bus messages
@@ -1774,7 +1775,246 @@ def cmd_doctor(args: list[str], *, org: str | None = None) -> int:
     return base_rc
 
 
+def cmd_set_status(args: list[str]) -> int:
+    """agent-status-presence task 1.5 — write a status record for the current agent.
+
+    Usage:
+      otaman set-status <state> [--task "..."] [--change <slug>] [--outcome <slug>]
+                                [--blocked-by <agent|human>] [--agent <name>]
+
+    States: working | blocked | waiting | idle.
+
+    Heartbeat: re-calling with the same state preserves `since`; only
+    `updated_at` advances.
+    """
+    import argparse
+    parser = argparse.ArgumentParser(prog="otaman set-status", add_help=False)
+    parser.add_argument("state", nargs="?")
+    parser.add_argument("--task", default=None)
+    parser.add_argument("--change", default=None)
+    parser.add_argument("--outcome", default=None)
+    parser.add_argument("--blocked-by", dest="blocked_by", default=None)
+    parser.add_argument("--agent", dest="explicit_agent", default=None)
+    try:
+        ns = parser.parse_args(args)
+    except SystemExit:
+        UI.muted("Usage: otaman set-status <working|blocked|waiting|idle> "
+                 "[--task \"...\"] [--change SLUG] [--blocked-by NAME] [--outcome SLUG]")
+        return 2
+
+    if not ns.state:
+        UI.error("set-status requires a state argument")
+        UI.muted("Usage: otaman set-status <working|blocked|waiting|idle> [...]")
+        return 2
+
+    from otaman_cli.status import (
+        AgentStatus, State, get_backend, is_agent_presence_enabled,
+    )
+
+    try:
+        new_state = State(ns.state.lower())
+    except ValueError:
+        UI.error(f"Invalid state {ns.state!r}; expected one of: "
+                 "working, blocked, waiting, idle")
+        return 2
+
+    root = find_project_root()
+    if not root:
+        UI.error("Not in an otaman project")
+        return 1
+
+    agent = resolve_agent_identity(root, explicit=ns.explicit_agent)
+    if not agent:
+        UI.error("Agent identity could not be resolved.")
+        UI.muted("  Sources tried: OTAMAN_AGENT env, .otaman agent: field (CWD walk), .agents/current-agent")
+        UI.muted("  Fix: pass --agent <name>, or set OTAMAN_AGENT, or run 'otaman init --update'")
+        return 1
+
+    if not is_agent_presence_enabled(root):
+        UI.muted("Agent presence disabled (platform.agent_presence: false) — no-op")
+        return 0
+
+    backend = get_backend(root)
+    existing = backend.read(agent)
+
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    # Heartbeat: same state → preserve `since`; advance `updated_at` only.
+    if existing is not None and existing.state == new_state:
+        since = existing.since
+    else:
+        since = now_iso
+
+    # Clearing fields when transitioning to idle (per spec: task/change null when idle)
+    if new_state == State.IDLE:
+        task = None
+        change = None
+        outcome = None
+        blocked_by = None
+    else:
+        task = ns.task if ns.task is not None else (existing.task if existing else None)
+        change = ns.change if ns.change is not None else (existing.change if existing else None)
+        outcome = ns.outcome if ns.outcome is not None else (existing.outcome if existing else None)
+        # blocked_by only meaningful for blocked state
+        if new_state == State.BLOCKED:
+            blocked_by = ns.blocked_by if ns.blocked_by is not None else (
+                existing.blocked_by if existing else "human"
+            )
+        else:
+            blocked_by = None
+
+    status = AgentStatus(
+        agent=agent,
+        state=new_state,
+        task=task,
+        change=change,
+        outcome=outcome,
+        blocked_by=blocked_by,
+        since=since,
+        updated_at=now_iso,
+    )
+    try:
+        backend.write(status)
+    except Exception as exc:
+        UI.error(f"Failed to write status: {exc}")
+        return 1
+
+    UI.ok(f"Status: {agent} → {new_state.value}")
+    if task:
+        UI.muted(f"  task:       {task}")
+    if change:
+        UI.muted(f"  change:     {change}")
+    if blocked_by:
+        UI.muted(f"  blocked_by: {blocked_by}")
+    UI.muted(f"  since:      {since}")
+    return 0
+
+
+def cmd_fleet_status(args: list[str]) -> int:
+    """agent-status-presence task 1.9 — fleet status table.
+
+    Usage:
+      otaman status [--blocked] [--agent NAME] [--json]
+
+    Reads all status files via the configured backend, sorts by priority
+    (blocked → working → waiting → idle), prints a table with summary counts.
+    """
+    import argparse, json
+    parser = argparse.ArgumentParser(prog="otaman status", add_help=False)
+    parser.add_argument("--blocked", action="store_true")
+    parser.add_argument("--agent", dest="agent_filter", default=None)
+    parser.add_argument("--json", action="store_true", dest="as_json")
+    try:
+        ns, _unknown = parser.parse_known_args(args)
+    except SystemExit:
+        UI.muted("Usage: otaman status [--blocked] [--agent NAME] [--json]")
+        return 2
+
+    from otaman_cli.status import State, get_backend, is_agent_presence_enabled
+    root = find_project_root()
+    if not root:
+        UI.error("Not in an otaman project")
+        return 1
+
+    if not is_agent_presence_enabled(root):
+        if ns.as_json:
+            print(json.dumps({"enabled": False, "agents": []}))
+        else:
+            print("Agent presence disabled (platform.agent_presence: false)")
+        return 0
+
+    backend = get_backend(root)
+    try:
+        records = backend.read_all()
+    except NotImplementedError as exc:
+        UI.error(str(exc))
+        return 2
+
+    if ns.agent_filter:
+        records = [r for r in records if r.agent == ns.agent_filter]
+    if ns.blocked:
+        records = [r for r in records if r.state == State.BLOCKED]
+
+    # Priority sort: blocked, working, waiting, idle
+    order = {State.BLOCKED: 0, State.WORKING: 1, State.WAITING: 2, State.IDLE: 3}
+    records.sort(key=lambda r: (order.get(r.state, 99), r.agent))
+
+    if ns.as_json:
+        print(json.dumps({
+            "enabled": True,
+            "generated_at": __import__("datetime").datetime.now(
+                __import__("datetime").timezone.utc
+            ).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "agents": [r.to_dict() for r in records],
+        }, indent=2))
+        return 0
+
+    from datetime import datetime, timezone
+    now_utc = datetime.now(timezone.utc)
+    print()
+    UI.header(f"Fleet status  ({now_utc.strftime('%Y-%m-%d %H:%M UTC')})")
+    if not records:
+        UI.muted("  No agents reporting status yet.")
+        return 0
+
+    def _since_human(iso: str) -> str:
+        try:
+            t = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return iso
+        delta = now_utc - t
+        secs = int(delta.total_seconds())
+        if secs < 60:
+            return f"{secs}s"
+        if secs < 3600:
+            return f"{secs // 60}m"
+        if secs < 86400:
+            return f"{secs // 3600}h"
+        return f"{secs // 86400}d"
+
+    # Render compact table
+    print(f"  {'AGENT':<18} {'STATE':<9} {'SINCE':<8} TASK / CHANGE")
+    counts = {s: 0 for s in State}
+    for r in records:
+        counts[r.state] = counts.get(r.state, 0) + 1
+        tail = ""
+        if r.state != State.IDLE:
+            parts: list[str] = []
+            if r.task:
+                parts.append(r.task)
+            if r.change:
+                parts.append(r.change)
+            tail = "  ·  ".join(parts) if parts else "—"
+        elif r.state == State.IDLE:
+            tail = "—"
+        if r.state == State.BLOCKED and r.blocked_by:
+            tail = f"blocked by {r.blocked_by}  ·  {tail}".rstrip("  ·  ")
+        print(f"  {r.agent:<18} {r.state.value:<9} {_since_human(r.since):<8} {tail}")
+
+    print()
+    UI.muted(
+        f"Blocked: {counts.get(State.BLOCKED, 0)}   "
+        f"Waiting: {counts.get(State.WAITING, 0)}   "
+        f"Working: {counts.get(State.WORKING, 0)}   "
+        f"Idle: {counts.get(State.IDLE, 0)}"
+    )
+    return 0
+
+
 def cmd_status(args: list[str]) -> int:
+    """Show fleet status (default) or cross-repo dashboard (--repos).
+
+    Default: agent-status-presence fleet view (task 1.9).  Pass --repos to
+    get the legacy cross-repo dashboard.
+    """
+    if "--repos" in args:
+        args = [a for a in args if a != "--repos"]
+        return _cmd_status_repos(args)
+    return cmd_fleet_status(args)
+
+
+def _cmd_status_repos(args: list[str]) -> int:
     """Show cross-repo status dashboard. Also runs silent bus cleanup."""
     root = find_project_root()
     if not root:
@@ -5118,7 +5358,8 @@ def cmd_help() -> int:
   {C.GREEN}compliance{C.RESET} [--format F]        Generate compliance audit report (HIPAA / ISO / GDPR)
 
 {C.BOLD}Bus & messages:{C.RESET}
-  {C.GREEN}status{C.RESET} [repo]                 Cross-repo status dashboard (commits, messages, reviews)
+  {C.GREEN}status{C.RESET} [--blocked|--agent N|--json|--repos]   Fleet status (per-agent presence; --repos for legacy view)
+  {C.GREEN}set-status{C.RESET} <state> [--task ...]   Update this agent's status (working|blocked|waiting|idle)
   {C.GREEN}whoami{C.RESET}, {C.GREEN}iam{C.RESET}                   Show agent identity + project + routing + bus state ([--json])
   {C.GREEN}check{C.RESET} [agent]                 Check pending messages for an agent (auto-detects from cwd)
   {C.GREEN}read{C.RESET} <message-stem>           Read full content of a bus message (substring match OK)
@@ -5376,7 +5617,8 @@ def main() -> int:
         "init": lambda: cmd_init(positional, dry_run=dry_run, skip_doctor=skip_doctor, update=update, shell=shell_flag, yes=yes_flag),
         "clone": lambda: cmd_clone(positional, target=maestro_dir or ""),
         "doctor": lambda: cmd_doctor(positional, org=org_name),
-        "status": lambda: cmd_status(positional),
+        "status": lambda: cmd_status(rest),
+        "set-status": lambda: cmd_set_status(rest),
         "check": lambda: cmd_check(positional, hide_broadcast_hours=hide_broadcast_hours),
         "read": lambda: cmd_read(positional),
         "send": lambda: cmd_send(rest),
