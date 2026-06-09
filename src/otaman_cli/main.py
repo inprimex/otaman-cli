@@ -1347,9 +1347,22 @@ def cmd_init(args: list[str], dry_run: bool = False, skip_doctor: bool = False, 
     else:
         UI.header("Otaman Init")
 
-    # Validate first
+    # Validate first.
+    # ce-org-agent-bootstrap task 4.1 — accept CE-shaped platform.yaml by
+    # normalizing in-memory before validation (alias agent→owner; infer
+    # project from parent dir; default version=1.0).  Hints printed but
+    # the on-disk file is not rewritten.
     print(f"Validating {config_path.name}...")
-    result = run_script("validate-platform.py", str(config_path), capture=True)
+    norm_path, hints = _normalize_ce_platform_yaml_for_validation(config_path)
+    if hints:
+        for h in hints:
+            UI.muted(f"  hint: {h}")
+    result = run_script("validate-platform.py", str(norm_path), capture=True)
+    if norm_path != config_path:
+        try:
+            norm_path.unlink()
+        except OSError:
+            pass
     if result.returncode != 0:
         UI.error((result.stdout or "") + (result.stderr or "") or "validate failed (no output)")
         return result.returncode
@@ -3810,10 +3823,145 @@ def cmd_review(args: list[str], reviewer: str = "all") -> int:
     return 0
 
 
+def _normalize_ce_platform_yaml_for_validation(config_path: Path) -> tuple[Path, list[str]]:
+    """ce-org-agent-bootstrap task 4.1 — normalize CE-shaped platform.yaml in-memory.
+
+    The schema in otaman-core requires `project`, `version`, and per-repo
+    `owner`.  CE bootstrap historically wrote `agent:` per repo and
+    sometimes omitted `project:` / `version:`.  This helper:
+
+      - Treats `agent:` as alias for `owner:` on each repo entry
+      - Infers `project:` from the parent dir name when absent
+      - Defaults `version:` to "1.0" when absent
+      - Returns a path to a tmp file holding the normalized YAML when any
+        change was made; otherwise returns the original path
+      - Returns a list of human-readable deprecation hints for the caller
+        to surface
+
+    The on-disk source file is NEVER modified by this helper.  When changes
+    were applied, the caller is responsible for unlinking the returned tmp
+    path after the validator runs.
+    """
+    import yaml as _yaml
+    import tempfile as _tmp
+
+    hints: list[str] = []
+    if not config_path.is_file():
+        # Defer to the validator; it will report the missing-file error itself
+        return config_path, hints
+
+    try:
+        text = config_path.read_text(encoding="utf-8")
+        doc = _yaml.safe_load(text) or {}
+    except Exception:
+        return config_path, hints
+
+    if not isinstance(doc, dict):
+        return config_path, hints
+
+    changed = False
+
+    # 1. version default
+    if "version" not in doc:
+        doc["version"] = "1.0"
+        hints.append(
+            "platform.yaml: `version:` field missing — defaulted to \"1.0\" for validation. "
+            "Add `version: \"1.0\"` to the canonical file to silence this hint."
+        )
+        changed = True
+
+    # 2. project inferred from parent dir
+    if "project" not in doc or not doc.get("project"):
+        try:
+            parent = config_path.resolve().parent
+            inferred = parent.name or "ce-org"
+            # Sanitize: lowercase, replace anything non-[a-z0-9-] with '-'
+            import re as _re
+            inferred = _re.sub(r"[^a-z0-9-]+", "-", inferred.lower()).strip("-") or "ce-org"
+        except Exception:
+            inferred = "ce-org"
+        doc["project"] = inferred
+        hints.append(
+            f"platform.yaml: `project:` field missing — inferred {inferred!r} from "
+            "parent directory name. Add `project: <slug>` to the canonical file."
+        )
+        changed = True
+
+    # 3. repos: agent → owner alias.  The schema has additionalProperties:
+    # false, so we must DROP `agent:` from the validation-time copy after
+    # promoting it.  The user's on-disk file is untouched.
+    repos = doc.get("repos")
+    if isinstance(repos, list):
+        promoted = 0
+        for r in repos:
+            if not isinstance(r, dict):
+                continue
+            agent_val = r.get("agent")
+            owner_val = r.get("owner")
+            if agent_val and not owner_val:
+                r["owner"] = agent_val
+                promoted += 1
+            # Strip `agent:` from the validation copy whether or not we
+            # promoted (e.g. if both were set, agent is still unknown).
+            if "agent" in r:
+                r.pop("agent", None)
+                changed = True
+        if promoted:
+            hints.append(
+                f"platform.yaml: {promoted} repo entry(ies) use `agent:` field — "
+                "aliased to `owner:` for validation. Add `owner:` alongside "
+                "`agent:` (same value) in the canonical file."
+            )
+            changed = True
+
+    if not changed:
+        return config_path, hints
+
+    # Write the normalized doc to a tmp file in the same directory so the
+    # validator's relative-path resolution behaves the same way.
+    parent_dir = config_path.parent
+    try:
+        fd, tmp_name = _tmp.mkstemp(
+            prefix=".otaman-ce-norm-", suffix=".yaml", dir=str(parent_dir),
+        )
+    except OSError:
+        # Fall back to system tmp if the parent dir isn't writable
+        fd, tmp_name = _tmp.mkstemp(prefix=".otaman-ce-norm-", suffix=".yaml")
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            _yaml.safe_dump(doc, fh, sort_keys=False, default_flow_style=False)
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        return config_path, hints
+    return tmp_path, hints
+
+
 def cmd_validate(args: list[str]) -> int:
-    """Validate platform.yaml."""
+    """Validate platform.yaml.
+
+    ce-org-agent-bootstrap task 4.1 — accepts the CE platform.yaml shape
+    by normalizing in-memory before validation (agent→owner alias; project
+    inferred from parent dir; version default "1.0").  Deprecation hints
+    are printed; the on-disk file is not rewritten.
+    """
     config = args[0] if args else "platform.yaml"
-    result = run_script("validate-platform.py", config)
+    config_path = Path(config)
+    norm_path, hints = _normalize_ce_platform_yaml_for_validation(config_path)
+    if hints:
+        for h in hints:
+            UI.muted(f"hint: {h}")
+    try:
+        result = run_script("validate-platform.py", str(norm_path))
+    finally:
+        if norm_path != config_path and norm_path.exists():
+            try:
+                norm_path.unlink()
+            except OSError:
+                pass
     return result.returncode
 
 
