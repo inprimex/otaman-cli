@@ -107,4 +107,27 @@ Why the split: bus checks happen dozens of times per session, and the MCP-via-in
 - Work in branches: `agent/cli-agent/{feature-name}`
 - All changes go through PRs
 - Write clear commit messages for the audit trail
+
+### Agent Status (REQUIRED)
+
+Before writing any code for a specific task, call:
+
+```bash
+otaman set-status working --task "<N.M task description>" --change <change-name>
+```
+
+When waiting on another agent or a dependency:
+
+```bash
+otaman set-status waiting --task "<N.M ...>" --change <change-name>
+```
+
+When done with all current tasks:
+
+```bash
+otaman set-status idle
+```
+
+One CLI call — no file editing, no token overhead. The human sees live fleet
+state in `otaman status` and at the bottom of `otaman check`.
 <!-- otaman:end -->
