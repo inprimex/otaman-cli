@@ -3830,17 +3830,33 @@ def _normalize_ce_platform_yaml_for_validation(config_path: Path) -> tuple[Path,
     `owner`.  CE bootstrap historically wrote `agent:` per repo and
     sometimes omitted `project:` / `version:`.  This helper:
 
-      - Treats `agent:` as alias for `owner:` on each repo entry
+      - Treats `agent:` as alias for `owner:` on each repo entry (and
+        strips `agent:` from the validation copy since repo items have
+        `additionalProperties: false` in the schema)
       - Infers `project:` from the parent dir name when absent
       - Defaults `version:` to "1.0" when absent
+      - Injects a synthetic placeholder repo into the validation copy
+        when `repos:` is empty AND a CE-scaffold marker (`runner:` or
+        `terminal:`) is present, so the schema's `repos: minItems: 1`
+        check passes
       - Returns a path to a tmp file holding the normalized YAML when any
         change was made; otherwise returns the original path
-      - Returns a list of human-readable deprecation hints for the caller
-        to surface
+      - Returns a list of human-readable hints for the caller to surface
 
     The on-disk source file is NEVER modified by this helper.  When changes
     were applied, the caller is responsible for unlinking the returned tmp
     path after the validator runs.
+
+    History:
+      - 2026-06-09 (PR #54): original 3 normalizations (agent→owner,
+        project, version)
+      - 2026-06-09 (PR #55): stripped `runner:` / `terminal:` /
+        `agent_bootstrap:` as pass-through pending schema extension
+      - 2026-06-10: otaman-core commit 27f2c7c allowlisted those root
+        keys (and `bus:`, `agents:`, `orgs:`, `agent_presence:`, plus the
+        program-init wizard set).  Pass-through stripping was removed in
+        the follow-up cleanup; only the empty-repos placeholder remains
+        for the CE org-dir scaffold use case.
     """
     import yaml as _yaml
     import tempfile as _tmp
@@ -3914,51 +3930,33 @@ def _normalize_ce_platform_yaml_for_validation(config_path: Path) -> tuple[Path,
             )
             changed = True
 
-    # 4. CE-runtime top-level keys (ce-org-agent-bootstrap follow-up;
-    # extends task 4.1 per deploy-agent's 2026-06-09 question).  The core
-    # schema has `additionalProperties: false` at root, so these would
-    # otherwise force a hard error.  Treat them as opaque pass-through —
-    # the CLI doesn't validate their contents; runner-agent reads them.
-    # Pending core-agent extending platform-schema.yaml to declare these
-    # as first-class root keys.
-    _CE_RUNTIME_STRIPPED_KEYS = ("runner", "terminal", "agent_bootstrap")
-    stripped_ce_keys: list[str] = []
-    for k in _CE_RUNTIME_STRIPPED_KEYS:
-        if k in doc:
-            doc.pop(k, None)
-            stripped_ce_keys.append(k)
-    if stripped_ce_keys:
+    # 4. Empty / missing `repos:` for fresh CE org-dir scaffolds.  The
+    # schema's `repos: minItems: 1` constraint remains even after the
+    # 2026-06-10 schema extension (otaman-core commit 27f2c7c) that
+    # allowlisted `runner:` / `terminal:` / `bus:` / etc. as native root
+    # keys.  Detect "CE org-dir scaffold" mode by the presence of a
+    # `runner:` or `terminal:` block (both first-class in the schema now,
+    # so we read them without stripping).  Inject a single synthetic
+    # placeholder repo into the validation copy so the `minItems: 1`
+    # check passes; the on-disk file's empty `repos:` is preserved.
+    _CE_SCAFFOLD_MARKERS = ("runner", "terminal")
+    has_ce_marker = any(k in doc for k in _CE_SCAFFOLD_MARKERS)
+    if (not isinstance(doc.get("repos"), list) or len(doc.get("repos") or []) == 0) \
+            and has_ce_marker:
+        # Schema requires name to match ^[A-Za-z][A-Za-z0-9._-]{1,63}$
+        # and owner to match ^[a-z][a-z0-9-]{1,63}$.
+        doc["repos"] = [{
+            "name": "ce-org-placeholder",
+            "path": ".",
+            "owner": "ops-agent",
+        }]
         hints.append(
-            f"platform.yaml: CE-runtime top-level keys present "
-            f"({', '.join(stripped_ce_keys)}) — accepted as pass-through "
-            "for validation. The core schema does not yet declare them; "
-            "extension tracked separately."
+            "platform.yaml: empty/missing `repos:` accepted for fresh "
+            "CE org-dir scaffold (detected via runner:/terminal: marker). "
+            "Programs will populate `repos:` as they are added; canonical "
+            "files should list at least one repo."
         )
         changed = True
-
-    # 5. Empty / missing `repos:` for fresh CE org-dir scaffolds.  The
-    # schema requires `repos: minItems: 1`, but a freshly-bootstrapped
-    # org dir has no programs yet.  Detect "CE org-dir scaffold" mode by
-    # the presence of stripped CE-runtime keys OR explicitly-empty repos
-    # alongside any of those keys originally.  Inject a single synthetic
-    # placeholder repo into the validation copy so the schema check
-    # passes; the on-disk file remains empty.
-    if not isinstance(doc.get("repos"), list) or len(doc.get("repos") or []) == 0:
-        if stripped_ce_keys:
-            # Schema requires name to match ^[A-Za-z][A-Za-z0-9._-]{1,63}$
-            # and owner to match ^[a-z][a-z0-9-]{1,63}$.
-            doc["repos"] = [{
-                "name": "ce-org-placeholder",
-                "path": ".",
-                "owner": "ops-agent",
-            }]
-            hints.append(
-                "platform.yaml: empty/missing `repos:` accepted for fresh "
-                "CE org-dir scaffold. Programs will populate `repos:` as "
-                "they are added; canonical files should list at least "
-                "one repo."
-            )
-            changed = True
 
     if not changed:
         return config_path, hints

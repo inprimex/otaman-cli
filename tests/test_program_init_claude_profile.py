@@ -238,18 +238,11 @@ def test_non_tty_path_produces_no_claude_field(tmp_path: Path, monkeypatch: pyte
 # This test guards against any future field-name / nesting drift.)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Self-review 2026-06-07 found 8 additional top-level keys the wizard "
-        "emits that platform-schema.yaml rejects: currency, description, "
-        "edition, mode, releases, roles, skills, triage. Fixing these "
-        "requires either schema extension (otaman-core, read-only here) or a "
-        "broader wizard restructure to nest under program: — tracked in the "
-        "cli-agent → spec-agent audit-request message 20260607T-wizard-emit-mismatch. "
-        "This test stays xfail until the gap closes."
-    ),
-    strict=False,
-)
+# Previously xfail (2026-06-07 → 2026-06-10): the wizard emitted 8 top-level
+# keys (currency, description, edition, mode, releases, roles, skills, triage)
+# that platform-schema.yaml rejected via `additionalProperties: false`.
+# Closed by otaman-core commit 27f2c7c (2026-06-10) which allowlisted all 13
+# missing root keys, including the wizard set. Test now passes natively.
 def test_wizard_output_passes_platform_schema_validation(tmp_path, monkeypatch):
     """End-to-end post-condition: the platform.yaml the wizard writes must
     pass otaman-core's platform-schema.yaml validator. Catches the bug class

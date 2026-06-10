@@ -126,55 +126,29 @@ class TestNormalizationHelper:
         assert norm == ghost
         assert hints == []
 
-    def test_runner_key_stripped_with_hint(self, tmp_path: Path):
-        """ce-org-agent-bootstrap follow-up: `runner:` accepted as pass-through."""
+    def test_runner_and_terminal_now_passthrough_natively(self, tmp_path: Path):
+        """After otaman-core schema extension (commit 27f2c7c, 2026-06-10),
+        `runner:` and `terminal:` are first-class root keys.  The normalizer
+        no longer strips them; they pass through to the validator natively.
+        """
         src = self._write_yaml(tmp_path / "platform.yaml", {
             "project": "x",
             "version": "1.0",
             "runner": {"harnesses": [{"id": "claude-code", "binary": "claude"}]},
-            "repos": [{"name": "r1", "path": "./r1", "owner": "ops-agent"}],
-        })
-        original = src.read_text()
-        norm, hints = _normalize_ce_platform_yaml_for_validation(src)
-        normalized = yaml.safe_load(norm.read_text())
-        assert "runner" not in normalized
-        assert any("CE-runtime" in h and "runner" in h for h in hints)
-        # Source untouched
-        assert src.read_text() == original
-        norm.unlink()
-
-    def test_terminal_key_stripped_with_hint(self, tmp_path: Path):
-        src = self._write_yaml(tmp_path / "platform.yaml", {
-            "project": "x",
-            "version": "1.0",
             "terminal": {"local_auth": True},
             "repos": [{"name": "r1", "path": "./r1", "owner": "ops-agent"}],
         })
         norm, hints = _normalize_ce_platform_yaml_for_validation(src)
-        normalized = yaml.safe_load(norm.read_text())
-        assert "terminal" not in normalized
-        assert any("terminal" in h for h in hints)
-        norm.unlink()
-
-    def test_both_runner_and_terminal_stripped(self, tmp_path: Path):
-        src = self._write_yaml(tmp_path / "platform.yaml", {
-            "project": "x",
-            "version": "1.0",
-            "runner": {"harnesses": []},
-            "terminal": {"local_auth": True},
-            "repos": [{"name": "r1", "path": "./r1", "owner": "ops-agent"}],
-        })
-        norm, hints = _normalize_ce_platform_yaml_for_validation(src)
-        normalized = yaml.safe_load(norm.read_text())
-        assert "runner" not in normalized
-        assert "terminal" not in normalized
-        # Single combined hint mentions both
-        hint_text = next((h for h in hints if "CE-runtime" in h), "")
-        assert "runner" in hint_text and "terminal" in hint_text
-        norm.unlink()
+        # Nothing to normalize → source path returned unchanged
+        assert norm == src
+        assert hints == []
 
     def test_empty_repos_accepted_for_ce_org_scaffold(self, tmp_path: Path):
-        """Empty repos[] accepted when CE-runtime markers are present (fresh org-dir)."""
+        """Empty repos[] accepted when CE-scaffold marker (`runner:` or
+        `terminal:`) is present.  After the 2026-06-10 schema extension,
+        `runner:` is now first-class — the normalizer reads it as a marker
+        but does NOT strip it from the validation copy.
+        """
         src = self._write_yaml(tmp_path / "platform.yaml", {
             "project": "x",
             "version": "1.0",
@@ -183,11 +157,13 @@ class TestNormalizationHelper:
         })
         norm, hints = _normalize_ce_platform_yaml_for_validation(src)
         normalized = yaml.safe_load(norm.read_text())
-        # Placeholder repo injected into validation copy
+        # Placeholder repo injected
         assert len(normalized["repos"]) == 1
         repo = normalized["repos"][0]
         assert repo["name"] == "ce-org-placeholder"
         assert repo["owner"] == "ops-agent"
+        # runner: is preserved (no longer stripped)
+        assert "runner" in normalized
         assert any("CE org-dir scaffold" in h for h in hints)
         norm.unlink()
 
@@ -214,6 +190,8 @@ class TestNormalizationHelper:
         norm, hints = _normalize_ce_platform_yaml_for_validation(src)
         normalized = yaml.safe_load(norm.read_text())
         assert len(normalized["repos"]) == 1
+        # terminal: preserved (no longer stripped)
+        assert "terminal" in normalized
         norm.unlink()
 
     def test_existing_owner_takes_precedence_over_agent(self, tmp_path: Path):
@@ -328,5 +306,6 @@ class TestValidateCommand:
             f"fresh CE org scaffold must pass validation.  "
             f"stdout={r.stdout!r}  stderr={r.stderr!r}"
         )
-        # Hints surface the pass-through behavior
-        assert "CE-runtime" in r.stdout or "CE org-dir" in r.stdout
+        # Only the empty-repos placeholder hint should fire (runner:/terminal:
+        # are first-class in the schema since 2026-06-10).
+        assert "CE org-dir scaffold" in r.stdout
