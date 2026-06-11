@@ -5147,15 +5147,25 @@ def cmd_blocked(
 ) -> int:
     """List, clear, or register blocked tasks for the current agent.
 
-    `otaman blocked --list`           — list blocked entries
-    `otaman blocked --clear <slug>`   — remove a blocked entry
+    `otaman blocked --list`              — list blocked entries (current agent)
+    `otaman blocked --clear <slug>`      — remove a blocked entry (current agent)
+    `otaman blocked clear <stem>`        — tombstone any matching entry across
+                                            ALL agents' files by Proposal stem
+                                            (auto-clear-blocked-entries 2.1)
     `otaman blocked <slug> [--blocked-by NAME]`  — register a new blocked entry
-                                                   and set status (task 1.8)
+                                                    and set status (1.8)
     """
     root = find_project_root()
     if not root:
         UI.error("Not in an otaman project")
         return 1
+
+    # auto-clear-blocked-entries task 2.1 — `otaman blocked clear <stem>`
+    # subcommand: search all `.agents/blocked/*.md` for entries whose
+    # `- **Proposal**: <stem>` line matches, and tombstone them with
+    # reason `manually-cleared`.  Idempotent (no-match exits 0).
+    if len(args) >= 2 and args[0] == "clear":
+        return _cmd_blocked_clear_by_stem(root, args[1])
 
     agent = resolve_agent_identity(root) or "unknown-agent"
     blocked_file = root / ".agents" / "blocked" / f"{agent}.md"
@@ -5235,6 +5245,89 @@ def cmd_blocked(
     UI.muted("  otaman blocked --clear <slug>")
     UI.muted("  otaman blocked <slug> [--blocked-by NAME]")
     return 1
+
+
+def _cmd_blocked_clear_by_stem(root: Path, stem: str) -> int:
+    """auto-clear-blocked-entries task 2.1 — manual escape hatch.
+
+    Scan every file under ``.agents/blocked/`` for entries whose
+    ``- **Proposal**: <stem>`` line matches the given stem.  Tombstone each
+    match by wrapping the entry block in an HTML comment with a
+    ``cleared YYYY-MM-DD — manually-cleared`` trailer.  Idempotent: an
+    already-commented entry is naturally skipped by the line-leading
+    ``^## Blocked:`` regex.
+
+    Returns 0 always — no-match is NOT an error (task 2.2: idempotent).
+    """
+    stem = (stem or "").strip()
+    if not stem:
+        UI.error("clear requires a proposal stem")
+        UI.muted("  Usage: otaman blocked clear <proposal-stem>")
+        return 1
+
+    blocked_dir = root / ".agents" / "blocked"
+    if not blocked_dir.is_dir():
+        print(f"No blocked entry found for stem: {stem}")
+        return 0
+
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Same regex shape as plugin-agent's `_auto_tombstone_blocked` in
+    # bus_server.py, kept in sync deliberately so the tombstone format
+    # is identical regardless of which agent / which trigger fired it.
+    entry_re = re.compile(
+        r"^(## Blocked: .+?)(?=\n## Blocked: |\Z)",
+        re.DOTALL | re.MULTILINE,
+    )
+    proposal_field_re = re.compile(
+        r"^\s*-\s*\*\*Proposal\*\*:\s*(\S+)", re.MULTILINE,
+    )
+    title_re = re.compile(r"^## Blocked:\s*(.+)$", re.MULTILINE)
+
+    tombstoned: list[tuple[str, str]] = []   # (agent, title)
+
+    for blocked_file in sorted(blocked_dir.glob("*.md")):
+        agent_name = blocked_file.stem
+        try:
+            text = blocked_file.read_text(encoding="utf-8")
+        except OSError:
+            continue
+
+        modified = False
+        new_parts: list[str] = []
+        last_end = 0
+        for m in entry_re.finditer(text):
+            entry_block = m.group(1)
+            new_parts.append(text[last_end:m.start()])
+
+            prop_m = proposal_field_re.search(entry_block)
+            if prop_m and prop_m.group(1) == stem:
+                title_m = title_re.search(entry_block)
+                title = title_m.group(1).strip() if title_m else "(untitled)"
+                tombstoned.append((agent_name, title))
+                trailer = f"\ncleared {today} — manually-cleared -->"
+                new_parts.append("<!-- " + entry_block.rstrip() + trailer)
+                modified = True
+            else:
+                new_parts.append(entry_block)
+            last_end = m.end()
+
+        new_parts.append(text[last_end:])
+
+        if modified:
+            try:
+                blocked_file.write_text("".join(new_parts), encoding="utf-8")
+            except OSError as exc:
+                UI.warn(f"Failed to write {blocked_file}: {exc}")
+
+    if not tombstoned:
+        print(f"No blocked entry found for stem: {stem}")
+        return 0
+
+    for agent_name, title in tombstoned:
+        UI.ok(f"Cleared: {agent_name} — {title}")
+    return 0
 
 
 def _status_hook_after_blocked(root: Path, agent: str, slug: str, by: str) -> None:
