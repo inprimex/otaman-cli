@@ -13,6 +13,7 @@ Usage:
     otaman doctor [--org <name>]      Check environment readiness; --org adds CE harness check
     otaman status [--blocked] [--agent NAME] [--json]   Fleet status (or --repos for cross-repo view)
     otaman set-status <state>         Update this agent's status (working|blocked|waiting|idle)
+    otaman watchdog <action>          Query/control the runner watchdog (status|start|pause|resume)
     otaman check [<agent>]            Check messages for an agent
     otaman ack <msg> [--read|--resolved]   Acknowledge a bus message
     otaman cleanup [--dry-run]        Archive old bus messages
@@ -1880,6 +1881,15 @@ def cmd_doctor(args: list[str], *, org: str | None = None) -> int:
         return 1 if (base_rc or org_rc) else 0
 
     return base_rc
+
+
+def _cmd_watchdog_dispatch(args: list[str]) -> int:
+    """Lazy-import wrapper for `otaman watchdog ...` so urllib + endpoint
+    discovery don't load on every CLI invocation (the watchdog is a
+    rarely-used surface; most operators never hit it).
+    """
+    from otaman_cli.watchdog import cmd_watchdog
+    return cmd_watchdog(args)
 
 
 def cmd_set_status(args: list[str]) -> int:
@@ -6129,6 +6139,7 @@ def cmd_help() -> int:
 {C.BOLD}Bus & messages:{C.RESET}
   {C.GREEN}status{C.RESET} [--blocked|--agent N|--json|--repos]   Fleet status (per-agent presence; --repos for legacy view)
   {C.GREEN}set-status{C.RESET} <state> [--task ...]   Update this agent's status (working|blocked|waiting|idle)
+  {C.GREEN}watchdog{C.RESET} <status|start|pause|resume>   Query/control the runner watchdog (HTTP)
   {C.GREEN}whoami{C.RESET}, {C.GREEN}iam{C.RESET}                   Show agent identity + project + routing + bus state ([--json])
   {C.GREEN}check{C.RESET} [agent]                 Check pending messages for an agent (auto-detects from cwd)
   {C.GREEN}read{C.RESET} <message-stem>           Read full content of a bus message (substring match OK)
@@ -6392,6 +6403,7 @@ def main() -> int:
         "doctor": lambda: cmd_doctor(positional, org=org_name),
         "status": lambda: cmd_status(rest),
         "set-status": lambda: cmd_set_status(rest),
+        "watchdog": lambda: _cmd_watchdog_dispatch(positional),
         "check": lambda: cmd_check(positional, hide_broadcast_hours=hide_broadcast_hours),
         "read": lambda: cmd_read(positional),
         "send": lambda: cmd_send(rest),
