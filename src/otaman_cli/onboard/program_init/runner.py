@@ -270,6 +270,75 @@ def _parse_releases(raw: str) -> list[str]:
     return [r.strip() for r in raw.split(",") if r.strip()]
 
 
+# tech-startup-skill-pack-implementation tasks 4.1-4.3 — confirmation screen
+# shown when `tech-startup` is in the selected domains.  Lets the user
+# verify the prefilled skill profile or override it before platform.yaml
+# is written.  Skipped in non-interactive / dry-run modes.
+
+_TECH_STARTUP_CONFIRM_COPY = (
+    "The tech-startup pack includes 10 skills for cofounder strategy work.\n"
+    "2 skills (investor-targeting-strategist, financial-modeling-analyst) "
+    "require cofounder identity to activate.\n"
+    "We've prefilled the skill profile — review and confirm."
+)
+
+_TECH_STARTUP_IDENTITY_NOTE = (
+    "Note: 2 skills require cofounder identity.  To activate them, add\n"
+    "  identity:\n"
+    "    roles:\n"
+    "      cofounder: <username>\n"
+    "to platform.yaml after init."
+)
+
+
+def _confirm_tech_startup_prefill(answers: dict[str, Any], *, dry_run: bool) -> None:
+    """Tasks 4.2 + 4.3 — show confirmation screen + identity note.
+
+    Only fires when ``tech-startup`` is among the selected ``domains``.
+    Allows the user to override the prefilled skill profile from the
+    confirmation prompt.  In dry-run / non-interactive (EOF on input)
+    mode, the prefill is accepted as-is silently.
+    """
+    domains = answers.get("domains") or []
+    if "tech-startup" not in domains:
+        return
+
+    current_profile = answers.get("skill_profile") or "tech-startup-cofounder"
+
+    # Always show the screen so it appears in --dry-run output too — visible
+    # signal that prefill happened.  In dry-run we don't read input.
+    print()
+    print("─" * 64)
+    print("  Tech-Startup Pack Prefill")
+    print("─" * 64)
+    for line in _TECH_STARTUP_CONFIRM_COPY.splitlines():
+        print(f"  {line}")
+    print()
+    print(f"  Prefilled skill_profile: {current_profile}")
+    print()
+    for line in _TECH_STARTUP_IDENTITY_NOTE.splitlines():
+        print(f"  {line}")
+    print("─" * 64)
+
+    if dry_run:
+        return
+
+    # Interactive confirmation — let the user override or accept.  EOF
+    # / KeyboardInterrupt falls through to "accept as-is" (matches the
+    # rest of the wizard's degrade-gracefully posture).
+    try:
+        raw = input(
+            f"  Press Enter to keep '{current_profile}', or type a different profile name: "
+        ).strip()
+    except (EOFError, KeyboardInterrupt):
+        return
+    if raw and raw != current_profile:
+        answers["skill_profile"] = raw
+        print(f"  Skill profile overridden: {raw}")
+    else:
+        print(f"  Confirmed: {current_profile}")
+
+
 def run_program_init(args: argparse.Namespace) -> int:
     """Main entry point called from the CLI.
 
@@ -386,6 +455,15 @@ def run_program_init(args: argparse.Namespace) -> int:
     companion_repos = compute_companion_repos(processes)
     answers["scaffold_business"] = "business" in companion_repos
     answers["scaffold_strategy"] = "strategy" in companion_repos
+
+    # ── 5d. tech-startup-skill-pack-implementation tasks 4.1-4.3 ─────────────
+    # When `tech-startup` was selected as a domain, the wizard's existing
+    # `skill_profile` recommendation already defaults to `tech-startup-cofounder`
+    # (questions._recommend_skill_profile).  Per the spec, surface a
+    # confirmation screen with the exact copy from design.md Q4 PLUS the
+    # cofounder identity note before writing platform.yaml.  The user may
+    # override the prefilled profile from the confirmation screen.
+    _confirm_tech_startup_prefill(answers, dry_run=getattr(args, "dry_run", False))
 
     # ── 6. generate / update platform.yaml ───────────────────────────────────
     if existing_yaml:
