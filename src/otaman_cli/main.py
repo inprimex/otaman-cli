@@ -1862,6 +1862,60 @@ def cmd_doctor(args: list[str], *, org: str | None = None) -> int:
                 UI.warn(issue["issue"])
             UI.muted(f"Fix: {issue['fix']}")
 
+    # pm-sync health check
+    print()
+    UI.subheader("[pm-sync]")
+    try:
+        import yaml as _yaml
+        _pm_platform_yaml = root / "platform.yaml"
+        if _pm_platform_yaml.is_file():
+            _pm_config = _yaml.safe_load(_pm_platform_yaml.read_text(encoding="utf-8")) or {}
+        else:
+            _pm_config = {}
+        _pm_sync = _pm_config.get("pm-sync")
+        if not _pm_sync:
+            UI.warn("[pm-sync] PM sync not configured — run `otaman pm configure <provider> --url <url>`")
+        else:
+            # Check required fields
+            _pm_provider = _pm_sync.get("provider") or ""
+            _pm_base_url = _pm_sync.get("base-url") or ""
+            _pm_project_map = _pm_sync.get("project-map")
+            _pm_webhook_target = (_pm_sync.get("webhook-target") or "").strip()
+
+            if not _pm_provider:
+                UI.warn("[pm-sync] provider not set in pm-sync block")
+            else:
+                UI.ok(f"[pm-sync] provider: {_pm_provider}")
+
+            if not _pm_base_url:
+                UI.warn("[pm-sync] base-url not set in pm-sync block")
+            else:
+                UI.ok(f"[pm-sync] base-url: {_pm_base_url}")
+
+            if _pm_project_map is None:
+                UI.warn("[pm-sync] project-map not set in pm-sync block")
+            elif not _pm_project_map:
+                UI.warn("[pm-sync] pm init not run — run `otaman pm init <provider>`")
+            else:
+                UI.ok(f"[pm-sync] project-map: {len(_pm_project_map)} mapping(s)")
+
+            # Webhook reachability
+            if _pm_webhook_target:
+                try:
+                    import urllib.request as _urllib_req
+                    _pm_req = _urllib_req.Request(_pm_webhook_target, method="HEAD")
+                    _pm_resp = _urllib_req.urlopen(_pm_req, timeout=3)
+                    UI.ok(f"[pm-sync] webhook-target reachable ({_pm_resp.status}): {_pm_webhook_target}")
+                except Exception as _pm_exc:
+                    UI.warn(f"[pm-sync] webhook-target unreachable ({_pm_webhook_target}): {_pm_exc}")
+            else:
+                UI.warn(
+                    "[pm-sync] webhooks not configured — run with `--no-webhooks` flag or "
+                    "set `pm-sync.webhook-target`"
+                )
+    except Exception as _pm_outer_exc:
+        UI.warn(f"[pm-sync] check failed: {_pm_outer_exc}")
+
     # Summary line
     print()
     p, w, f_ = summary.get("passed", 0), summary.get("warned", 0), summary.get("failed", 0)
