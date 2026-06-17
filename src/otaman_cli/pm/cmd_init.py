@@ -187,21 +187,18 @@ def cmd_pm_init(args: list[str]) -> int:
     # Step 4: Create root project (idempotent)
     # -----------------------------------------------------------------------
     UI.action("Step 4: Create root project")
-    root_project_id: str | None = None
-    project_entry = doc.get("project", {})
-    if isinstance(project_entry, dict):
-        project_name = project_entry.get("name", "otaman")
-    else:
-        project_name = str(project_entry) if project_entry else "otaman"
-    identifier = _to_identifier(project_name)
+    root_project_id: int | str | None = None
+    project_name = getattr(config, "program_name", None) or "Otaman Platform"
+    identifier = getattr(config, "program_key", None) or "otaman"
 
     if dry_run or adapter is None:
         UI.muted(f"[dry-run] Would create root project: identifier={identifier!r}, name={project_name!r}")
         root_project_id = "dry-run-root"
     else:
         try:
-            root_project_id = adapter.ensure_project(identifier=identifier, name=project_name)  # type: ignore[attr-defined]
-            UI.ok(f"Root project ready -- id={root_project_id}")
+            root_project = adapter.provision_project(config)
+            root_project_id = root_project.id
+            UI.ok(f"Root project ready -- id={root_project_id}, name={root_project.name}")
         except Exception as exc:
             UI.error(f"Failed to create root project: {exc}")
             return 1
@@ -210,22 +207,23 @@ def cmd_pm_init(args: list[str]) -> int:
     # Step 5: Create subprojects for each repo
     # -----------------------------------------------------------------------
     UI.action(f"Step 5: Create subprojects for {len(repos)} repos")
-    subprojects: list[tuple[str, str]] = []
+    subprojects: list[tuple[str, int]] = []
 
     for repo_name in repos:
         repo_identifier = _to_identifier(repo_name)
         homepage = f"https://github.com/{gh_org}/{repo_name}"
         if dry_run or adapter is None:
             UI.muted(f"[dry-run] Would create subproject: {repo_identifier!r} (parent={root_project_id}, homepage={homepage})")
-            subprojects.append((repo_name, f"dry-run-{repo_identifier}"))
+            subprojects.append((repo_name, 0))  # placeholder id for dry-run
         else:
             try:
-                proj_id = adapter.ensure_project(  # type: ignore[attr-defined]
-                    identifier=repo_identifier,
+                proj = adapter.create_subproject(
                     name=repo_name,
+                    identifier=repo_identifier,
                     parent_id=root_project_id,
-                    homepage=homepage,
+                    github_url=homepage,
                 )
+                proj_id = proj.id
                 UI.ok(f"  Subproject ready: {repo_name} -> id={proj_id}")
                 subprojects.append((repo_name, proj_id))
             except Exception as exc:
@@ -239,13 +237,8 @@ def cmd_pm_init(args: list[str]) -> int:
     if dry_run or adapter is None:
         UI.muted(f"[dry-run] Would create statuses: {', '.join(otaman_statuses)}")
     else:
-        for status_name in otaman_statuses:
-            try:
-                adapter.ensure_issue_status(status_name)  # type: ignore[attr-defined]
-                UI.ok(f"  Status: {status_name}")
-            except Exception as exc:
-                UI.warn(f"  Manual step required -- could not create status '{status_name}': {exc}")
-                UI.muted("  Creating issue statuses requires Redmine admin rights. Add them manually via Admin > Issue Statuses.")
+        UI.muted("Issue statuses require Redmine admin access. Create them manually: Admin > Issue Statuses > New Status")
+        UI.muted(f"  Required: {', '.join(otaman_statuses)}")
 
     # -----------------------------------------------------------------------
     # Step 7: Create issue custom fields
@@ -255,13 +248,8 @@ def cmd_pm_init(args: list[str]) -> int:
     if dry_run or adapter is None:
         UI.muted(f"[dry-run] Would create custom fields: {', '.join(custom_fields)}")
     else:
-        for field_name in custom_fields:
-            try:
-                adapter.ensure_custom_field(field_name)  # type: ignore[attr-defined]
-                UI.ok(f"  Custom field: {field_name}")
-            except Exception as exc:
-                UI.warn(f"  Could not create custom field '{field_name}': {exc}")
-                UI.muted("  Custom fields require Redmine admin rights. Add them manually via Admin > Custom Fields.")
+        UI.muted("Custom fields require Redmine admin access. Create them manually: Admin > Custom Fields > New Custom Field")
+        UI.muted(f"  Required: {', '.join(custom_fields)}")
 
     # -----------------------------------------------------------------------
     # Step 8: Register + activate webhooks
@@ -275,8 +263,8 @@ def cmd_pm_init(args: list[str]) -> int:
             UI.muted(f"[dry-run] Would register webhook: {webhook_url}")
         else:
             try:
-                adapter.ensure_webhook(webhook_url)  # type: ignore[attr-defined]
-                UI.ok(f"Webhook registered: {webhook_url}")
+                reg = adapter.register_webhook(webhook_url, ["create", "update", "destroy"])
+                UI.ok(f"Webhook registered and activated: id={reg.id}, url={reg.url}")
             except Exception as exc:
                 UI.warn(f"Could not register webhook: {exc}")
     else:
@@ -295,10 +283,13 @@ def cmd_pm_init(args: list[str]) -> int:
             doc2: dict[str, Any] = yaml.safe_load(text) or {}
             if "pm-sync" not in doc2:
                 doc2["pm-sync"] = {}
-            doc2["pm-sync"]["project-map"] = {
-                "_root": root_project_id,
-                **{repo: proj_id for repo, proj_id in subprojects},
+            project_map: dict[str, Any] = {
+                repo: proj_id for repo, proj_id in subprojects
             }
+            # Only include _root when we have a real integer id (not the dry-run placeholder)
+            if isinstance(root_project_id, int):
+                project_map["_root"] = root_project_id
+            doc2["pm-sync"]["project-map"] = project_map
             platform_yaml_path.write_text(
                 yaml.dump(doc2, allow_unicode=True, default_flow_style=False),
                 encoding="utf-8",
