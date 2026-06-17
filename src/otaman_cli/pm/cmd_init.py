@@ -351,10 +351,24 @@ def cmd_pm_init(args: list[str]) -> int:
             return 1
 
     # -----------------------------------------------------------------------
-    # Step 10: Seed backlog (placeholder)
+    # Step 10: Configure Easy8 MCP server in .mcp.json
+    # -----------------------------------------------------------------------
+    if provider == "easy8" and not dry_run:
+        UI.action("Step 10: Configure Easy8 MCP server")
+        try:
+            from otaman_cli.pm.cmd_configure import _write_mcp_config
+            _write_mcp_config(root, getattr(config, "base_url", ""), UI)
+        except Exception as exc:
+            UI.warn(f"Could not write MCP config: {exc}")
+    elif dry_run:
+        base_url_val = getattr(config, "base_url", "")
+        UI.muted(f"[dry-run] Would add Easy8 MCP server to .mcp.json ({base_url_val}/mcp)")
+
+    # -----------------------------------------------------------------------
+    # Step 11: Seed backlog (placeholder)
     # -----------------------------------------------------------------------
     if seed_backlog:
-        UI.action("Step 10: Seed backlog")
+        UI.action("Step 11: Seed backlog")
         UI.muted("Backlog seeding not yet implemented.")
 
     # -----------------------------------------------------------------------
