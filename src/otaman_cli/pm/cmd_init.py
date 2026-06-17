@@ -151,7 +151,9 @@ def cmd_pm_init(args: list[str]) -> int:
                 return 1
             base_url = getattr(config, "base_url", "") or ""
             try:
-                adapter = Easy8Adapter(base_url=base_url, api_key=api_key)
+                _status_map = getattr(config, "status_map", {}) or {}
+                _tracker = getattr(config, "tracker", "Task") or "Task"
+                adapter = Easy8Adapter(base_url=base_url, api_key=api_key, status_map=_status_map, tracker=_tracker)
             except Exception as exc:
                 UI.error(f"Failed to instantiate Easy8Adapter: {exc}")
                 return 1
@@ -230,15 +232,32 @@ def cmd_pm_init(args: list[str]) -> int:
                 UI.warn(f"  Could not create subproject for {repo_name}: {exc}")
 
     # -----------------------------------------------------------------------
-    # Step 6: Create Otaman workflow statuses
+    # Step 6: Validate status map against instance
     # -----------------------------------------------------------------------
-    UI.action("Step 6: Create Otaman workflow statuses")
-    otaman_statuses = ["Declared", "In-Progress", "Blocked", "Done"]
+    UI.action("Step 6: Validate status map")
+    status_map = getattr(config, "status_map", {}) or {}
+    default_map = {"declared": "New", "in_progress": "In Progress", "blocked": "Feedback", "done": "Closed"}
+    effective_map = {**default_map, **status_map}
+
     if dry_run or adapter is None:
-        UI.muted(f"[dry-run] Would create statuses: {', '.join(otaman_statuses)}")
+        UI.muted(f"[dry-run] Status map: {effective_map}")
     else:
-        UI.muted("Issue statuses require Redmine admin access. Create them manually: Admin > Issue Statuses > New Status")
-        UI.muted(f"  Required: {', '.join(otaman_statuses)}")
+        try:
+            from otaman_adapters.easy8 import Easy8Adapter  # type: ignore[import]
+            if isinstance(adapter, Easy8Adapter):
+                adapter._status_map.update(status_map)  # type: ignore[attr-defined]
+            existing = {s.name.lower() for s in adapter.list_statuses()}  # type: ignore[attr-defined]
+            all_ok = True
+            for state, pm_name in effective_map.items():
+                if pm_name.lower() in existing:
+                    UI.ok(f"  {state} → '{pm_name}' ✓")
+                else:
+                    UI.warn(f"  {state} → '{pm_name}' NOT FOUND on instance (create it via Admin > Issue Statuses)")
+                    all_ok = False
+            if all_ok:
+                UI.ok("All status mappings verified")
+        except Exception as exc:
+            UI.warn(f"Could not validate status map: {exc}")
 
     # -----------------------------------------------------------------------
     # Step 7: Create issue custom fields
