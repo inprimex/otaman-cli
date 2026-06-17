@@ -54,17 +54,27 @@ def cmd_pm_configure(args: list[str]) -> int:
     # Determine program name and key from platform.yaml
     import yaml
     doc = yaml.safe_load(text) or {}
-    program_name = doc.get("project", {})
-    if isinstance(program_name, str):
-        program_name_str = program_name
-    elif isinstance(program_name, dict):
-        program_name_str = program_name.get("name", "")
-    else:
-        program_name_str = ""
-    if not program_name_str:
-        program_name_str = "My Program"
 
-    program_key = re.sub(r"[^a-z0-9-]", "-", program_name_str.lower()).strip("-") or "program"
+    # Prefer existing pm-sync values (idempotent re-configure)
+    existing_pm = doc.get("pm-sync") or {}
+    if isinstance(existing_pm, dict) and existing_pm.get("program-name"):
+        program_name_str = str(existing_pm["program-name"])
+        program_key_str = str(existing_pm.get("program-key", ""))
+    else:
+        # Derive from top-level project key
+        raw = doc.get("project", "") or ""
+        if isinstance(raw, dict):
+            raw = raw.get("name", "") or ""
+        program_name_str = str(raw).strip()
+        # Capitalise first letter for display name if it looks like a slug
+        if program_name_str and program_name_str == program_name_str.lower():
+            program_name_str = program_name_str.replace("-", " ").title()
+        if not program_name_str:
+            program_name_str = "My Program"
+        program_key_str = ""
+
+    if not program_key_str:
+        program_key_str = re.sub(r"[^a-z0-9-]", "-", program_name_str.lower()).strip("-") or "program"
 
     # Build pm-sync block
     webhook_line = f"  webhook-target: {webhook_target}" if webhook_target and not no_webhooks else "  # webhook-target: https://<your-bridge>/pm-sync/easy8  # set when bridge is deployed"
@@ -74,7 +84,7 @@ def cmd_pm_configure(args: list[str]) -> int:
         f"  base-url: {base_url}\n"
         f"  identity-mode: system_user\n"
         f'  program-name: "{program_name_str}"\n'
-        f"  program-key: {program_key}\n"
+        f"  program-key: {program_key_str}\n"
         f"  per-repo: true\n"
         f"  status-map:\n"
         f"    declared: New\n"
