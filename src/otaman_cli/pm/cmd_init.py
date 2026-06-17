@@ -278,22 +278,47 @@ def cmd_pm_init(args: list[str]) -> int:
         UI.muted("[dry-run] Would write project-map to platform.yaml")
     else:
         try:
-            import yaml
+            import re
+
             text = platform_yaml_path.read_text(encoding="utf-8")
-            doc2: dict[str, Any] = yaml.safe_load(text) or {}
-            if "pm-sync" not in doc2:
-                doc2["pm-sync"] = {}
-            project_map: dict[str, Any] = {
-                repo: proj_id for repo, proj_id in subprojects
-            }
-            # Only include _root when we have a real integer id (not the dry-run placeholder)
+
+            # Build the new project-map YAML block (indented 4 spaces to match
+            # the pm-sync: child indent in platform.yaml)
+            map_entries: dict[str, int] = {}
             if isinstance(root_project_id, int):
-                project_map["_root"] = root_project_id
-            doc2["pm-sync"]["project-map"] = project_map
-            platform_yaml_path.write_text(
-                yaml.dump(doc2, allow_unicode=True, default_flow_style=False),
-                encoding="utf-8",
+                map_entries["_root"] = root_project_id
+            for repo, proj_id in subprojects:
+                if isinstance(proj_id, int):
+                    map_entries[repo] = proj_id
+
+            if map_entries:
+                lines = [""]
+                for k, v in sorted(map_entries.items()):
+                    lines.append(f"    {k}: {v}")
+                new_value = "\n".join(lines)
+            else:
+                new_value = " {}"
+
+            # Replace `project-map: ...` — handles both the empty `{}` form
+            # and a previously-written block form.
+            # Pattern: `project-map:` followed by either ` {}` on the same line
+            # OR a multi-line block (lines indented deeper than the key).
+            pattern = re.compile(
+                r"(  project-map:)( \{\}| *\n(?:    [^\n]*\n)*)",
+                re.MULTILINE,
             )
+
+            if pattern.search(text):
+                new_text = pattern.sub(r"\g<1>" + new_value + "\n", text, count=1)
+            else:
+                # Fallback: append project-map under pm-sync: if pattern not found
+                new_text = text.replace(
+                    "pm-sync:",
+                    "pm-sync:\n  project-map:" + new_value,
+                    1,
+                )
+
+            platform_yaml_path.write_text(new_text, encoding="utf-8")
             UI.ok("project-map written to platform.yaml")
         except Exception as exc:
             UI.error(f"Failed to write project-map to platform.yaml: {exc}")
