@@ -31,6 +31,7 @@ Usage:
     otaman presale [name domain client]  Initialize pre-sale estimation project
     otaman retrospective [project-code]  Post-project retrospective
     otaman onboard <sub> [args]        Onboard users / projects (add-user, list-users, whoami, doctor)
+    otaman pm <init|status> [args]         PM tool sync (Easy8 / Redmine)
     otaman mcp-config --bridge-url URL  Emit Claude Code .mcp.json for the bridge
     otaman session spawn --agent A --repo R  Spawn a session under the logged-in user
     otaman help                        Show this help
@@ -6199,6 +6200,10 @@ def cmd_help() -> int:
   {C.GREEN}git-host{C.RESET} <subcommand>          Git host PAT + PR/MR API:
                                   detect, list, check, add, pr, post-review
 
+{C.BOLD}PM tool sync:{C.RESET}
+  {C.GREEN}pm{C.RESET} init <provider> [--url U]    Initialize PM sync (creates projects, webhooks, custom fields)
+  {C.GREEN}pm{C.RESET} status                      Show per-repo PM sync state (open issue counts)
+
 {C.BOLD}Help:{C.RESET}
   {C.GREEN}help{C.RESET}                          Show this help
 
@@ -6266,6 +6271,25 @@ def cmd_login(args: list[str]) -> int:
 
 
 # ---------------------------------------------------------------------------
+# PM dispatch helper
+# ---------------------------------------------------------------------------
+
+def _cmd_pm_dispatch(args: list[str]) -> int:
+    """Dispatch `otaman pm <sub>` subcommands."""
+    from otaman_cli.pm.cmd_init import cmd_pm_init
+    from otaman_cli.pm.cmd_status import cmd_pm_status
+    sub = args[0] if args else ""
+    rest = args[1:] if args else []
+    if sub == "init":
+        return cmd_pm_init(rest)
+    elif sub == "status":
+        return cmd_pm_status(rest)
+    else:
+        UI.error(f"Unknown pm subcommand: {sub!r}. Use: pm init | pm status")
+        return 1
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -6305,6 +6329,19 @@ def main() -> int:
     # `otaman project <action>` — project/repo registry management
     if command == "project":
         return cmd_project(rest)
+
+    # `otaman pm <action>` — PM tool sync (Easy8 / Redmine)
+    if command == "pm":
+        from otaman_cli.pm.cmd_init import cmd_pm_init
+        from otaman_cli.pm.cmd_status import cmd_pm_status
+        sub = rest[0] if rest else ""
+        if sub == "init":
+            return cmd_pm_init(rest[1:])
+        elif sub == "status":
+            return cmd_pm_status(rest[1:])
+        else:
+            UI.error(f"Unknown pm subcommand: {sub!r}. Use: pm init | pm status")
+            return 1
 
     # Extract flags
     fmt = "markdown"
@@ -6453,6 +6490,7 @@ def main() -> int:
         "logout": lambda: cmd_login(["logout"] + rest),
         "token": lambda: cmd_login(["show"] + rest),
         "onboard": lambda: cmd_onboard(rest),
+        "pm": lambda: _cmd_pm_dispatch(rest),
     }
 
     if command not in commands:
