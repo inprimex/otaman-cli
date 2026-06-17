@@ -156,6 +156,20 @@ def _build_platform_yaml(answers: dict[str, Any]) -> dict[str, Any]:
             doc["program"] = program_block
         program_block.setdefault("claude", {})["config_dir"] = claude_config_dir
 
+    # pm-sync block — only written when the user opted in during the wizard.
+    # Webhook target is set to the explicit URL when the user has a public bridge;
+    # otherwise the key is omitted so the bridge falls back to its own address.
+    if answers.get("pm_sync_enabled", False):
+        pm_sync_block: dict[str, Any] = {
+            "provider": answers.get("pm_sync_provider", "easy8"),
+            "base-url": answers.get("pm_sync_url", ""),
+            "tracker": answers.get("pm_sync_tracker", "Task"),
+        }
+        webhook_mode = answers.get("pm_sync_webhook_mode", "")
+        if webhook_mode == "I have a public bridge URL (configure webhooks now)":
+            pm_sync_block["webhook-target"] = answers.get("pm_sync_webhook_url", "")
+        doc["pm-sync"] = pm_sync_block
+
     # bus-cc-routing task 2.5 — default routing rules.  spec-agent always
     # CC'd on messages to human; cpo-agent additionally CC'd on high/urgent
     # only when a cpo-agent repo is configured.
