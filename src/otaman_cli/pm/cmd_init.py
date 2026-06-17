@@ -248,8 +248,15 @@ def cmd_pm_init(args: list[str]) -> int:
     if dry_run or adapter is None:
         UI.muted(f"[dry-run] Would create custom fields: {', '.join(custom_fields)}")
     else:
-        UI.muted("Custom fields require Redmine admin access. Create them manually: Admin > Custom Fields > New Custom Field")
-        UI.muted(f"  Required: {', '.join(custom_fields)}")
+        for field_name in custom_fields:
+            if hasattr(adapter, "ensure_custom_field"):
+                try:
+                    field_id = adapter.ensure_custom_field(field_name)  # type: ignore[attr-defined]
+                    UI.ok(f"  Custom field: {field_name} (id={field_id})")
+                except Exception as exc:
+                    UI.warn(f"  Could not create custom field '{field_name}': {exc}")
+            else:
+                UI.muted(f"  Manual step: create custom field '{field_name}' via Admin > Custom Fields")
 
     # -----------------------------------------------------------------------
     # Step 8: Register + activate webhooks
