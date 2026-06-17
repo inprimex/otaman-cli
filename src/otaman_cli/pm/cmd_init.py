@@ -92,8 +92,9 @@ def cmd_pm_init(args: list[str]) -> int:
         UI.error("No 'pm-sync' block found in platform.yaml. Add a pm-sync section first.")
         return 1
 
-    if url_override:
-        config.base_url = url_override  # type: ignore[attr-defined]
+    if url_override and config is not None:
+        from dataclasses import replace as dc_replace
+        config = dc_replace(config, base_url=url_override)
 
     UI.ok(f"Config loaded -- provider: {provider}, base-url: {getattr(config, 'base_url', '(not set)')}")
 
@@ -101,21 +102,23 @@ def cmd_pm_init(args: list[str]) -> int:
     # Step 2: Validate identity-mode against adapter capabilities
     # -----------------------------------------------------------------------
     UI.action("Step 2: Validate identity-mode against adapter capabilities")
-    if PmAdapterCapabilities is not None:
-        try:
-            caps = PmAdapterCapabilities.for_provider(provider)
+    try:
+        if provider == "easy8":
+            from otaman_adapters.easy8 import EASY8_CAPABILITIES  # type: ignore[import]
             identity_mode = getattr(config, "identity_mode", None)
-            if identity_mode and not caps.supports_identity_mode(identity_mode):
-                UI.error(
-                    f"Adapter '{provider}' does not support identity-mode '{identity_mode}'. "
-                    f"Supported modes: {', '.join(caps.supported_identity_modes)}"
-                )
+            if identity_mode == "user" and not EASY8_CAPABILITIES.agent_identity_user:
+                UI.error(f"Adapter '{provider}' does not support identity-mode 'user'.")
+                return 1
+            if identity_mode == "group" and not EASY8_CAPABILITIES.agent_identity_group:
+                UI.error(f"Adapter '{provider}' does not support identity-mode 'group'.")
                 return 1
             UI.ok(f"Identity-mode validated: {identity_mode or '(default)'}")
-        except Exception as exc:
-            UI.warn(f"Could not validate identity-mode (PmAdapterCapabilities unavailable): {exc}")
-    else:
-        UI.muted("PmAdapterCapabilities not available -- skipping identity-mode validation")
+        else:
+            UI.muted(f"Identity-mode validation not available for provider '{provider}' -- skipping")
+    except ImportError:
+        UI.muted("otaman-adapters not installed -- skipping identity-mode validation")
+    except Exception as exc:
+        UI.warn(f"Could not validate identity-mode: {exc}")
 
     # -----------------------------------------------------------------------
     # Step 3: Load adapter + resolve API key
@@ -265,9 +268,9 @@ def cmd_pm_init(args: list[str]) -> int:
     # -----------------------------------------------------------------------
     if not no_webhooks:
         UI.action("Step 8: Register webhooks")
-        webhook_url = getattr(config, "webhook_url", None)
+        webhook_url = getattr(config, "webhook_target", None)
         if not webhook_url:
-            UI.muted("No webhook_url configured in pm-sync block -- skipping webhook registration.")
+            UI.muted("No webhook_target configured in pm-sync block -- skipping webhook registration.")
         elif dry_run or adapter is None:
             UI.muted(f"[dry-run] Would register webhook: {webhook_url}")
         else:
