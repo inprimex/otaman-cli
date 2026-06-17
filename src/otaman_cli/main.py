@@ -31,7 +31,7 @@ Usage:
     otaman presale [name domain client]  Initialize pre-sale estimation project
     otaman retrospective [project-code]  Post-project retrospective
     otaman onboard <sub> [args]        Onboard users / projects (add-user, list-users, whoami, doctor)
-    otaman pm <init|status> [args]         PM tool sync (Easy8 / Redmine)
+    otaman pm <init|configure|status> [args]  PM tool sync (Easy8 / Redmine)
     otaman mcp-config --bridge-url URL  Emit Claude Code .mcp.json for the bridge
     otaman session spawn --agent A --repo R  Spawn a session under the logged-in user
     otaman help                        Show this help
@@ -6201,6 +6201,7 @@ def cmd_help() -> int:
                                   detect, list, check, add, pr, post-review
 
 {C.BOLD}PM tool sync:{C.RESET}
+  {C.GREEN}pm{C.RESET} configure <provider> --url U  Write pm-sync block to platform.yaml + .mcp.json
   {C.GREEN}pm{C.RESET} init <provider> [--url U]    Initialize PM sync (creates projects, webhooks, custom fields)
   {C.GREEN}pm{C.RESET} status                      Show per-repo PM sync state (open issue counts)
 
@@ -6280,12 +6281,15 @@ def _cmd_pm_dispatch(args: list[str]) -> int:
     from otaman_cli.pm.cmd_status import cmd_pm_status
     sub = args[0] if args else ""
     rest = args[1:] if args else []
-    if sub == "init":
+    if sub == "configure":
+        from otaman_cli.pm.cmd_configure import cmd_pm_configure
+        return cmd_pm_configure(rest)
+    elif sub == "init":
         return cmd_pm_init(rest)
     elif sub == "status":
         return cmd_pm_status(rest)
     else:
-        UI.error(f"Unknown pm subcommand: {sub!r}. Use: pm init | pm status")
+        UI.error(f"Unknown pm subcommand: {sub!r}. Use: pm configure | pm init | pm status")
         return 1
 
 
@@ -6335,12 +6339,15 @@ def main() -> int:
         from otaman_cli.pm.cmd_init import cmd_pm_init
         from otaman_cli.pm.cmd_status import cmd_pm_status
         sub = rest[0] if rest else ""
-        if sub == "init":
+        if sub == "configure":
+            from otaman_cli.pm.cmd_configure import cmd_pm_configure
+            return cmd_pm_configure(rest[1:])
+        elif sub == "init":
             return cmd_pm_init(rest[1:])
         elif sub == "status":
             return cmd_pm_status(rest[1:])
         else:
-            UI.error(f"Unknown pm subcommand: {sub!r}. Use: pm init | pm status")
+            UI.error(f"Unknown pm subcommand: {sub!r}. Use: pm configure | pm init | pm status")
             return 1
 
     # Extract flags

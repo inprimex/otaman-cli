@@ -8,6 +8,7 @@ license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
 dependencies = [
     "otaman-core",
+    "otaman-adapters",
     "otaman-bridge",
     "otaman-plugin",
     "pyyaml>=6",
