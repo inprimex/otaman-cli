@@ -30,6 +30,7 @@ def cmd_pm_init(args: list[str]) -> int:
     seed_backlog: bool = False
     no_webhooks: bool = False
     admin_key: str | None = None
+    roster_mode: bool = False  # human-roster task 5.2
 
     i = 0
     while i < len(args):
@@ -49,6 +50,9 @@ def cmd_pm_init(args: list[str]) -> int:
         elif token == "--admin-key" and i + 1 < len(args):
             admin_key = args[i + 1]
             i += 2
+        elif token == "--roster":
+            roster_mode = True
+            i += 1
         elif not token.startswith("-"):
             if provider is None:
                 provider = token
@@ -57,7 +61,7 @@ def cmd_pm_init(args: list[str]) -> int:
             i += 1
 
     if not provider:
-        UI.error("Usage: otaman pm init <provider> [--url URL] [--dry-run] [--seed-backlog] [--no-webhooks] [--admin-key KEY]")
+        UI.error("Usage: otaman pm init <provider> [--url URL] [--dry-run] [--seed-backlog] [--no-webhooks] [--admin-key KEY] [--roster]")
         UI.muted("Supported providers: easy8")
         return 1
 
@@ -372,6 +376,15 @@ def cmd_pm_init(args: list[str]) -> int:
         UI.muted("Backlog seeding not yet implemented.")
 
     # -----------------------------------------------------------------------
+    # Step 12: --roster — resolve pm-user-id for each roster entry (5.2)
+    # -----------------------------------------------------------------------
+    if roster_mode:
+        UI.action("Step 12: Resolve roster pm-user-id")
+        _resolve_roster_pm_user_ids(
+            platform_yaml_path, adapter=adapter, dry_run=dry_run, UI=UI,
+        )
+
+    # -----------------------------------------------------------------------
     # Summary
     # -----------------------------------------------------------------------
     UI.ok(f"PM sync initialized for provider: {provider}")
@@ -385,6 +398,125 @@ def cmd_pm_init(args: list[str]) -> int:
             )
 
     return 0
+
+
+# ---------------------------------------------------------------------------
+# human-roster task 5.2 — resolve pm-user-id for each roster entry
+# ---------------------------------------------------------------------------
+
+def _resolve_roster_pm_user_ids(
+    platform_yaml_path: Path,
+    *,
+    adapter: Any,
+    dry_run: bool,
+    UI: Any,
+) -> None:
+    """For each `human-roster` entry without `pm-user-id`, resolve via the
+    adapter and write the integer back to `platform.yaml`.
+
+    Matching strategy lives in `otaman_adapters.easy8.resolve_pm_user_id`:
+    email first (exact), then case-insensitive name.  Unresolved entries
+    surface a WARNING and are left unchanged.
+
+    In dry-run mode, prints what WOULD be resolved without making API calls
+    or modifying the file.
+
+    Idempotent: entries that already have `pm-user-id` are skipped silently.
+    """
+    import yaml as _yaml
+
+    if not platform_yaml_path.is_file():
+        UI.warn(f"platform.yaml not found at {platform_yaml_path}")
+        return
+    try:
+        text = platform_yaml_path.read_text(encoding="utf-8")
+        doc = _yaml.safe_load(text) or {}
+    except Exception as exc:
+        UI.warn(f"Failed to parse platform.yaml: {exc}")
+        return
+
+    roster = doc.get("human-roster")
+    if not isinstance(roster, list) or not roster:
+        UI.muted("No `human-roster` block in platform.yaml — nothing to resolve.")
+        return
+
+    resolved = 0
+    skipped = 0
+    unresolved = 0
+
+    if dry_run:
+        for entry in roster:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name", "(unknown)")
+            if entry.get("pm-user-id") is not None:
+                UI.muted(f"  [dry-run] {name}: pm-user-id already set ({entry['pm-user-id']}) — skip")
+                skipped += 1
+                continue
+            UI.muted(f"  [dry-run] Would resolve pm-user-id for {name} ({entry.get('email', '?')})")
+        UI.ok(f"[dry-run] {len(roster)} roster entries reviewed")
+        return
+
+    if adapter is None:
+        UI.warn("Adapter unavailable — cannot resolve pm-user-id (run without --dry-run after configuring OTAMAN_PM_EASY8_API_KEY)")
+        return
+
+    # Real resolution path — needs HumanRosterEntry + resolve_pm_user_id
+    try:
+        from otaman_adapters.easy8 import HumanRosterEntry, resolve_pm_user_id  # type: ignore
+    except ImportError as exc:
+        UI.warn(f"otaman-adapters does not expose roster helpers: {exc}")
+        return
+
+    for entry in roster:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name") or "(unknown)"
+        email = entry.get("email") or ""
+        roles = entry.get("roles") or []
+        if entry.get("pm-user-id") is not None:
+            skipped += 1
+            continue
+
+        try:
+            roster_entry = HumanRosterEntry(
+                name=name, email=email, roles=list(roles), pm_user_id=None,
+            )
+            user_id = resolve_pm_user_id(adapter, roster_entry)
+        except Exception as exc:
+            UI.warn(f"  {name}: resolution error ({exc}) — left unchanged")
+            unresolved += 1
+            continue
+
+        if user_id is None:
+            UI.warn(f"  {name} ({email or 'no email'}): no PM user matched — left unchanged")
+            unresolved += 1
+            continue
+
+        entry["pm-user-id"] = int(user_id)
+        UI.ok(f"  {name}: pm-user-id={user_id}")
+        resolved += 1
+
+    if resolved > 0:
+        # Write platform.yaml back — use ruamel.yaml for round-trip preservation
+        try:
+            from ruamel.yaml import YAML as _RuamelYAML
+            import io as _io
+            rt = _RuamelYAML()
+            rt.preserve_quotes = True
+            rt.indent(mapping=2, sequence=4, offset=2)
+            rt.width = 120
+            doc_rt = rt.load(text) or {}
+            # Update only the roster (we don't trust our modified `doc` to round-trip)
+            doc_rt["human-roster"] = roster
+            buf = _io.StringIO()
+            rt.dump(doc_rt, buf)
+            platform_yaml_path.write_text(buf.getvalue(), encoding="utf-8")
+        except Exception as exc:
+            UI.warn(f"Failed to write resolved roster back to platform.yaml: {exc}")
+            return
+
+    UI.ok(f"Roster: resolved={resolved}, skipped={skipped} (already set), unresolved={unresolved}")
 
 
 # ---------------------------------------------------------------------------

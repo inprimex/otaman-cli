@@ -291,6 +291,93 @@ _TECH_STARTUP_IDENTITY_NOTE = (
 )
 
 
+_VALID_ROSTER_ROLES = ("cofounder", "cto", "cpo", "developer")
+
+
+def _prompt_human_roster(answers: dict[str, Any], *, dry_run: bool) -> None:
+    """human-roster task 5.1 — collect roster entries iteratively.
+
+    Conditional: only fires when `pm_sync_enabled` is True.  Each entry
+    has `name`, `email`, and `roles` (comma-separated input → list).
+    Prompts loop until the user answers "n" / blank to "Add another?".
+
+    In dry-run or non-interactive (EOF) mode, the prompt is skipped
+    silently — the wizard's degrade-gracefully posture.
+
+    The collected list is written to `answers["human_roster"]`;
+    `platform_gen` emits it under `platform.yaml: human-roster:`.
+    """
+    if not answers.get("pm_sync_enabled"):
+        return
+    if dry_run:
+        return
+
+    print()
+    print("─" * 64)
+    print("  Human Roster (PM assignment)")
+    print("─" * 64)
+    print("  Map people to roles so the bridge can assign PM issues to humans.")
+    print("  Valid roles: " + ", ".join(_VALID_ROSTER_ROLES))
+    print("─" * 64)
+
+    try:
+        start = input("  Configure human roster now? [y/N]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if start not in ("y", "yes"):
+        print("  Skipped — add entries by hand-editing platform.yaml or re-running init.")
+        return
+
+    entries: list[dict[str, Any]] = []
+    while True:
+        entry_num = len(entries) + 1
+        print(f"\n  ── Entry {entry_num} ──")
+        try:
+            name = input("    Name (blank to finish): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not name:
+            break
+        try:
+            email = input("    Email: ").strip()
+            roles_raw = input(f"    Roles (comma-separated; e.g. cofounder,cto): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        roles = [r.strip().lower() for r in roles_raw.split(",") if r.strip()]
+        if not roles:
+            print("    [!] No roles provided — entry skipped.")
+            continue
+        unknown = [r for r in roles if r not in _VALID_ROSTER_ROLES]
+        if unknown:
+            print(f"    [!] Unknown role(s): {', '.join(unknown)}")
+            print(f"        Allowed: {', '.join(_VALID_ROSTER_ROLES)}")
+            # Per spec scenario this is a WARNING in doctor; here we let it pass
+            # so the operator can re-edit later if needed.  Print but accept.
+
+        entry: dict[str, Any] = {"name": name, "roles": roles}
+        if email:
+            entry["email"] = email
+        entries.append(entry)
+        print(f"    [+] Added: {name} ({', '.join(roles)})")
+
+        try:
+            again = input("\n  Add another entry? [y/N]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if again not in ("y", "yes"):
+            break
+
+    if entries:
+        answers["human_roster"] = entries
+        print(f"\n  [+] Roster collected: {len(entries)} entr{'y' if len(entries) == 1 else 'ies'}")
+        print("      `pm-user-id` will be resolved on `otaman pm init --roster`.")
+
+
 def _confirm_tech_startup_prefill(answers: dict[str, Any], *, dry_run: bool) -> None:
     """Tasks 4.2 + 4.3 — show confirmation screen + identity note.
 
@@ -455,6 +542,12 @@ def run_program_init(args: argparse.Namespace) -> int:
     companion_repos = compute_companion_repos(processes)
     answers["scaffold_business"] = "business" in companion_repos
     answers["scaffold_strategy"] = "strategy" in companion_repos
+
+    # ── 5c. human-roster (task 5.1) ──────────────────────────────────────────
+    # Only prompt when pm-sync was enabled (no PM tool → no use for the roster).
+    # The roster prompt collects 1+ entries iteratively; each entry is
+    # written under `platform.yaml: human-roster:` by platform_gen.
+    _prompt_human_roster(answers, dry_run=getattr(args, "dry_run", False))
 
     # ── 5d. tech-startup-skill-pack-implementation tasks 4.1-4.3 ─────────────
     # When `tech-startup` was selected as a domain, the wizard's existing
