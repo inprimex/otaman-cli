@@ -962,6 +962,109 @@ def check_launch_commands_resume(repos: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def check_human_roster(config: dict[str, Any]) -> dict[str, Any]:
+    """human-roster task 5.3 — validate the human-roster block.
+
+    Rules (per spec):
+      ERROR  — pm-sync configured but human-roster is absent or empty
+      WARN   — roster entry missing pm-user-id (run `otaman pm init --roster`)
+      WARN   — roster entry has a role not in {cofounder, cto, cpo, developer}
+      WARN   — roster entry missing email (resolution can't proceed)
+    """
+    issues: list[dict[str, Any]] = []
+    details: dict[str, Any] = {}
+
+    pm_sync = config.get("pm-sync")
+    roster = config.get("human-roster")
+
+    pm_configured = isinstance(pm_sync, dict) and bool(pm_sync)
+    roster_present = isinstance(roster, list) and len(roster) > 0
+
+    if pm_configured and not roster_present:
+        issues.append({
+            "severity": "high",
+            "message": "pm-sync configured but human-roster is empty",
+            "fix": "Add a `human-roster:` block to platform.yaml, then run `otaman pm init --roster`",
+        })
+        details["status"] = "fail"
+    elif not pm_configured:
+        # Nothing to check — pm-sync absent → roster optional
+        details["status"] = "skip"
+        return {
+            "check": "human_roster",
+            "status": "ok",
+            "details": {"skipped": "pm-sync not configured"},
+            "issues": [],
+        }
+
+    valid_roles = {"cofounder", "cto", "cpo", "developer"}
+    entries_with_missing_id = 0
+    entries_with_unknown_role = 0
+    entries_with_missing_email = 0
+
+    if isinstance(roster, list):
+        for idx, entry in enumerate(roster):
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name") or f"entry[{idx}]"
+
+            if entry.get("pm-user-id") is None:
+                entries_with_missing_id += 1
+                issues.append({
+                    "severity": "medium",
+                    "message": f"{name}: pm-user-id not set",
+                    "fix": "Run `otaman pm init --roster` to resolve from the PM tool",
+                })
+
+            if not entry.get("email"):
+                entries_with_missing_email += 1
+                issues.append({
+                    "severity": "medium",
+                    "message": f"{name}: email field empty (required for pm-user-id resolution)",
+                    "fix": f"Add `email: <addr>` to the {name} entry in platform.yaml",
+                })
+
+            roles = entry.get("roles") or []
+            if isinstance(roles, list):
+                bad = [r for r in roles if r not in valid_roles]
+                if bad:
+                    entries_with_unknown_role += 1
+                    issues.append({
+                        "severity": "medium",
+                        "message": f"{name}: unknown role(s) {bad}",
+                        "fix": f"Valid roles: {', '.join(sorted(valid_roles))}",
+                    })
+            if not roles:
+                issues.append({
+                    "severity": "high",
+                    "message": f"{name}: roles list is empty (at least one role required)",
+                    "fix": f"Add at least one of: {', '.join(sorted(valid_roles))}",
+                })
+
+    details.update({
+        "pm_sync_configured": pm_configured,
+        "roster_entries": len(roster) if isinstance(roster, list) else 0,
+        "missing_pm_user_id": entries_with_missing_id,
+        "missing_email": entries_with_missing_email,
+        "unknown_role": entries_with_unknown_role,
+    })
+
+    # Status derivation
+    if any(i.get("severity") == "high" for i in issues):
+        status = "fail"
+    elif issues:
+        status = "warn"
+    else:
+        status = "ok"
+
+    return {
+        "check": "human_roster",
+        "status": status,
+        "details": details,
+        "issues": issues,
+    }
+
+
 def run_doctor(project_root: Path) -> dict[str, Any]:
     """Run all doctor checks and return comprehensive report."""
     config_path = project_root / "platform.yaml"
@@ -987,6 +1090,7 @@ def run_doctor(project_root: Path) -> dict[str, Any]:
         check_git_host(project_root),
         check_launch_commands_resume(repos),
         check_plugin_doctor(project_root),
+        check_human_roster(config),
     ]
 
     passed = sum(1 for c in checks if c["status"] == "ok")

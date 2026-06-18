@@ -170,6 +170,13 @@ def _build_platform_yaml(answers: dict[str, Any]) -> dict[str, Any]:
             pm_sync_block["webhook-target"] = answers.get("pm_sync_webhook_url", "")
         doc["pm-sync"] = pm_sync_block
 
+    # human-roster (task 5.1) — only emitted when the wizard collected entries.
+    # Each entry: name, email (optional), roles (list, non-empty),
+    # pm-user-id (resolved later by `otaman pm init --roster`).
+    roster = answers.get("human_roster")
+    if isinstance(roster, list) and roster:
+        doc["human-roster"] = roster
+
     # bus-cc-routing task 2.5 — default routing rules.  spec-agent always
     # CC'd on messages to human; cpo-agent additionally CC'd on high/urgent
     # only when a cpo-agent repo is configured.
