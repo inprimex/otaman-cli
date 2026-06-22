@@ -13,6 +13,8 @@ Usage:
     otaman doctor [--org <name>]      Check environment readiness; --org adds CE harness check
     otaman status [--blocked] [--agent NAME] [--json]   Fleet status (or --repos for cross-repo view)
     otaman set-status <state>         Update this agent's status (working|blocked|waiting|idle)
+    otaman whoami --for-path <p>      Resolve owning agent for a path (monorepo-path-ownership)
+    otaman owner-paths --validate     Validate owner-paths globs in platform.yaml
     otaman watchdog <action>          Query/control the runner watchdog (status|start|pause|resume)
     otaman check [<agent>]            Check messages for an agent
     otaman ack <msg> [--read|--resolved]   Acknowledge a bus message
@@ -2328,11 +2330,110 @@ def _get_agent_ack_status(msg_stem: str, agent: str, acks_dir: Path) -> str:
     return "pending"
 
 
+def _cmd_whoami_for_path(raw_path: str) -> int:
+    """monorepo-path-ownership task 2.1 — `otaman whoami --for-path <path>`.
+
+    Resolves the owning agent for *raw_path* against the current project's
+    `platform.yaml owner-paths` configuration.  Prints a 3-line table per
+    the spec example:
+
+        repo:  <repo-name>
+        path:  <relative-path>
+        owner: <agent>  (<source>)
+
+    where `<source>` is either `matched glob: "<pat>"`, `fallback — no glob
+    matched`, or `no owner-paths configured`.  Exit 0 on success, 1 when
+    the path isn't under any registered repo.
+    """
+    from pathlib import Path as _Path
+    from otaman_cli.owner_paths import resolve_owner_for_path
+
+    root = find_project_root()
+    if root is None:
+        UI.error("Not in an otaman project (no platform.yaml found)")
+        return 1
+
+    target = _Path(raw_path)
+    # Resolve relative to CWD (per spec).  Don't require the file to exist —
+    # we're matching by glob, not by filesystem state.
+    if not target.is_absolute():
+        target = _Path.cwd() / target
+
+    result = resolve_owner_for_path(target, project_root=root)
+    if result is None:
+        UI.error(
+            f'path "{raw_path}" is not under any repo registered in platform.yaml'
+        )
+        return 1
+
+    UI.kv("  repo", result.repo_name)
+    UI.kv("  path", result.relative_path)
+    if result.matched_glob is not None:
+        tail = f"(matched glob: \"{result.matched_glob}\")"
+    else:
+        tail = f"({result.fallback_reason})"
+    UI.kv("  owner", f"{result.agent}  {tail}")
+    return 0
+
+
+def cmd_owner_paths(args: list[str]) -> int:
+    """monorepo-path-ownership task 2.2 — `otaman owner-paths --validate`.
+
+    Walks every repo's `owner-paths:` block and reports:
+      [ok]    pattern → declared agent
+      [WARN]  two patterns overlap at equal specificity
+      [ERROR] referenced agent not declared in platform.yaml agents:
+
+    Exit 0 on success or warnings-only; 1 when any error finding fires.
+    """
+    if "--validate" not in args:
+        UI.error("Usage: otaman owner-paths --validate")
+        return 2
+
+    from otaman_cli.owner_paths import validate_owner_paths
+
+    root = find_project_root()
+    if root is None:
+        UI.error("Not in an otaman project (no platform.yaml found)")
+        return 1
+
+    print("  Validating owner-paths in platform.yaml...")
+    findings = validate_owner_paths(root)
+    if not findings:
+        print("  No owner-paths configured in platform.yaml")
+        return 0
+
+    # Render with the spec-specified labels + alignment
+    n_ok = sum(1 for f in findings if f.severity == "ok")
+    n_warn = sum(1 for f in findings if f.severity == "warn")
+    n_error = sum(1 for f in findings if f.severity == "error")
+
+    for f in findings:
+        label_map = {"ok": "[ok]   ", "warn": "[WARN] ", "error": "[ERROR]"}
+        label = label_map.get(f.severity, "[?]   ")
+        # Padding for visual alignment with the spec's example output
+        line = f'  {label} {f.repo}: "{f.pattern}"  → {f.agent}'
+        print(line)
+        if f.note:
+            print(f"         {f.note}")
+
+    print()
+    print(
+        f"  Summary: {n_ok + n_warn + n_error} patterns, "
+        f"{n_warn} warnings, {n_error} errors"
+    )
+    if n_error > 0:
+        print("  Run `otaman owner-paths --validate` again after fixing platform.yaml")
+        return 1
+    return 0
+
+
 def cmd_whoami(args: list[str]) -> int:
     """Print current agent identity + project + routing + bus state.
 
     Usage:
       otaman whoami [--json]
+      otaman whoami --for-path <path>    # monorepo-path-ownership 2.1
 
     Useful for confirming which agent / project / routing identity is
     loaded in this tab, especially when terminal tab titles get
@@ -2342,6 +2443,15 @@ def cmd_whoami(args: list[str]) -> int:
     import os
     import yaml
     from datetime import datetime, timezone
+
+    # monorepo-path-ownership task 2.1 — `--for-path <path>` subcommand
+    if "--for-path" in args:
+        idx = args.index("--for-path")
+        if idx + 1 >= len(args):
+            UI.error("--for-path requires a path argument")
+            UI.muted("Usage: otaman whoami --for-path <path>")
+            return 1
+        return _cmd_whoami_for_path(args[idx + 1])
 
     json_mode = "--json" in args
 
@@ -6194,6 +6304,8 @@ def cmd_help() -> int:
 {C.BOLD}Bus & messages:{C.RESET}
   {C.GREEN}status{C.RESET} [--blocked|--agent N|--json|--repos]   Fleet status (per-agent presence; --repos for legacy view)
   {C.GREEN}set-status{C.RESET} <state> [--task ...]   Update this agent's status (working|blocked|waiting|idle)
+  {C.GREEN}whoami --for-path{C.RESET} <p>        Resolve owning agent for a path (monorepo-path-ownership)
+  {C.GREEN}owner-paths --validate{C.RESET}        Validate owner-paths globs in platform.yaml
   {C.GREEN}watchdog{C.RESET} <status|start|pause|resume>   Query/control the runner watchdog (HTTP)
   {C.GREEN}whoami{C.RESET}, {C.GREEN}iam{C.RESET}                   Show agent identity + project + routing + bus state ([--json])
   {C.GREEN}check{C.RESET} [agent]                 Check pending messages for an agent (auto-detects from cwd)
@@ -6507,6 +6619,7 @@ def main() -> int:
         "send": lambda: cmd_send(rest),
         "whoami": lambda: cmd_whoami(rest),
         "iam": lambda: cmd_whoami(rest),
+        "owner-paths": lambda: cmd_owner_paths(rest),
         "ack": lambda: cmd_ack(positional, ack_status),
         "cleanup": lambda: cmd_cleanup(positional, dry_run),
         "propose": lambda: cmd_propose(positional, desc),
