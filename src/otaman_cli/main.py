@@ -3490,8 +3490,35 @@ def _find_task_assignment_sender(active_dir: "Path", change_name: str, root: "Pa
     return "human"
 
 
+def _is_spec_agent() -> bool:
+    """fix-otaman-complete-task-drift task 1.1 — true only when the current
+    agent is spec-agent.
+
+    Reads `.agents/current-agent` relative to the project root.  Returns:
+      - True only when the file's stripped value is exactly `"spec-agent"`
+      - False on FileNotFoundError (no identity file → safe default;
+        treats unknown identity as non-spec-agent so tasks.md is not edited)
+      - False on any read error (same safe default)
+    """
+    root = find_project_root()
+    if root is None:
+        return False
+    p = root / ".agents" / "current-agent"
+    try:
+        return p.read_text(encoding="utf-8").strip() == "spec-agent"
+    except (FileNotFoundError, OSError):
+        return False
+
+
 def cmd_complete(args: list[str], tasks_spec: str = "", mark_all: bool = False) -> int:
-    """Report task completion: update tasks.md and send bus notification."""
+    """Report task completion: send bus notification + (spec-agent only) tick tasks.md.
+
+    fix-otaman-complete-task-drift Part A (tasks 1.1–1.5): when called by any
+    agent OTHER than spec-agent, the tasks.md write is skipped because the
+    calling agent has no permission to commit to otaman-specs.  The bus
+    message is sent unconditionally; spec-agent's session-start sweep applies
+    the ticks asynchronously (Part B).
+    """
     if not args:
         UI.error("Change name required")
         UI.muted("Usage: otaman complete <change-name> --tasks \"2.1,3.1-3.5\"")
@@ -3518,39 +3545,52 @@ def cmd_complete(args: list[str], tasks_spec: str = "", mark_all: bool = False) 
     # Get agent identity: CWD→repo→owner → .agents/current-agent → "unknown-agent"
     agent = resolve_agent_identity(root) or "unknown-agent"
 
-    # Step 1: Update tasks.md via actualize-tasks.py
-    script_args = ["--change", change_name, "--agent", agent, "--project-root", str(root)]
-    if mark_all:
-        script_args.append("--all")
-    elif tasks_spec:
-        script_args.extend(["--tasks", tasks_spec])
+    # fix-otaman-complete-task-drift task 1.2 — guard the tasks.md write
+    # behind an identity check.  Only spec-agent commits to otaman-specs,
+    # so only spec-agent's working-tree edit will reach `main`.  For every
+    # other agent, the local working-tree edit gets silently reverted on
+    # the next `git pull --ff-only` — this silent drift had ~130 tasks
+    # stuck on the wrong state before the fix landed (see PR #96 backfill).
+    is_spec = _is_spec_agent()
+    if is_spec:
+        # Step 1: Update tasks.md via actualize-tasks.py (spec-agent only)
+        script_args = ["--change", change_name, "--agent", agent, "--project-root", str(root)]
+        if mark_all:
+            script_args.append("--all")
+        elif tasks_spec:
+            script_args.extend(["--tasks", tasks_spec])
 
-    result = run_script("actualize-tasks.py", *script_args, capture=True)
+        result = run_script("actualize-tasks.py", *script_args, capture=True)
 
-    if result.returncode == 2:
-        UI.error(result.stderr or result.stdout)
-        return result.returncode
+        if result.returncode == 2:
+            UI.error(result.stderr or result.stdout)
+            return result.returncode
 
-    try:
-        import json as _json
-        report = _json.loads(result.stdout)
-    except Exception:
-        print(result.stdout)
-        report = {}
+        try:
+            import json as _json
+            report = _json.loads(result.stdout)
+        except Exception:
+            print(result.stdout)
+            report = {}
 
-    updated = report.get("updated", 0)
-    already = report.get("already_done", 0)
-    not_found = report.get("not_found", [])
-    tasks_file = report.get("tasks_file", "")
+        updated = report.get("updated", 0)
+        already = report.get("already_done", 0)
+        not_found = report.get("not_found", [])
+        tasks_file = report.get("tasks_file", "")
 
-    if updated > 0:
-        UI.ok(f"Updated: {updated} task(s) marked complete in tasks.md")
-    if already > 0:
-        UI.muted(f"Already done: {already} task(s)")
-    if not_found:
-        UI.warn(f"Not found: {', '.join(not_found)}")
-    if tasks_file:
-        UI.muted(f"File: {tasks_file}")
+        if updated > 0:
+            UI.ok(f"Updated: {updated} task(s) marked complete in tasks.md")
+        if already > 0:
+            UI.muted(f"Already done: {already} task(s)")
+        if not_found:
+            UI.warn(f"Not found: {', '.join(not_found)}")
+        if tasks_file:
+            UI.muted(f"File: {tasks_file}")
+    else:
+        # Non-spec-agent: skip the tasks.md write entirely.  The bus
+        # message below is the canonical signal; spec-agent's sweep
+        # (Part B of this change) applies the tick on next session start.
+        UI.muted(f"(skipping tasks.md write — current agent is {agent!r}, not spec-agent)")
 
     # Step 2: Create task-complete bus message
     # D1: locate originating task-assignment to route reply to assigner only
@@ -3571,6 +3611,16 @@ def cmd_complete(args: list[str], tasks_spec: str = "", mark_all: bool = False) 
 
     task_label = "all tasks" if mark_all else f"tasks {tasks_spec}"
 
+    # Note: `updated` is only set when the caller is spec-agent (i.e. the
+    # actualize-tasks.py path ran).  For non-spec-agents the bus body
+    # records the requested task ids; spec-agent's sweep applies the tick
+    # asynchronously, so the "Updated: N" line becomes a forward-looking
+    # plan rather than a past-tense report.
+    if is_spec:
+        updated_line = f"**Updated**: {updated} task(s) in tasks.md"
+    else:
+        updated_line = "**Pending tick**: spec-agent will apply tasks.md ticks on next session sweep"
+
     content = f"""---
 id: {msg_id}
 from: {agent}
@@ -3587,7 +3637,7 @@ status: pending
 **Agent**: {agent}
 **Change**: {change_name}
 **Completed**: {task_label}
-**Updated**: {updated} task(s) in tasks.md
+{updated_line}
 **Timestamp**: {now_iso}
 """
 
@@ -3597,6 +3647,15 @@ status: pending
     print()
     UI.ok(f"Bus notification: {filepath.relative_to(root)}")
     UI.muted(f"Type: task-complete | To: {recipient} | Change: {change_name}")
+
+    # fix-otaman-complete-task-drift task 1.2 — sweep notice for non-spec-agents.
+    # The bus message above IS the canonical signal; spec-agent picks it up
+    # via the session-start sweep (Part B) and applies the tick to tasks.md
+    # at that point.  Print this so the calling agent doesn't expect the
+    # checkboxes to be live immediately.
+    if not is_spec:
+        UI.ok("Bus task-complete sent.")
+        UI.muted("    spec-agent will tick tasks.md on next session start.")
 
     # Step 2b: Fanout to spec_owner if set and different from primary recipient
     spec_owner = _read_spec_owner(root, change_name)
