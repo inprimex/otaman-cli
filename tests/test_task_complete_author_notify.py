@@ -180,8 +180,15 @@ def _make_task_assignment(meta: Path, change: str, sender: str) -> None:
 
 
 def test_complete_with_spec_owner_sends_two_messages(project: Path) -> None:
-    """spec_owner set and != recipient → two task-complete messages."""
-    _write_spec_owner(project, "my-feature", "spec-agent")
+    """spec_owner set and != recipient → two task-complete messages.
+
+    Post fix-otaman-complete-task-drift: non-spec-agent runs force
+    `to: spec-agent` as the primary recipient (per design.md
+    `_send_task_complete_bus_message contract`).  When spec_owner is
+    a different value (e.g. "otaman"), the Step 2b fanout still fires
+    so the original assigner's role is preserved as a separate copy.
+    """
+    _write_spec_owner(project, "my-feature", "otaman")  # spec_owner = original assigner
     _make_task_assignment(project, "my-feature", "otaman")
 
     result = _run_complete(project, "my-feature", "1.1")
@@ -194,8 +201,9 @@ def test_complete_with_spec_owner_sends_two_messages(project: Path) -> None:
         for line in text.splitlines():
             if line.startswith("to:"):
                 recipients.add(line.split(":", 1)[1].strip())
-    assert "otaman" in recipients, f"primary recipient missing; messages: {[m.name for m in msgs]}"
-    assert "spec-agent" in recipients, f"spec_owner fanout missing; messages: {[m.name for m in msgs]}"
+    # Primary always spec-agent (cli-agent caller); spec_owner fanout reaches otaman
+    assert "spec-agent" in recipients, f"primary recipient missing; messages: {[m.name for m in msgs]}"
+    assert "otaman" in recipients, f"spec_owner fanout missing; messages: {[m.name for m in msgs]}"
 
 
 def test_complete_without_spec_owner_sends_one_message(project: Path) -> None:
@@ -210,8 +218,13 @@ def test_complete_without_spec_owner_sends_one_message(project: Path) -> None:
 
 
 def test_complete_spec_owner_equals_recipient_sends_one_message(project: Path) -> None:
-    """spec_owner == recipient → no duplicate message."""
-    _write_spec_owner(project, "my-feature", "otaman")
+    """spec_owner == recipient → no duplicate message.
+
+    Post fix-otaman-complete-task-drift: the recipient for non-spec-agent
+    runs is hardcoded to "spec-agent".  This test verifies the
+    no-duplicate semantics by setting spec_owner == "spec-agent" too.
+    """
+    _write_spec_owner(project, "my-feature", "spec-agent")
     _make_task_assignment(project, "my-feature", "otaman")
 
     result = _run_complete(project, "my-feature", "1.1")
