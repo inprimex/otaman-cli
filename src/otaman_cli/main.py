@@ -15,6 +15,7 @@ Usage:
     otaman set-status <state>         Update this agent's status (working|blocked|waiting|idle)
     otaman whoami --for-path <p>      Resolve owning agent for a path (monorepo-path-ownership)
     otaman owner-paths --validate     Validate owner-paths globs in platform.yaml
+    otaman notify-change <change>     Send spec-change notification (post-merge-spec-notify)
     otaman watchdog <action>          Query/control the runner watchdog (status|start|pause|resume)
     otaman check [<agent>]            Check messages for an agent
     otaman ack <msg> [--read|--resolved]   Acknowledge a bus message
@@ -1938,6 +1939,12 @@ def cmd_doctor(args: list[str], *, org: str | None = None) -> int:
         return 1 if (base_rc or org_rc) else 0
 
     return base_rc
+
+
+def _cmd_notify_change_dispatch(args: list[str]) -> int:
+    """Lazy-import wrapper for `otaman notify-change` (post-merge-spec-notify 1.1)."""
+    from otaman_cli.notify_change import cmd_notify_change
+    return cmd_notify_change(args)
 
 
 def _cmd_watchdog_dispatch(args: list[str]) -> int:
@@ -6394,6 +6401,7 @@ def cmd_help() -> int:
   {C.GREEN}set-status{C.RESET} <state> [--task ...]   Update this agent's status (working|blocked|waiting|idle)
   {C.GREEN}whoami --for-path{C.RESET} <p>        Resolve owning agent for a path (monorepo-path-ownership)
   {C.GREEN}owner-paths --validate{C.RESET}        Validate owner-paths globs in platform.yaml
+  {C.GREEN}notify-change{C.RESET} <change>             Send spec-change notification (post-merge replacement)
   {C.GREEN}watchdog{C.RESET} <status|start|pause|resume>   Query/control the runner watchdog (HTTP)
   {C.GREEN}whoami{C.RESET}, {C.GREEN}iam{C.RESET}                   Show agent identity + project + routing + bus state ([--json])
   {C.GREEN}check{C.RESET} [agent]                 Check pending messages for an agent (auto-detects from cwd)
@@ -6708,6 +6716,7 @@ def main() -> int:
         "whoami": lambda: cmd_whoami(rest),
         "iam": lambda: cmd_whoami(rest),
         "owner-paths": lambda: cmd_owner_paths(rest),
+        "notify-change": lambda: _cmd_notify_change_dispatch(positional),
         "ack": lambda: cmd_ack(positional, ack_status),
         "cleanup": lambda: cmd_cleanup(positional, dry_run),
         "propose": lambda: cmd_propose(positional, desc),
