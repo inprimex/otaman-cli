@@ -3639,7 +3639,20 @@ def cmd_complete(args: list[str], tasks_spec: str = "", mark_all: bool = False) 
     active_dir.mkdir(parents=True, exist_ok=True)
     (active_dir / "acks").mkdir(exist_ok=True)
 
-    recipient = _find_task_assignment_sender(active_dir, change_name, root)
+    # fix-otaman-complete-task-drift `_send_task_complete_bus_message` contract:
+    # the design.md design specifies `to: spec-agent` for non-spec-agent
+    # callers (spec-agent is the agent that applies tasks.md ticks via the
+    # session-start sweep, so they're the canonical recipient).  The
+    # original `_find_task_assignment_sender` path routed to whoever sent
+    # the task-assignment, which produced a self-addressed message when
+    # the calling agent had ALSO authored a task-assignment for the same
+    # change (e.g. plugin-agent's report 2026-06-26).  For non-spec-agent
+    # callers, override to spec-agent.  spec-agent's own runs keep the
+    # legacy recipient logic since their work IS the canonical tick.
+    if is_spec:
+        recipient = _find_task_assignment_sender(active_dir, change_name, root)
+    else:
+        recipient = "spec-agent"
 
     slug = re.sub(r"[^a-z0-9]+", "-", change_name.lower()).strip("-")[:30]
     msg_id = f"{now_ts}-complete-{slug}"

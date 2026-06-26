@@ -155,6 +155,59 @@ class TestCmdCompleteBranching:
             rc = cmd_complete(["test-change"], tasks_spec="1.1")
             assert rc == 0, f"agent={agent} should exit 0; got {rc}"
 
+    # Regression for plugin-agent's 2026-06-26 report: when the calling
+    # agent ALSO has a task-assignment they sent for the same change in
+    # the bus (e.g. they tasked another agent), the old recipient logic
+    # would route the task-complete back to themselves.  Fix: non-spec-agent
+    # callers always target `spec-agent`.
+    def test_non_spec_agent_recipient_is_spec_agent_not_self(self, tmp_path: Path):
+        """plugin-agent reported self-addressed task-complete after running
+        cmd_complete on a change for which they had authored a
+        task-assignment.  The new (post-spec) routing forces
+        ``to: spec-agent`` for non-spec-agent runs."""
+        # Stage a project + plant a task-assignment FROM plugin-agent for
+        # change "x".  Running cmd_complete x as plugin-agent must produce
+        # a message addressed to spec-agent, NOT plugin-agent (self).
+        _stage_project(tmp_path, agent="plugin-agent")
+        active = tmp_path / ".agents" / "bus" / "active"
+        (active / "20260626T000000-plugin-agent-to-someone-task-assignment-x.md").write_text(
+            "---\n"
+            "id: ta-x\n"
+            "from: plugin-agent\n"
+            "to: someone\n"
+            "priority: normal\n"
+            "type: task-assignment\n"
+            "change: x\n"
+            "timestamp: 2026-06-26T00:00:00Z\n"
+            "status: pending\n"
+            "---\n\n## Subject: Task assignment for x\n\nbody\n",
+            encoding="utf-8",
+        )
+
+        env = {
+            **os.environ,
+            "OTAMAN_AGENT": "plugin-agent",
+            "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
+            "NO_COLOR": "1",
+        }
+        r = subprocess.run([
+            sys.executable, "-m", "otaman_cli.main",
+            "complete", "x", "--tasks", "1.1",
+        ], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30)
+        assert r.returncode == 0, (r.stdout, r.stderr)
+
+        # Find the produced task-complete message
+        msgs = list(active.glob("*task-complete*.md"))
+        assert len(msgs) >= 1
+        complete_msg = next(m for m in msgs if m.read_text(encoding="utf-8").count("type: task-complete"))
+        body = complete_msg.read_text(encoding="utf-8")
+        assert "to: spec-agent" in body, (
+            f"non-spec-agent run MUST target spec-agent; got:\n{body[:400]}"
+        )
+        assert "to: plugin-agent" not in body, (
+            "MUST NOT self-address (regression of 2026-06-26 plugin-agent report)"
+        )
+
     # 1.5 — full integration via subprocess
     def test_integration_cli_agent_does_not_modify_tasks_md(self, tmp_path: Path):
         """End-to-end: `otaman complete` as cli-agent → bus file written, no tasks.md mutation."""
