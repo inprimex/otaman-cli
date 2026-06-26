@@ -76,9 +76,12 @@ Why the split: bus checks happen dozens of times per session, and the MCP-via-in
 - When you finish tasks from a `task-assignment`, you MUST report completion:
   - `otaman complete <change-name> --tasks "2.1, 2.3"` (specific tasks)
   - `otaman complete <change-name> --all` (all tasks for that change)
-- This updates `tasks.md` checkboxes in the specs repo and sends a `task-complete` bus message
+- This sends a `task-complete` bus message addressed to spec-agent
 - **Lifecycle**: task-assignment received -> ack "read" -> implement -> `otaman complete` -> ack "resolved"
 - NEVER ack a task-assignment as "resolved" without first running `otaman complete`
+
+**How tasks.md ticks actually land** (post fix-otaman-complete-task-drift):
+`otaman complete` sends a bus `task-complete` message; spec-agent applies the `tasks.md` tick asynchronously on their next session-start sweep (Part B of the same change). You do NOT need to commit to `otaman-specs` yourself — that repo is read-only for non-spec-agents. The output line `spec-agent will tick tasks.md on next session start` is the success signal, not an error. If the tick doesn't appear in tasks.md after some time, the bus message is still the canonical signal — flag it to spec-agent rather than re-running `otaman complete`.
 
 ### Specs (OpenSpec)
 - Specs repo: `../otaman-specs` (READ-ONLY)
