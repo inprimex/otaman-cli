@@ -2645,20 +2645,32 @@ def cmd_send(args: list[str]) -> int:
     slug = re.sub(r"[^a-z0-9]+", "-", ns.subject.lower())[:40].strip("-")
     filename = f"{ts}-{agent}-to-{ns.to}-{slug}.md"
 
-    # bus-cc-routing task 2.1 — emit `cc:` field when --cc is given.
-    # De-duplicate, drop the primary recipient if accidentally included,
-    # and drop empty / whitespace-only entries.
-    cc_list: list[str] = []
-    if ns.cc:
-        seen: set[str] = set()
-        for raw in ns.cc:
-            name = (raw or "").strip()
-            if not name or name == ns.to or name in seen:
-                continue
-            cc_list.append(name)
-            seen.add(name)
+    # cli-send-cc-fanout-parity (tasks 1.1-1.5) — compute the effective CC
+    # list as the union of explicit --cc and routing-rule-derived CC, then
+    # write per-recipient copies after the primary.  Ported from
+    # bus_server.py:157-283 so cmd_send and the MCP otaman_send produce
+    # byte-identical on-disk files.
+    from otaman_cli.cc_fanout import (
+        compute_effective_cc,
+        inject_x_cc,
+        load_routing_rules,
+        cc_copy_filename,
+    )
+    routing_rules = load_routing_rules(root)
+    # Strip + drop empties from --cc values (a UX nicety; the ported
+    # compute_effective_cc preserves whitespace-only entries because
+    # bus_server.py:227 doesn't strip).  cmd_send historically stripped
+    # so keep that behavior at the CLI boundary.
+    stripped_cc = [c.strip() for c in (ns.cc or []) if isinstance(c, str) and c.strip()]
+    effective_cc = compute_effective_cc(
+        to=ns.to,
+        priority=ns.priority,
+        explicit_cc=stripped_cc,
+        routing_rules=routing_rules,
+        msg_type=ns.msg_type,
+    )
 
-    cc_line = f"cc: [{', '.join(cc_list)}]\n" if cc_list else ""
+    cc_line = f"cc: [{', '.join(effective_cc)}]\n" if effective_cc else ""
     content = (
         f"---\n"
         f"id: {ts}-{agent[:8]}\n"
@@ -2681,16 +2693,33 @@ def cmd_send(args: list[str]) -> int:
     msg_path = active_dir / filename
     msg_path.write_text(content, encoding="utf-8")
 
+    # Per-CC copies (task 1.5): one extra file per effective_cc recipient,
+    # frontmatter augmented with `x-cc: true`.  Stem includes the recipient
+    # so each agent's `otaman check` glob picks up its copy.
+    cc_copy_paths: list[Path] = []
+    if effective_cc:
+        cc_content = inject_x_cc(content)
+        for recipient in effective_cc:
+            cc_fname = cc_copy_filename(
+                timestamp=ts, from_agent=agent,
+                cc_recipient=recipient, slug=slug,
+            )
+            cc_path = active_dir / cc_fname
+            cc_path.write_text(cc_content, encoding="utf-8")
+            cc_copy_paths.append(cc_path)
+
     UI.ok(f"Sent: {filename}")
     UI.kv("  From", agent)
     UI.kv("  To", ns.to)
-    if cc_list:
-        UI.kv("  CC", ", ".join(cc_list))
+    if effective_cc:
+        UI.kv("  CC", ", ".join(effective_cc))
     UI.kv("  Type", ns.msg_type)
     UI.kv("  Priority", ns.priority)
     UI.muted(f"  Path: {msg_path.relative_to(root)}")
-    if cc_list:
-        UI.muted("  Note: bus-server fan-out (per-recipient copies) requires send via MCP otaman_send; cmd_send writes the cc: field only.")
+    if cc_copy_paths:
+        UI.muted(f"  CC copies: {len(cc_copy_paths)} written (x-cc: true)")
+        for p in cc_copy_paths:
+            UI.muted(f"    {p.relative_to(root)}")
     return 0
 
 

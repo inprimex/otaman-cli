@@ -52,11 +52,15 @@ class TestSendCcFlag:
         root = self._setup_root(tmp_path)
         r = self._run_send(root, "--cc", "spec-agent")
         assert r.returncode == 0, r.stderr
-        # Find the written message and assert frontmatter
+        # cli-send-cc-fanout-parity: cmd_send now writes primary + 1 CC copy
         msgs = list((root / ".agents" / "bus" / "active").glob("*.md"))
-        assert len(msgs) == 1
-        body = msgs[0].read_text(encoding="utf-8")
-        assert "cc: [spec-agent]" in body
+        assert len(msgs) == 2
+        # Primary has cc: but no x-cc: marker; CC copy has both
+        primary = next(m for m in msgs if "x-cc: true" not in m.read_text(encoding="utf-8"))
+        cc_copy = next(m for m in msgs if "x-cc: true" in m.read_text(encoding="utf-8"))
+        assert "cc: [spec-agent]" in primary.read_text(encoding="utf-8")
+        assert "cc: [spec-agent]" in cc_copy.read_text(encoding="utf-8")
+        assert "to-spec-agent" in cc_copy.name
 
     def test_multiple_cc_recipients_repeated(self, tmp_path: Path):
         root = self._setup_root(tmp_path)
