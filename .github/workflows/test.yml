@@ -46,6 +46,13 @@ jobs:
           token: ${{ secrets.INPRIMEX_RO_TOKEN }}
           path: workspace/otaman-plugin
 
+      - name: Checkout otaman-adapters (sibling path-dep)
+        uses: actions/checkout@v6
+        with:
+          repository: inprimex/otaman-adapters
+          token: ${{ secrets.INPRIMEX_RO_TOKEN }}
+          path: workspace/otaman-adapters
+
       - name: Generate workspace pyproject.toml
         shell: bash
         working-directory: workspace
@@ -58,12 +65,13 @@ jobs:
           requires-python = ">=3.10"
 
           [tool.uv.workspace]
-          members = ["otaman-core","otaman-bridge","otaman-plugin","otaman-cli"]
+          members = ["otaman-core","otaman-bridge","otaman-plugin","otaman-adapters","otaman-cli"]
 
           [tool.uv.sources]
           otaman-core = { workspace = true }
           otaman-bridge = { workspace = true }
           otaman-plugin = { workspace = true }
+          otaman-adapters = { workspace = true }
           otaman-cli = { workspace = true }
           EOF
           echo "Workspace pyproject written:"
