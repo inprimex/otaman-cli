@@ -60,7 +60,20 @@ import sys
 from pathlib import Path
 from typing import Any
 
-VERSION = "0.1.0"
+
+def _resolve_version() -> str:
+    # Read the installed package version from importlib.metadata so the value
+    # tracks pipx/uv installs and reflects the actual release tag baked into
+    # the wheel. Falls back to a "-dev" suffix for editable/source-tree runs
+    # where the package isn't installed.
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+        return version("otaman-cli")
+    except (ImportError, PackageNotFoundError):
+        return "0.1.0-dev"
+
+
+VERSION = _resolve_version()
 # After Stage 4E carve, run_script() dispatches to scripts that live across
 # multiple sibling repos via "python -m <module>". SCRIPT_MAP records the
 # legacy filename → new module name lookup; PYTHONPATH for the subprocess
