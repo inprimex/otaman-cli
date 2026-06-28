@@ -1,6 +1,6 @@
 [project]
 name = "otaman-cli"
-version = "0.1.0"
+version = "0.2.0"
 description = "Otaman standalone CLI: subcommand dispatch, local + remote operations, account management"
 requires-python = ">=3.10"
 authors = [{ name = "Otaman platform" }]
