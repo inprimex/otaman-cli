@@ -263,11 +263,85 @@ class TestMaestroUpgrade:
         self._run(["launcher", "add", str(launcher)], isolated_registry)
         r = self._run(["upgrade", "--dry-run"], isolated_registry)
         assert r.returncode == 0
-        # Should emit ssh commands
-        assert "ssh user@host" in r.stdout
+        # Should emit ssh commands. "--" before the host guards against
+        # flag-injection via a hostile ssh_default_host value (F031).
+        assert "ssh -- user@host" in r.stdout
         # Both pull and init paths should appear
         assert "git pull" in r.stdout
         assert "bash -l -c 'otaman init'" in r.stdout
+
+    def test_hostile_host_rejected(
+        self, isolated_registry: Path, tmp_path: Path
+    ) -> None:
+        """F031 regression: a launch-settings.yaml ssh_default_host starting
+        with '-' must never reach ssh's argv as an unguarded flag (e.g.
+        -oProxyCommand=... would execute a local command)."""
+        launcher = tmp_path / "hostile_host"
+        launcher.mkdir()
+        (launcher / "launch-settings.yaml").write_text(
+            "active_connection: m\n"
+            "connections:\n"
+            "  m:\n"
+            "    type: ssh\n"
+            "    ssh_default_host: -oProxyCommand=touch /tmp/pwned\n"
+            "    ssh_remote_root: /home/user/proj-maestro\n"
+            "    ssh_plugin_path: /home/user/maestro-plugin\n",
+            encoding="utf-8",
+        )
+        self._run(["launcher", "add", str(launcher)], isolated_registry)
+        r = self._run(["upgrade", "--dry-run"], isolated_registry)
+        assert r.returncode != 0
+        assert "unsafe ssh_default_host" in (r.stdout + r.stderr)
+        assert "ProxyCommand" not in (r.stdout + r.stderr) or "Refusing" in (r.stdout + r.stderr)
+
+    def test_hostile_ssh_key_rejected(
+        self, isolated_registry: Path, tmp_path: Path
+    ) -> None:
+        launcher = tmp_path / "hostile_key"
+        launcher.mkdir()
+        (launcher / "launch-settings.yaml").write_text(
+            "active_connection: m\n"
+            "connections:\n"
+            "  m:\n"
+            "    type: ssh\n"
+            "    ssh_default_host: user@host\n"
+            "    ssh_key: -oProxyCommand=touch /tmp/pwned\n"
+            "    ssh_remote_root: /home/user/proj-maestro\n"
+            "    ssh_plugin_path: /home/user/maestro-plugin\n",
+            encoding="utf-8",
+        )
+        self._run(["launcher", "add", str(launcher)], isolated_registry)
+        r = self._run(["upgrade", "--dry-run"], isolated_registry)
+        assert r.returncode != 0
+        assert "unsafe ssh_key" in (r.stdout + r.stderr)
+
+    def test_shell_metacharacters_in_remote_paths_are_quoted(
+        self, isolated_registry: Path, tmp_path: Path
+    ) -> None:
+        """F031 regression: plugin_path/maestro_root are interpolated into a
+        string the *remote* shell parses (ssh's implicit `sh -c`), so a
+        value containing shell metacharacters must come out shell-quoted."""
+        import shlex as _shlex
+
+        hostile_plugin_path = "/home/user/plugin; touch /tmp/pwned"
+        launcher = tmp_path / "hostile_paths"
+        launcher.mkdir()
+        (launcher / "launch-settings.yaml").write_text(
+            "active_connection: m\n"
+            "connections:\n"
+            "  m:\n"
+            "    type: ssh\n"
+            "    ssh_default_host: user@host\n"
+            f"    ssh_remote_root: /home/user/proj-maestro\n"
+            f"    ssh_plugin_path: '{hostile_plugin_path}'\n",
+            encoding="utf-8",
+        )
+        self._run(["launcher", "add", str(launcher)], isolated_registry)
+        r = self._run(["upgrade", "--dry-run"], isolated_registry)
+        assert r.returncode == 0
+        assert f"cd {_shlex.quote(hostile_plugin_path)}" in r.stdout
+        # The raw, unquoted injection payload must never appear bare.
+        assert "; touch /tmp/pwned && git pull" not in r.stdout
 
     def test_dry_run_skip_pull(
         self, isolated_registry: Path, tmp_path: Path
