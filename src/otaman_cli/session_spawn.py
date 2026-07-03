@@ -162,7 +162,10 @@ def main(argv=None) -> int:
     ap.add_argument("--worktree", help="Worktree path; default = use repo directly")
     ap.add_argument("--initial-prompt", help="First message to seed the session")
     ap.add_argument("--env", action="append", default=[],
-                    help="ENV=value (repeatable) -- passed to spawned process")
+                    help="OTAMAN_USER_KEY=value (repeatable) -- passed to spawned process. "
+                         "Key must be prefixed OTAMAN_USER_ (F091): the runner rejects any "
+                         "other key with 400, including attempts to set PATH/LD_PRELOAD/"
+                         "BASH_ENV/NODE_OPTIONS or override a runner-computed var.")
     ap.add_argument("--token-cache", type=Path, default=DEFAULT_TOKEN_CACHE)
     ap.add_argument("--runner-endpoint", type=Path, default=DEFAULT_RUNNER_ENDPOINT)
     ap.add_argument("--output-json", action="store_true",
