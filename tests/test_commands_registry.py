@@ -77,3 +77,31 @@ class TestDispatch:
         treating this as a real exit code.
         """
         assert registry.dispatch("never-registered", []) is None
+
+
+class TestMigratedCommands:
+    """Regression guard for the first real F020 migration: outcome, solution,
+    persona, hitl, project, pm moved from main.py's early special-case
+    if-branches (and, for pm, a dead duplicate dict entry) into commands/.
+    Uses the real production registry, not the isolated `registry` fixture.
+    """
+
+    def test_mechanical_wrappers_are_registered(self) -> None:
+        from otaman_cli import commands as c
+        for name in ("outcome", "solution", "persona", "hitl", "project", "pm"):
+            assert name in c.registered_names(), f"'{name}' did not register on import"
+
+    def test_no_longer_in_legacy_dispatcher_dict(self) -> None:
+        """These six must be gone from the `commands = {...}` dict in
+        main.py -- otherwise F022's "duplicate dead entries" problem is
+        still there, just with the registry as an extra layer on top.
+        """
+        import re
+        from pathlib import Path
+
+        main_src = Path(__file__).resolve().parent.parent / "src" / "otaman_cli" / "main.py"
+        src = main_src.read_text(encoding="utf-8")
+        dispatcher_pattern = re.compile(r'^\s*"(?P<name>[a-z][a-z0-9-]*)"\s*:\s*lambda\b', re.MULTILINE)
+        dict_names = set(dispatcher_pattern.findall(src))
+        for name in ("outcome", "solution", "persona", "hitl", "project", "pm"):
+            assert name not in dict_names, f"'{name}' is still a dict entry in main.py"

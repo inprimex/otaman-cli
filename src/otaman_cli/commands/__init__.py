@@ -63,3 +63,16 @@ def dispatch(name: str, args: list[str]) -> int | None:
     if spec is None:
         return None
     return spec.handler(args)
+
+
+# Migrated command modules register themselves as a side effect of import.
+# Importing them here means `import otaman_cli.commands` alone is enough to
+# populate the registry -- callers (main.py's dispatcher, this package's own
+# tests, test_help_coverage.py) never need to know the list of migrated
+# modules. Add a line here as each new command group migrates out of main.py.
+from otaman_cli.commands import hitl as _hitl  # noqa: E402,F401
+from otaman_cli.commands import outcome as _outcome  # noqa: E402,F401
+from otaman_cli.commands import persona as _persona  # noqa: E402,F401
+from otaman_cli.commands import pm as _pm  # noqa: E402,F401
+from otaman_cli.commands import project as _project  # noqa: E402,F401
+from otaman_cli.commands import solution as _solution  # noqa: E402,F401
