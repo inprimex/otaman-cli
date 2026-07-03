@@ -94,7 +94,7 @@ def test_sibling_repos_user_accepts_calls_scan(tmp_path: Path, monkeypatch: pyte
 
     with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=True), \
          mock.patch("builtins.input", return_value="y"), \
-         mock.patch("otaman_cli.main.cmd_scan", return_value=0) as mock_scan:
+         mock.patch("otaman_cli.commands.scan.cmd_scan", return_value=0) as mock_scan:
         rc = cli_main._init_preflight([])
     assert rc == 0
     mock_scan.assert_called_once()
@@ -120,7 +120,7 @@ def test_sibling_repos_user_declines_falls_through_to_wizard(
     # Two inputs: "n" to scan prompt, then "y" to wizard prompt
     with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=True), \
          mock.patch("builtins.input", side_effect=["n", "y"]), \
-         mock.patch("otaman_cli.main.cmd_scan") as mock_scan, \
+         mock.patch("otaman_cli.commands.scan.cmd_scan") as mock_scan, \
          mock.patch("otaman_cli.onboard.program_init.run_program_init", return_value=0) as mock_wizard:
         rc = cli_main._init_preflight([])
     assert rc == 0
