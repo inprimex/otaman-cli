@@ -79,21 +79,27 @@ class TestDispatch:
         assert registry.dispatch("never-registered", []) is None
 
 
+# Commands migrated out of main.py so far, in migration order. Extend this
+# tuple as each new F020 migration PR lands -- it's the single source of
+# truth both tests below check against.
+MIGRATED_COMMANDS = ("outcome", "solution", "persona", "hitl", "project", "pm", "git-host")
+
+
 class TestMigratedCommands:
-    """Regression guard for the first real F020 migration: outcome, solution,
-    persona, hitl, project, pm moved from main.py's early special-case
-    if-branches (and, for pm, a dead duplicate dict entry) into commands/.
-    Uses the real production registry, not the isolated `registry` fixture.
+    """Regression guard for F020 migrations out of main.py's legacy dispatch
+    (early special-case if-branches for outcome/solution/persona/hitl/
+    project/pm, and the `commands = {...}` dict entry for git-host). Uses
+    the real production registry, not the isolated `registry` fixture.
     """
 
-    def test_mechanical_wrappers_are_registered(self) -> None:
+    def test_migrated_commands_are_registered(self) -> None:
         from otaman_cli import commands as c
-        for name in ("outcome", "solution", "persona", "hitl", "project", "pm"):
+        for name in MIGRATED_COMMANDS:
             assert name in c.registered_names(), f"'{name}' did not register on import"
 
     def test_no_longer_in_legacy_dispatcher_dict(self) -> None:
-        """These six must be gone from the `commands = {...}` dict in
-        main.py -- otherwise F022's "duplicate dead entries" problem is
+        """Migrated commands must be gone from the `commands = {...}` dict
+        in main.py -- otherwise F022's "duplicate dead entries" problem is
         still there, just with the registry as an extra layer on top.
         """
         import re
@@ -103,5 +109,5 @@ class TestMigratedCommands:
         src = main_src.read_text(encoding="utf-8")
         dispatcher_pattern = re.compile(r'^\s*"(?P<name>[a-z][a-z0-9-]*)"\s*:\s*lambda\b', re.MULTILINE)
         dict_names = set(dispatcher_pattern.findall(src))
-        for name in ("outcome", "solution", "persona", "hitl", "project", "pm"):
+        for name in MIGRATED_COMMANDS:
             assert name not in dict_names, f"'{name}' is still a dict entry in main.py"
