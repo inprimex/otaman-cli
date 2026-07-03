@@ -73,6 +73,7 @@ def dispatch(name: str, args: list[str]) -> int | None:
 from otaman_cli.commands import approve as _approve  # noqa: E402,F401
 from otaman_cli.commands import blocked as _blocked  # noqa: E402,F401
 from otaman_cli.commands import check as _check  # noqa: E402,F401
+from otaman_cli.commands import complete as _complete  # noqa: E402,F401
 from otaman_cli.commands import git_host as _git_host  # noqa: E402,F401
 from otaman_cli.commands import hitl as _hitl  # noqa: E402,F401
 from otaman_cli.commands import outcome as _outcome  # noqa: E402,F401
