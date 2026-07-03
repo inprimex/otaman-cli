@@ -5811,263 +5811,6 @@ def _status_hook_after_blocked(root: Path, agent: str, slug: str, by: str) -> No
         pass
 
 
-def _parse_flag_value(rest: list[str], flag: str, *, default: str | None = None) -> str | None:
-    """Consume `--flag VALUE` from *rest* (mutates), returning VALUE or default."""
-    if flag in rest:
-        i = rest.index(flag)
-        if i + 1 < len(rest):
-            value = rest[i + 1]
-            del rest[i:i + 2]
-            return value
-    return default
-
-
-def _parse_flag_list(rest: list[str], flag: str) -> list[str]:
-    """Consume all `--flag VALUE` occurrences from *rest* (mutates), returning list."""
-    values: list[str] = []
-    while flag in rest:
-        i = rest.index(flag)
-        if i + 1 < len(rest):
-            values.append(rest[i + 1])
-            del rest[i:i + 2]
-        else:
-            del rest[i:i + 1]
-            break
-    return values
-
-
-def _parse_dependencies(deps: list[str]) -> list[dict]:
-    """Parse `--depends-on KIND:VALUE` strings into typed dependency dicts.
-
-    Format:
-        outcome:JTBD-3-foo        → {kind: outcome, ref: JTBD-3-foo}
-        solution:SOL-1-bar        → {kind: solution, ref: SOL-1-bar}
-        external:Email provider   → {kind: external, name: "Email provider"}
-    """
-    out: list[dict] = []
-    for d in deps:
-        if ":" not in d:
-            UI.warn(f"Ignoring malformed --depends-on (need KIND:VALUE): {d!r}")
-            continue
-        kind, value = d.split(":", 1)
-        kind = kind.strip()
-        value = value.strip()
-        if kind in ("outcome", "solution"):
-            out.append({"kind": kind, "ref": value})
-        elif kind == "external":
-            out.append({"kind": "external", "name": value})
-        else:
-            UI.warn(f"Ignoring --depends-on with unknown kind {kind!r}: {d!r}")
-    return out
-
-
-def cmd_hitl(args: list[str]) -> int:
-    """`otaman hitl <action> [...]` — HITL stack (request-human-review / human-decision)."""
-    if not args:
-        UI.error("Usage: otaman hitl <action> [options]")
-        UI.muted("Actions: list | next | take <id>")
-        return 1
-    action, *rest_args = args
-    rest = list(rest_args)
-    parsed: dict[str, object] = {}
-    if rest and not rest[0].startswith("-"):
-        parsed["id"] = rest.pop(0)
-    if rest:
-        UI.warn(f"Unrecognised arguments ignored: {rest}")
-    from otaman_cli.hitl import commands as _hitl
-    return _hitl.dispatch(action, parsed)
-
-
-def cmd_project(args: list[str]) -> int:
-    """`otaman project <action> [...]` — project/repo registry commands.
-
-    Subcommands:
-      add        — create remote repo + register (CVS, gated on otaman-core 1.x)
-      assign     — register an existing local git repo (local-only; works now)
-      list       — list registered repos
-      show       — show one repo's full detail
-      update     — modify repos[] entry fields
-      disable    — set status: inactive
-      enable     — restore to active (drop status field)
-      remove     — deregister from platform.yaml; optional --delete-remote
-    """
-    if not args:
-        UI.error("Usage: otaman project <action> [options]")
-        UI.muted("Actions: add | assign | list | show | update | disable | enable | remove")
-        return 1
-    action, *rest_args = args
-    rest = list(rest_args)
-
-    # Pull flag values (simple consumer; flags can interleave with positional)
-    def _take(flag: str) -> str | None:
-        if flag in rest:
-            i = rest.index(flag)
-            if i + 1 < len(rest):
-                value = rest[i + 1]
-                del rest[i:i + 2]
-                return value
-        return None
-
-    def _take_bool(flag: str) -> bool:
-        if flag in rest:
-            rest.remove(flag)
-            return True
-        return False
-
-    # Common flags consumed first so positional pickup is clean
-    owner = _take("--owner")
-    name_flag = _take("--name")
-    path_flag = _take("--path")
-    url_flag = _take("--url")
-    description_flag = _take("--description")
-    status_flag = _take("--status")
-    delete_remote = _take_bool("--delete-remote")
-
-    # Remaining positional after flag stripping
-    positional = [a for a in rest if not a.startswith("-")]
-    primary = positional[0] if positional else ""
-
-    if action == "assign":
-        from otaman_cli.project.cmd_assign import cmd_project_assign
-        return cmd_project_assign(primary, owner=owner, name=name_flag)
-    if action == "list":
-        from otaman_cli.project.cmd_list import cmd_project_list
-        return cmd_project_list(status=status_flag or "active")
-    if action == "show":
-        from otaman_cli.project.cmd_show import cmd_project_show
-        return cmd_project_show(primary)
-    if action == "update":
-        from otaman_cli.project.cmd_update import cmd_project_update
-        return cmd_project_update(
-            primary, owner=owner, path=path_flag,
-            url=url_flag, description=description_flag,
-        )
-    if action == "disable":
-        from otaman_cli.project.cmd_status import cmd_project_disable
-        return cmd_project_disable(primary)
-    if action == "enable":
-        from otaman_cli.project.cmd_status import cmd_project_enable
-        return cmd_project_enable(primary)
-    if action == "remove":
-        from otaman_cli.project.cmd_remove import cmd_project_remove
-        return cmd_project_remove(primary, delete_remote=delete_remote)
-    if action == "add":
-        UI.error("`otaman project add` is not yet implemented in this phase.")
-        UI.muted("Depends on otaman-core 1.x (GitHostAdapter.create_repo). Use `otaman project assign` for existing local repos.")
-        return 2
-
-    UI.error(f"Unknown project action: {action}")
-    UI.muted("Available: add | assign | list | show | update | disable | enable | remove")
-    return 2
-
-
-def cmd_outcome(args: list[str]) -> int:
-    """`otaman outcome <action> [...]` — dispatches to cli_outcome.dispatch."""
-    if not args:
-        UI.error("Usage: otaman outcome <action> [options]")
-        UI.muted("Actions: add | list | show | history | promote | demote | "
-                 "retire | request-estimate | accept-cost | reject-cost")
-        return 1
-
-    action, *rest_args = args
-    rest = list(rest_args)
-    parsed: dict[str, object] = {}
-
-    # Common: positional <id> for show/history/promote/demote/retire/etc.
-    if rest and not rest[0].startswith("-"):
-        parsed["id"] = rest.pop(0)
-
-    # action-specific flags
-    parsed["as_a"] = _parse_flag_value(rest, "--as-a")
-    parsed["i_want_to"] = _parse_flag_value(rest, "--i-want-to")
-    parsed["incremental_outcome"] = _parse_flag_value(rest, "--incremental-outcome")
-    parsed["so_i_can"] = _parse_flag_value(rest, "--so-i-can")
-    parsed["ultimate_outcome"] = _parse_flag_value(rest, "--ultimate-outcome")
-    parsed["category"] = _parse_flag_value(rest, "--category")
-    parsed["persona"] = _parse_flag_value(rest, "--persona")
-    parsed["impact"] = _parse_flag_value(rest, "--impact")
-    parsed["priority"] = _parse_flag_value(rest, "--priority")
-    parsed["product_notes"] = _parse_flag_value(rest, "--product-notes")
-    parsed["release"] = _parse_flag_value(rest, "--release")
-    parsed["status"] = _parse_flag_value(rest, "--status")
-    parsed["reason"] = _parse_flag_value(rest, "--reason") or _parse_flag_value(rest, "--note")
-    parsed["solution"] = _parse_flag_value(rest, "--solution")
-    # `add` accepts an explicit --id if positional wasn't used
-    if not parsed.get("id"):
-        parsed["id"] = _parse_flag_value(rest, "--id")
-
-    if rest:
-        UI.warn(f"Unrecognised arguments ignored: {rest}")
-
-    from otaman_cli.registries import cli_outcome
-    return cli_outcome.dispatch(action, parsed)
-
-
-def cmd_solution(args: list[str]) -> int:
-    """`otaman solution <action> [...]` — dispatches to cli_solution.dispatch."""
-    if not args:
-        UI.error("Usage: otaman solution <action> [options]")
-        UI.muted("Actions: add | list | show | history | propose | "
-                 "promote-to-complete | discard")
-        return 1
-
-    action, *rest_args = args
-    rest = list(rest_args)
-    parsed: dict[str, object] = {}
-
-    if rest and not rest[0].startswith("-"):
-        parsed["id"] = rest.pop(0)
-
-    parsed["outcome"] = _parse_flag_value(rest, "--outcome")
-    parsed["description"] = _parse_flag_value(rest, "--description")
-    parsed["t_shirt"] = _parse_flag_value(rest, "--t-shirt")
-    ef = _parse_flag_value(rest, "--effort-days")
-    parsed["effort_days"] = float(ef) if ef else None
-    parsed["release"] = _parse_flag_value(rest, "--release")
-    parsed["cto_notes"] = _parse_flag_value(rest, "--cto-notes")
-    parsed["status"] = _parse_flag_value(rest, "--status")
-    parsed["reason"] = _parse_flag_value(rest, "--reason") or _parse_flag_value(rest, "--note")
-    parsed["pros"] = _parse_flag_list(rest, "--pro")
-    parsed["cons"] = _parse_flag_list(rest, "--con")
-    parsed["dependencies"] = _parse_dependencies(_parse_flag_list(rest, "--depends-on"))
-    if not parsed.get("id"):
-        parsed["id"] = _parse_flag_value(rest, "--id")
-
-    if rest:
-        UI.warn(f"Unrecognised arguments ignored: {rest}")
-
-    from otaman_cli.registries import cli_solution
-    return cli_solution.dispatch(action, parsed)
-
-
-def cmd_persona(args: list[str]) -> int:
-    """`otaman persona <action> [...]` — dispatches to cli_persona.dispatch."""
-    if not args:
-        UI.error("Usage: otaman persona <action> [options]")
-        UI.muted("Actions: add | list | show | retire")
-        return 1
-
-    action, *rest_args = args
-    rest = list(rest_args)
-    parsed: dict[str, object] = {}
-    if rest and not rest[0].startswith("-"):
-        parsed["id"] = rest.pop(0)
-    parsed["name"] = _parse_flag_value(rest, "--name")
-    parsed["description"] = _parse_flag_value(rest, "--description")
-    parsed["kind"] = _parse_flag_value(rest, "--kind")
-    parsed["domain_prefill_source"] = _parse_flag_value(rest, "--domain-prefill-source")
-    parsed["status"] = _parse_flag_value(rest, "--status")
-    parsed["reason"] = _parse_flag_value(rest, "--reason")
-    if not parsed.get("id"):
-        parsed["id"] = _parse_flag_value(rest, "--id")
-
-    if rest:
-        UI.warn(f"Unrecognised arguments ignored: {rest}")
-
-    from otaman_cli.registries import cli_persona
-    return cli_persona.dispatch(action, parsed)
-
-
 def cmd_set_agent(args: list[str]) -> int:
     """DEPRECATED: otaman set-agent no longer mutates any file.
 
@@ -6575,29 +6318,6 @@ def cmd_login(args: list[str]) -> int:
     return _login_main(args)
 
 
-
-# ---------------------------------------------------------------------------
-# PM dispatch helper
-# ---------------------------------------------------------------------------
-
-def _cmd_pm_dispatch(args: list[str]) -> int:
-    """Dispatch `otaman pm <sub>` subcommands."""
-    from otaman_cli.pm.cmd_init import cmd_pm_init
-    from otaman_cli.pm.cmd_status import cmd_pm_status
-    sub = args[0] if args else ""
-    rest = args[1:] if args else []
-    if sub == "configure":
-        from otaman_cli.pm.cmd_configure import cmd_pm_configure
-        return cmd_pm_configure(rest)
-    elif sub == "init":
-        return cmd_pm_init(rest)
-    elif sub == "status":
-        return cmd_pm_status(rest)
-    else:
-        UI.error(f"Unknown pm subcommand: {sub!r}. Use: pm configure | pm init | pm status")
-        return 1
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -6615,45 +6335,22 @@ def main() -> int:
     command = args[0]
     rest = args[1:]
 
-    # Registry commands have rich per-action flags that the generic flag loop
-    # below would mishandle. Dispatch them BEFORE the generic loop with the
-    # raw argv intact (the cmd_* functions parse their own flags).
-    if command == "outcome":
-        return cmd_outcome(rest)
-    if command == "solution":
-        return cmd_solution(rest)
-    if command == "persona":
-        return cmd_persona(rest)
+    # F020/F022 strangler-fig cutover: migrated command groups (outcome,
+    # solution, persona, hitl, project, pm as of this migration) register in
+    # otaman_cli.commands instead of an if-branch here. Checked before the
+    # generic flag loop below, same reasoning as the old special-cases: these
+    # commands have rich per-action flags the shared loop would mishandle, so
+    # they always need the raw argv, never the loop's parsed positional/fmt/etc.
+    from otaman_cli import commands as _commands_registry
+    registry_result = _commands_registry.dispatch(command, rest)
+    if registry_result is not None:
+        return registry_result
 
     # `otaman init companion-repos` — sub-action with its own flags
     # (--program / --repos / --dry-run / --force).  Dispatch raw before the
     # generic flag loop, same reason as the registry commands above.
     if command == "init" and rest and rest[0] == "companion-repos":
         return cmd_init_companion_repos(rest[1:])
-
-    # `otaman hitl <action>` — human-in-the-loop stack (auto-session-spawn §3).
-    if command == "hitl":
-        return cmd_hitl(rest)
-
-    # `otaman project <action>` — project/repo registry management
-    if command == "project":
-        return cmd_project(rest)
-
-    # `otaman pm <action>` — PM tool sync (Easy8 / Redmine)
-    if command == "pm":
-        from otaman_cli.pm.cmd_init import cmd_pm_init
-        from otaman_cli.pm.cmd_status import cmd_pm_status
-        sub = rest[0] if rest else ""
-        if sub == "configure":
-            from otaman_cli.pm.cmd_configure import cmd_pm_configure
-            return cmd_pm_configure(rest[1:])
-        elif sub == "init":
-            return cmd_pm_init(rest[1:])
-        elif sub == "status":
-            return cmd_pm_status(rest[1:])
-        else:
-            UI.error(f"Unknown pm subcommand: {sub!r}. Use: pm configure | pm init | pm status")
-            return 1
 
     # Extract flags
     fmt = "markdown"
@@ -6785,14 +6482,6 @@ def main() -> int:
         "models": lambda: cmd_models(rest),
         "set-agent": lambda: cmd_set_agent(positional),
         "blocked": lambda: cmd_blocked(positional, list_mode=blocked_list, clear_slug=blocked_clear, blocked_by=blocked_by_value),
-        # outcome/solution/persona are dispatched BEFORE this dict by the early
-        # branch in main() so flags survive the generic loop. These entries are
-        # retained for discoverability (help-coverage test scans this dict).
-        "hitl": lambda: cmd_hitl(rest),
-        "project": lambda: cmd_project(rest),
-        "outcome": lambda: cmd_outcome(rest),
-        "solution": lambda: cmd_solution(rest),
-        "persona": lambda: cmd_persona(rest),
         "presale": lambda: cmd_presale(positional),
         "retrospective": lambda: cmd_retrospective(positional),
         "discovery": lambda: cmd_discovery_phase(positional),
@@ -6804,17 +6493,7 @@ def main() -> int:
         "logout": lambda: cmd_login(["logout"] + rest),
         "token": lambda: cmd_login(["show"] + rest),
         "onboard": lambda: cmd_onboard(rest),
-        "pm": lambda: _cmd_pm_dispatch(rest),
     }
-
-    # F020 strangler-fig cutover: migrated command groups register in
-    # otaman_cli.commands instead of the dict above. Checked first so a
-    # migrated command's registry entry always wins over any stale dict
-    # entry left behind mid-migration.
-    from otaman_cli import commands as _commands_registry
-    registry_result = _commands_registry.dispatch(command, rest)
-    if registry_result is not None:
-        return registry_result
 
     if command not in commands:
         UI.error(f"Unknown command: {command}")
