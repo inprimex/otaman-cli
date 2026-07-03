@@ -412,3 +412,48 @@ class TestMaestroUpgrade:
         assert "/home/u/maestro-plugin" in r.stdout
         # And NOT the parent's host
         assert "u@lan-host" not in r.stdout
+
+
+# ---------------------------------------------------------------------------
+# F020 migration regression: commands/upgrade.py's local-connection path
+
+
+class TestUpgradeOneLocalConnectionPath:
+    """`_upgrade_one`'s local branch re-invokes main.py as a script
+    (`python3 main.py init`) and computes plugin_root from main.py's
+    location. Both used `Path(__file__)` before the F020 move of this code
+    out of main.py into commands/upgrade.py -- naive relocation would have
+    silently pointed both at commands/upgrade.py instead (one directory
+    level off for plugin_root, and a script with no __main__ guard for the
+    re-invocation). This pins the fix: both must resolve against
+    otaman_cli.main.__file__ regardless of where the calling code lives.
+    """
+
+    def test_plugin_root_resolves_against_main_module(self, tmp_path: Path) -> None:
+        from otaman_cli.commands.upgrade import _upgrade_one
+        from otaman_cli import main as main_module
+        from unittest.mock import patch, MagicMock
+
+        with patch("otaman_cli.commands.upgrade.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            rc = _upgrade_one(
+                launcher_path=tmp_path,
+                connection={"local_root": str(tmp_path)},
+                ctype="local",
+                skip_pull=False,
+                skip_init=False,
+                dry_run=False,
+            )
+        assert rc == 0
+        assert mock_run.call_count == 2
+
+        pull_argv = mock_run.call_args_list[0].args[0]
+        assert pull_argv[:2] == ["git", "-C"]
+        expected_plugin_root = str(Path(main_module.__file__).resolve().parent.parent)
+        assert pull_argv[2] == expected_plugin_root
+
+        init_argv = mock_run.call_args_list[1].args[0]
+        assert init_argv[0] == sys.executable
+        assert Path(init_argv[1]).name == "main.py"
+        assert init_argv[1] == str(Path(main_module.__file__).resolve())
+        assert init_argv[2] == "init"
