@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 import pytest
 
-from otaman_cli.main import (
+from otaman_cli.commands.doctor import (
     _check_org_harnesses,
     _parse_version_tuple,
     _print_org_harness_report,
@@ -224,13 +224,13 @@ class TestPrintReport:
 class TestDoctorOrgAdditive:
     """`doctor` without --org must not run harness checks."""
 
-    def test_cmd_doctor_signature_accepts_org_kwarg(self):
-        """Smoke: the function signature stays backward-compatible."""
+    def test_cmd_doctor_takes_raw_argv_only(self):
+        """After the F020 migration, cmd_doctor parses --org from argv itself
+        instead of the shared flag loop passing it as a keyword -- one fewer
+        command routed through that loop (F021/F022)."""
         import inspect
         sig = inspect.signature(cmd_doctor)
-        assert "org" in sig.parameters
-        # org defaults to None — calling without it must work
-        assert sig.parameters["org"].default is None
+        assert list(sig.parameters) == ["args"]
 
     def test_no_org_skips_harness_helper(self, fake_root: Path, monkeypatch):
         """When --org is absent, _check_org_harnesses must not run.
@@ -239,7 +239,7 @@ class TestDoctorOrgAdditive:
         short-circuit cmd_doctor's heavy doctor.py run by injecting a stub
         report via run_script.
         """
-        from otaman_cli import main as m
+        from otaman_cli.commands import doctor as m
 
         def _boom(*_a, **_kw):
             raise AssertionError("_check_org_harnesses must not run when --org is absent")
@@ -255,5 +255,5 @@ class TestDoctorOrgAdditive:
         monkeypatch.setattr(m, "run_script", lambda *a, **kw: _StubResult())
         monkeypatch.setattr(m, "find_project_root", lambda: fake_root)
 
-        rc = cmd_doctor([], org=None)
+        rc = cmd_doctor([])
         assert rc == 0
