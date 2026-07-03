@@ -46,17 +46,21 @@ _DISPATCHER_PATTERN = re.compile(
 
 def _dispatcher_commands() -> set[str]:
     """Extract command names from the ``commands = { "name": lambda: ... }``
-    dict in cli/maestro.py.
+    dict in cli/maestro.py, plus anything registered in the new F020
+    strangler-fig registry (``otaman_cli.commands``).
 
-    Pure regex — no need to import the module (which has heavy side effects
-    on import including loading multiple subsystems). The pattern is strict
-    enough to avoid false positives from incidentally-quoted strings.
+    The legacy half is pure regex — no need to import the heavy main.py
+    module. The registry half imports ``otaman_cli.commands`` directly
+    (a small, side-effect-free module) rather than regexing it, since
+    migrated commands are real Python registrations, not dict literals.
     """
     src = CLI_FILE.read_text(encoding="utf-8")
-    matches = _DISPATCHER_PATTERN.findall(src)
-    # Dedupe and exclude any accidental matches outside the dispatcher
-    # (none in practice today, but keep defensive).
-    return set(matches)
+    matches = set(_DISPATCHER_PATTERN.findall(src))
+
+    from otaman_cli import commands as _registry
+    matches |= set(_registry.registered_names())
+
+    return matches
 
 
 def _help_output() -> str:
