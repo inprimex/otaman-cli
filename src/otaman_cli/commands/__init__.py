@@ -70,6 +70,7 @@ def dispatch(name: str, args: list[str]) -> int | None:
 # populate the registry -- callers (main.py's dispatcher, this package's own
 # tests, test_help_coverage.py) never need to know the list of migrated
 # modules. Add a line here as each new command group migrates out of main.py.
+from otaman_cli.commands import approve as _approve  # noqa: E402,F401
 from otaman_cli.commands import blocked as _blocked  # noqa: E402,F401
 from otaman_cli.commands import check as _check  # noqa: E402,F401
 from otaman_cli.commands import git_host as _git_host  # noqa: E402,F401
