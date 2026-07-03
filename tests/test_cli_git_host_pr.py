@@ -252,7 +252,7 @@ class TestPostReview:
         with patch.object(gh, "get_adapter", return_value=fake), \
                 patch.object(gh, "detect_remote_for_repo",
                              return_value=_fake_remote_info()), \
-                patch("otaman_cli.main._git_host_current_branch",
+                patch("otaman_cli.commands.git_host._git_host_current_branch",
                       return_value="my-branch"):
             rc, out = _run_cli(
                 ["git-host", "post-review", "--repo", "app"],
@@ -300,7 +300,7 @@ class TestPostReview:
         with patch.object(gh, "get_adapter", return_value=fake), \
                 patch.object(gh, "detect_remote_for_repo",
                              return_value=_fake_remote_info()), \
-                patch("otaman_cli.main._git_host_current_branch",
+                patch("otaman_cli.commands.git_host._git_host_current_branch",
                       return_value="orphan-branch"):
             rc, _ = _run_cli(
                 ["git-host", "post-review", "--repo", "app"],
