@@ -6790,6 +6790,15 @@ def main() -> int:
         "pm": lambda: _cmd_pm_dispatch(rest),
     }
 
+    # F020 strangler-fig cutover: migrated command groups register in
+    # otaman_cli.commands instead of the dict above. Checked first so a
+    # migrated command's registry entry always wins over any stale dict
+    # entry left behind mid-migration.
+    from otaman_cli import commands as _commands_registry
+    registry_result = _commands_registry.dispatch(command, rest)
+    if registry_result is not None:
+        return registry_result
+
     if command not in commands:
         UI.error(f"Unknown command: {command}")
         UI.muted("Run 'otaman help' for available commands")
