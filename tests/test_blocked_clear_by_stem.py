@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from otaman_cli.main import _cmd_blocked_clear_by_stem
+from otaman_cli.commands.blocked import _cmd_blocked_clear_by_stem
 
 
 # ---------------------------------------------------------------- helpers
