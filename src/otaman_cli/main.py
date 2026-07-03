@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -5503,13 +5504,29 @@ def _upgrade_one(
             UI.error("    Missing ssh_default_host or ssh_remote_root")
             return 2
 
+        # F031: host/ssh_key come from launch-settings.yaml, a file an
+        # attacker with write access to shared config/dotfiles could taint.
+        # A leading '-' would let a value like -oProxyCommand=... be parsed
+        # as an ssh option instead of a hostname/path (local command
+        # injection), since ssh_cmd is a flat argv list with no separator.
+        for field_name, value in (("ssh_default_host", host), ("ssh_key", ssh_key)):
+            if value and value.startswith("-"):
+                UI.error(f"    Refusing unsafe {field_name} value starting with '-': {value!r}")
+                return 2
+
         ssh_cmd = ["ssh"]
         if ssh_key:
             ssh_cmd += ["-i", ssh_key]
-        ssh_cmd += [host]
+        # "--" marks the end of ssh's own options, so host can never be
+        # misparsed as a flag even if the leading-'-' guard above is bypassed.
+        ssh_cmd += ["--", host]
 
         if not skip_pull and plugin_path:
-            remote = f"cd {plugin_path} && git pull --ff-only"
+            # plugin_path is interpolated into a string the *remote* shell
+            # parses (ssh's implicit `sh -c`), so it must be shell-quoted
+            # here -- passing it as a separate argv element wouldn't help,
+            # since ssh joins argv into one string for the remote shell.
+            remote = f"cd {shlex.quote(plugin_path)} && git pull --ff-only"
             full = ssh_cmd + [remote]
             UI.muted(f"    Run: {' '.join(full)}")
             if not dry_run:
@@ -5531,7 +5548,7 @@ def _upgrade_one(
                 UI.warn("    Cannot run otaman init -- no ssh_plugin_path configured")
                 return 3
             remote = (
-                f"cd {maestro_root} && "
+                f"cd {shlex.quote(maestro_root)} && "
                 f"bash -l -c 'otaman init'"
             )
             full = ssh_cmd + [remote]
