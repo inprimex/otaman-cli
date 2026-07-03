@@ -197,7 +197,7 @@ class TestCompleteHook:
         return proj
 
     def test_finds_tasks_md_via_sibling(self, tmp_path: Path):
-        from otaman_cli.main import _find_tasks_md_for_change
+        from otaman_cli.commands.complete import _find_tasks_md_for_change
         proj = self._stage_specs_sibling(tmp_path, "ch1", "# tasks\n- [ ] 1.1\n")
         path = _find_tasks_md_for_change(proj, "ch1")
         assert path is not None
@@ -212,7 +212,7 @@ class TestCompleteHook:
             "- [ ] 1.2 @otaman-cli still pending\n"
         )
         proj = self._stage_specs_sibling(tmp_path, "ch1", body)
-        from otaman_cli.main import _status_hook_after_complete
+        from otaman_cli.commands.complete import _status_hook_after_complete
         _status_hook_after_complete(proj, "cli-agent", "ch1")
         s = _read_status(proj)
         assert s is not None
@@ -228,7 +228,7 @@ class TestCompleteHook:
             "- [x] 1.2 @otaman-cli also done\n"
         )
         proj = self._stage_specs_sibling(tmp_path, "ch2", body)
-        from otaman_cli.main import _status_hook_after_complete
+        from otaman_cli.commands.complete import _status_hook_after_complete
         _status_hook_after_complete(proj, "cli-agent", "ch2")
         s = _read_status(proj)
         assert s is not None
@@ -246,7 +246,7 @@ class TestCompleteHook:
             "- [ ] 2.1 @otaman-plugin not mine\n"
         )
         proj = self._stage_specs_sibling(tmp_path, "ch3", body)
-        from otaman_cli.main import _status_hook_after_complete
+        from otaman_cli.commands.complete import _status_hook_after_complete
         _status_hook_after_complete(proj, "cli-agent", "ch3")
         s = _read_status(proj)
         assert s is not None
@@ -347,7 +347,7 @@ class TestLifecycleIntegration:
         )
         # Trigger the complete hook directly (cmd_complete also calls
         # actualize-tasks.py which we don't want to run in tests)
-        from otaman_cli.main import _status_hook_after_complete
+        from otaman_cli.commands.complete import _status_hook_after_complete
         _status_hook_after_complete(proj, "cli-agent", "lifecycle-test")
         s = _read_status(proj)
         assert s["state"] == "idle"

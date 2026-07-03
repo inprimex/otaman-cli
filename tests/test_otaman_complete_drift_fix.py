@@ -18,7 +18,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from otaman_cli.main import _is_spec_agent, cmd_complete
+from otaman_cli.commands.complete import _is_spec_agent, cmd_complete
 
 
 def _stage_project(tmp_path: Path, agent: str | None = "cli-agent") -> Path:
@@ -102,7 +102,7 @@ class TestCmdCompleteBranching:
         monkeypatch.chdir(tmp_path)
 
         # Capture the run_script invocation
-        from otaman_cli import main as _m
+        from otaman_cli.commands import complete as _m
         calls: list[tuple] = []
         stub_result = MagicMock(returncode=0, stdout='{"updated": 2, "already_done": 0, "not_found": [], "tasks_file": "x"}', stderr="")
         def _stub_run_script(name, *args, **kw):
@@ -110,7 +110,7 @@ class TestCmdCompleteBranching:
             return stub_result
         monkeypatch.setattr(_m, "run_script", _stub_run_script)
 
-        rc = cmd_complete(["test-change"], tasks_spec="1.1,1.2")
+        rc = cmd_complete(["test-change", "--tasks", "1.1,1.2"])
         assert rc == 0
         # actualize-tasks.py WAS called
         assert any(name == "actualize-tasks.py" for name, _ in calls), (
@@ -122,14 +122,14 @@ class TestCmdCompleteBranching:
         _stage_project(tmp_path, agent="cli-agent")
         monkeypatch.chdir(tmp_path)
 
-        from otaman_cli import main as _m
+        from otaman_cli.commands import complete as _m
         calls: list[tuple] = []
         def _stub_run_script(name, *args, **kw):
             calls.append((name, args))
             return MagicMock(returncode=0, stdout="{}", stderr="")
         monkeypatch.setattr(_m, "run_script", _stub_run_script)
 
-        rc = cmd_complete(["test-change"], tasks_spec="1.1,1.2")
+        rc = cmd_complete(["test-change", "--tasks", "1.1,1.2"])
         assert rc == 0
         # actualize-tasks.py was NOT called
         assert not any(name == "actualize-tasks.py" for name, _ in calls), (
@@ -147,12 +147,12 @@ class TestCmdCompleteBranching:
         for agent in ("spec-agent", "cli-agent"):
             _stage_project(tmp_path, agent=agent)
             monkeypatch.chdir(tmp_path)
-            from otaman_cli import main as _m
+            from otaman_cli.commands import complete as _m
             monkeypatch.setattr(
                 _m, "run_script",
                 lambda *a, **kw: MagicMock(returncode=0, stdout='{"updated": 0}', stderr=""),
             )
-            rc = cmd_complete(["test-change"], tasks_spec="1.1")
+            rc = cmd_complete(["test-change", "--tasks", "1.1"])
             assert rc == 0, f"agent={agent} should exit 0; got {rc}"
 
     # Regression for plugin-agent's 2026-06-26 report: when the calling

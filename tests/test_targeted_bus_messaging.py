@@ -14,7 +14,7 @@ from datetime import datetime, timezone, timedelta
 
 import pytest
 
-from otaman_cli.main import _find_task_assignment_sender
+from otaman_cli.commands.complete import _find_task_assignment_sender
 
 
 # ---------------------------------------------------------------------------
