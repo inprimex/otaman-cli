@@ -2387,97 +2387,6 @@ def cmd_cleanup(args: list[str], dry_run: bool = False) -> int:
     return 0
 
 
-def cmd_propose(args: list[str], desc: str = "") -> int:
-    """Create a spec-change-request on the bus for human approval."""
-    if not args:
-        UI.error("Title required")
-        UI.muted("Usage: otaman propose \"add user pagination\" [-d \"Detailed description\"]")
-        return 1
-
-    root = find_project_root()
-    if not root:
-        UI.error("Not in an otaman project")
-        return 1
-
-    UI.header("Spec Change Request")
-
-    title = " ".join(args)
-
-    from datetime import datetime, timezone
-    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    now_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-
-    # Get agent: CWD→repo→owner → .agents/current-agent → "human"
-    agent = resolve_agent_identity(root) or "human"
-
-    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40]
-    msg_id = f"{now_ts}-scr-{slug}"
-    filename = f"{now_ts}-{agent}-to-human-spec-change-request.md"
-
-    active_dir, _ = _resolve_bus_paths(root)
-    active_dir.mkdir(parents=True, exist_ok=True)
-    (active_dir / "acks").mkdir(exist_ok=True)
-
-    content = f"""---
-id: {msg_id}
-from: {agent}
-to: human
-priority: high
-type: spec-change-request
-timestamp: {now_iso}
-status: pending
----
-
-## Subject: Spec change request: {title}
-
-### What needs to change
-{desc or "TODO: Describe the proposed spec change."}
-
-### Why this is needed
-TODO: What was discovered during implementation that triggered this.
-
-### Affected specs
-TODO: Which spec files/areas need updating.
-
-### Affected repos
-TODO: Which repos will need implementation changes after the spec updates.
-
-### Suggested spec changes
-TODO: Concrete suggestions for what the spec should say.
-"""
-
-    filepath = active_dir / filename
-    filepath.write_text(content, encoding="utf-8")
-
-    # Record blocked task
-    msg_stem = filepath.stem
-    blocked_dir = root / ".agents" / "blocked"
-    blocked_dir.mkdir(parents=True, exist_ok=True)
-    blocked_file = blocked_dir / f"{agent}.md"
-    blocked_entry = f"""
-## Blocked: {title}
-- **Proposal**: {msg_stem}
-- **Blocked since**: {now_iso}
-- **Depends on**: spec-change-approved + spec-change notification
-- **Task to resume**: Implement feature after spec is committed
-"""
-    with open(blocked_file, "a", encoding="utf-8") as f:
-        f.write(blocked_entry)
-
-    UI.ok(f"Created: {filepath.relative_to(root)}")
-    UI.kv("From", UI.agent(agent))
-    UI.kv("Type", "spec-change-request (pending human approval)", C.YELLOW)
-    UI.kv("Blocked", str(blocked_file.relative_to(root)), C.YELLOW)
-    print()
-    UI.blocked("STOP: Do NOT implement features that depend on this spec change.")
-    UI.action(f"Switch to other tasks. Run {C.BOLD}otaman check{C.RESET} to poll for approval.")
-    print()
-    UI.muted("A human must review and approve this via: otaman approve")
-    UI.muted("Edit the message file to fill in details if needed.")
-    return 0
-
-
-
 def _read_platform_specs_path(root: "Path") -> str:
     """Return the specs.path value from platform.yaml, or '' if absent."""
     try:
@@ -2939,37 +2848,6 @@ def cmd_set_agent(args: list[str]) -> int:
     return 1
 
 
-def cmd_team(args: list[str], desc: str) -> int:
-    """Orchestrate a cross-repo feature."""
-    UI.header("Otaman Team Orchestration")
-
-    if not args:
-        UI.error("Feature description required")
-        UI.muted("Usage: otaman team <workflow-or-description> [-d details]")
-        UI.muted("Examples:")
-        UI.muted('  otaman team api-change -d "Add pagination to /users"')
-        UI.muted('  otaman team "Add user authentication flow"')
-        return 1
-
-    feature = " ".join(args)
-    UI.kv("Feature", feature, C.BOLD)
-    if desc:
-        UI.kv("Details", desc)
-
-    # Check for workflow template
-    plugin_root = Path(__file__).resolve().parent.parent
-    template_path = plugin_root / "references" / "workflows" / f"{feature}.md"
-    if template_path.exists():
-        UI.kv("Template", f"{C.GREEN}found{C.RESET} ({feature}.md)")
-    else:
-        UI.kv("Template", "custom (no standard workflow template)")
-
-    UI.subheader("To orchestrate this feature:")
-    UI.action(f"Use {C.GREEN}/otaman:team {feature}{C.RESET} in Claude Code")
-    UI.muted("It will decompose into tasks, assign to agents via bus, and track progress.")
-    return 0
-
-
 def cmd_help() -> int:
     """Show help."""
     print(f"""
@@ -3136,7 +3014,6 @@ def main() -> int:
         return cmd_init_companion_repos(rest[1:])
 
     # Extract flags
-    desc = ""
     update = False
     dry_run = False
     skip_doctor = False
@@ -3148,10 +3025,7 @@ def main() -> int:
 
     i = 0
     while i < len(rest):
-        if rest[i] in ("-d", "--desc") and i + 1 < len(rest):
-            desc = rest[i + 1]
-            i += 2
-        elif rest[i] == "--update":
+        if rest[i] == "--update":
             update = True
             i += 1
         elif rest[i] == "--shell":
@@ -3192,11 +3066,9 @@ def main() -> int:
         "iam": lambda: cmd_whoami(rest),
         "ack": lambda: cmd_ack(positional, ack_status),
         "cleanup": lambda: cmd_cleanup(positional, dry_run),
-        "propose": lambda: cmd_propose(positional, desc),
         "assign": lambda: cmd_assign(positional),
         "launcher": lambda: cmd_launcher(rest),
         "set-agent": lambda: cmd_set_agent(positional),
-        "team": lambda: cmd_team(positional, desc),
     }
 
     if command not in commands:
