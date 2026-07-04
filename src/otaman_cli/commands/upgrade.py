@@ -20,6 +20,7 @@ from typing import Any
 from otaman_cli import main as _main
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.main import UI
+from otaman_cli.safety import confirm_destructive_operation
 
 
 def _resolve_connection(
@@ -66,11 +67,13 @@ def cmd_upgrade(args: list[str]) -> int:
       --launcher <path>     refresh just one launcher
       --skip-pull           don't ``git pull`` (init refresh only)
       --skip-init           don't ``otaman init`` (pull only)
+      --yes, -y              skip the batch confirmation prompt
     """
     dry_run = False
     only_launcher: str | None = None
     skip_pull = False
     skip_init = False
+    yes = False
 
     i = 0
     while i < len(args):
@@ -81,6 +84,8 @@ def cmd_upgrade(args: list[str]) -> int:
             skip_pull = True
         elif a == "--skip-init":
             skip_init = True
+        elif a in ("--yes", "-y"):
+            yes = True
         elif a == "--launcher":
             if i + 1 >= len(args):
                 UI.error("--launcher requires a path"); return 1
@@ -117,6 +122,45 @@ def cmd_upgrade(args: list[str]) -> int:
     if dry_run:
         UI.muted("DRY RUN -- preview only, nothing will execute")
         print()
+
+    # Batch-level summary + confirm (task 1.4): resolve each entry's
+    # connection type/host up front so the operator sees the full scope
+    # before anything runs. Mirrors the settings-read + resolve-connection
+    # steps the main loop below performs per entry -- a second, lightweight
+    # pass, not a refactor of the loop itself; a parse failure here is
+    # silently skipped since the main loop will surface it properly as a
+    # per-launcher failure.
+    if not dry_run:
+        hosts: set[str] = set()
+        for entry in entries:
+            ls_path = Path(entry["path"]) / "launch-settings.yaml"
+            if not ls_path.is_file():
+                continue
+            try:
+                settings = yaml.safe_load(ls_path.read_text(encoding="utf-8")) or {}
+            except (OSError, yaml.YAMLError):
+                continue
+            active_name = settings.get("active_connection")
+            connections = settings.get("connections") or {}
+            if not active_name or active_name not in connections:
+                continue
+            conn = _resolve_connection(connections, active_name)
+            ctype = (conn.get("type") or "ssh").lower()
+            if ctype in ("ssh", "mesh"):
+                host = conn.get("ssh_default_host")
+                hosts.add(host if host else "<unknown host>")
+            else:
+                hosts.add("local")
+
+        host_desc = f" across {len(hosts)} host{'s' if len(hosts) != 1 else ''}" if hosts else ""
+        if not confirm_destructive_operation(
+            f"{len(entries)} launcher{'s' if len(entries) != 1 else ''}{host_desc} "
+            f"will be modified (git pull + otaman init):",
+            [e["path"] for e in entries],
+            yes=yes,
+        ):
+            UI.muted("Aborted — no changes made.")
+            return 1
 
     successes: list[str] = []
     failures: list[tuple[str, str]] = []
