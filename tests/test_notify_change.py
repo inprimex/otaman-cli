@@ -102,6 +102,43 @@ class TestDeriveRecipients:
         recipients = derive_recipients(specs, "ch1", project / "platform.yaml")
         assert recipients == ["cli-agent", "core-agent"]
 
+    def test_dotted_repo_name_annotation_not_truncated(self, tmp_path: Path):
+        """Regression (issue #92): `@otaman-sunflowers.host` used to be
+        truncated at the `.` by `_ANN_RE`, matching only `otaman-sunflowers`."""
+        project, specs = _stage_workspace(tmp_path)
+        platform_body = textwrap.dedent("""
+            project: myorg
+            version: '1.0'
+            specs:
+              path: ../myorg-specs
+            repos:
+              - {name: otaman-sunflowers.host, path: ../sunflowers-host, owner: host-agent}
+        """).lstrip()
+        (project / "platform.yaml").write_text(platform_body, encoding="utf-8")
+        _stage_change(specs, "ch1", "- [ ] 1.1 @otaman-sunflowers.host build it\n")
+        recipients = derive_recipients(specs, "ch1", project / "platform.yaml")
+        assert recipients == ["host-agent"]
+
+    def test_bare_repo_name_convention_resolves_owner(self, tmp_path: Path):
+        """Regression (issue #92): programs whose platform.yaml names repos
+        without the `otaman-` prefix (e.g. `sunflowers-specs`) used to
+        silently under-notify because `by_name` was keyed by the bare name
+        while the annotation kept the `otaman-` prefix."""
+        project, specs = _stage_workspace(tmp_path)
+        platform_body = textwrap.dedent("""
+            project: sunflowers
+            version: '1.0'
+            specs:
+              path: ../sunflowers-specs
+            repos:
+              - {name: sunflowers-specs, path: ../sunflowers-specs, owner: spec-agent}
+              - {name: sunflowers-host, path: ../sunflowers-host, owner: host-agent}
+        """).lstrip()
+        (project / "platform.yaml").write_text(platform_body, encoding="utf-8")
+        _stage_change(specs, "ch1", "- [ ] 1.1 @otaman-sunflowers-host ship it\n")
+        recipients = derive_recipients(specs, "ch1", project / "platform.yaml")
+        assert recipients == ["host-agent"]
+
 
 # ---------------------------------------------------------------- task 1.3 — bus message format
 class TestNotifyChangeBusMessage:

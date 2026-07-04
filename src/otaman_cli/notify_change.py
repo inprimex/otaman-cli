@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 
-_ANN_RE = re.compile(r"@otaman-[a-z0-9-]+", re.IGNORECASE)
+_ANN_RE = re.compile(r"@otaman-[a-z0-9.-]+", re.IGNORECASE)
 
 
 def _resolve_specs_path(root: Path) -> Path | None:
@@ -98,9 +98,16 @@ def _parse_at_annotations(tasks_md: Path) -> list[str]:
 def _lookup_owners(annotations: list[str], platform_yaml: Path) -> list[str]:
     """Map `otaman-<repo>` annotations to repo owners via platform.yaml.
 
+    Annotations carry the literal `otaman-` prefix (e.g. `otaman-cli` from
+    `@otaman-cli`), but `repos[].name` conventions differ across programs:
+    this project's own platform.yaml names repos with the prefix intact
+    (`otaman-cli`), while other otaman-managed programs commonly name repos
+    without it (`sunflowers-specs`). Try the annotation as-is first, then
+    fall back to the prefix-stripped form, so both conventions resolve.
+
     Returns ordered, deduplicated list of owner agent names.  Annotations
-    that don't match any `repos[].name` are silently skipped (the hook's
-    behavior — better to under-notify than mis-notify).
+    that don't match any `repos[].name` (in either form) are silently
+    skipped (the hook's behavior — better to under-notify than mis-notify).
     """
     if not platform_yaml.is_file():
         return []
@@ -126,6 +133,8 @@ def _lookup_owners(annotations: list[str], platform_yaml: Path) -> list[str]:
     out: list[str] = []
     for ann in annotations:
         owner = by_name.get(ann)
+        if owner is None and ann.startswith("otaman-"):
+            owner = by_name.get(ann[len("otaman-"):])
         if owner and owner not in seen:
             seen.add(owner)
             out.append(owner)
