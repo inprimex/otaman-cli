@@ -1747,58 +1747,6 @@ def _cmd_whoami_for_path(raw_path: str) -> int:
     return 0
 
 
-def cmd_owner_paths(args: list[str]) -> int:
-    """monorepo-path-ownership task 2.2 — `otaman owner-paths --validate`.
-
-    Walks every repo's `owner-paths:` block and reports:
-      [ok]    pattern → declared agent
-      [WARN]  two patterns overlap at equal specificity
-      [ERROR] referenced agent not declared in platform.yaml agents:
-
-    Exit 0 on success or warnings-only; 1 when any error finding fires.
-    """
-    if "--validate" not in args:
-        UI.error("Usage: otaman owner-paths --validate")
-        return 2
-
-    from otaman_cli.owner_paths import validate_owner_paths
-
-    root = find_project_root()
-    if root is None:
-        UI.error("Not in an otaman project (no platform.yaml found)")
-        return 1
-
-    print("  Validating owner-paths in platform.yaml...")
-    findings = validate_owner_paths(root)
-    if not findings:
-        print("  No owner-paths configured in platform.yaml")
-        return 0
-
-    # Render with the spec-specified labels + alignment
-    n_ok = sum(1 for f in findings if f.severity == "ok")
-    n_warn = sum(1 for f in findings if f.severity == "warn")
-    n_error = sum(1 for f in findings if f.severity == "error")
-
-    for f in findings:
-        label_map = {"ok": "[ok]   ", "warn": "[WARN] ", "error": "[ERROR]"}
-        label = label_map.get(f.severity, "[?]   ")
-        # Padding for visual alignment with the spec's example output
-        line = f'  {label} {f.repo}: "{f.pattern}"  → {f.agent}'
-        print(line)
-        if f.note:
-            print(f"         {f.note}")
-
-    print()
-    print(
-        f"  Summary: {n_ok + n_warn + n_error} patterns, "
-        f"{n_warn} warnings, {n_error} errors"
-    )
-    if n_error > 0:
-        print("  Run `otaman owner-paths --validate` again after fixing platform.yaml")
-        return 1
-    return 0
-
-
 def cmd_whoami(args: list[str]) -> int:
     """Print current agent identity + project + routing + bus state.
 
@@ -2713,18 +2661,6 @@ def cmd_assign(args: list[str]) -> int:
     return 0
 
 
-def cmd_review(args: list[str], reviewer: str = "all") -> int:
-    """Trigger a review."""
-    UI.info("Observer reviews are designed to run inside Claude Code sessions")
-    print(f"  where the observer agents have access to Read/Glob/Grep/Bash tools.")
-    print()
-    UI.action(f"Run in your Claude Code session:")
-    UI.muted(f"/otaman:review --reviewer {reviewer}")
-    if args:
-        UI.kv("Scope", " ".join(args))
-    return 0
-
-
 def _normalize_ce_platform_yaml_for_validation(config_path: Path) -> tuple[Path, list[str]]:
     """ce-org-agent-bootstrap task 4.1 — normalize CE-shaped platform.yaml in-memory.
 
@@ -2884,59 +2820,6 @@ def _normalize_ce_platform_yaml_for_validation(config_path: Path) -> tuple[Path,
             pass
         return config_path, hints
     return tmp_path, hints
-
-
-def cmd_validate(args: list[str]) -> int:
-    """Validate platform.yaml.
-
-    ce-org-agent-bootstrap task 4.1 — accepts the CE platform.yaml shape
-    by normalizing in-memory before validation (agent→owner alias; project
-    inferred from parent dir; version default "1.0").  Deprecation hints
-    are printed; the on-disk file is not rewritten.
-    """
-    config = args[0] if args else "platform.yaml"
-    config_path = Path(config)
-    norm_path, hints = _normalize_ce_platform_yaml_for_validation(config_path)
-    if hints:
-        for h in hints:
-            UI.muted(f"hint: {h}")
-    try:
-        result = run_script("validate-platform.py", str(norm_path))
-    finally:
-        if norm_path != config_path and norm_path.exists():
-            try:
-                norm_path.unlink()
-            except OSError:
-                pass
-    return result.returncode
-
-
-def cmd_compliance(args: list[str], fmt: str = "markdown") -> int:
-    """Generate compliance report."""
-    root = find_project_root()
-    if not root:
-        UI.error("Not in an otaman project")
-        return 1
-    result = run_script("compliance-report.py", str(root), "--format", fmt)
-    return result.returncode
-
-
-def cmd_validate_messages(args: list[str]) -> int:
-    """Validate bus message files."""
-    root = find_project_root()
-    if not root:
-        UI.error("Not in an otaman project")
-        return 1
-
-    UI.header("Bus Message Validation")
-
-    if args:
-        # Validate specific file
-        result = run_script("validate-message.py", args[0])
-    else:
-        # Validate all active messages
-        result = run_script("validate-message.py", str(root), "--all")
-    return result.returncode
 
 
 def cmd_launcher(args: list[str]) -> int:
@@ -3184,136 +3067,6 @@ def cmd_retrospective(args: list[str]) -> int:
     return 0
 
 
-def cmd_discovery_phase(args: list[str]) -> int:
-    """Show discovery phase status."""
-    UI.header("Otaman Discovery Phase")
-
-    # Find presale dir
-    d = Path.cwd()
-    presale_dir = None
-    for _ in range(10):
-        new_ = d / ".otaman-presale"
-        if new_.is_dir():
-            presale_dir = new_
-            break
-        if (d / ".maestro-presale").is_dir():  # legacy: fallback for pre-rebrand presale dirs
-            presale_dir = d / ".maestro-presale"  # legacy: pre-rebrand directory name
-            break
-        parent = d.parent
-        if parent == d:
-            break
-        d = parent
-
-    if not presale_dir:
-        UI.error("No .otaman-presale/ (or legacy: .maestro-presale/) directory found.")
-        UI.muted("Run 'otaman presale' first to initialize a pre-sale project.")
-        return 1
-
-    # Show status
-    meta_path = presale_dir / "project-meta.yaml"
-    if meta_path.exists():
-        try:
-            import yaml
-            meta = yaml.safe_load(meta_path.read_text(encoding="utf-8"))
-            UI.kv("Project", f"{meta.get('project_name', '?')} ({meta.get('project_code', '?')})")
-            UI.kv("Domain", meta.get('domain', '?'))
-            UI.kv("Phase", meta.get('current_phase', '?'))
-        except Exception:
-            pass
-
-    # Check artifacts
-    checks = [
-        ("Estimation", (presale_dir / "estimation").is_dir() and list((presale_dir / "estimation").glob("estimate-*.md"))),
-        ("Assumptions", (presale_dir / "assumptions.yaml").exists()),
-        ("Risks", (presale_dir / "risks.yaml").exists()),
-        ("Architecture", (presale_dir / "architecture").is_dir() and list((presale_dir / "architecture").glob("*.md"))),
-        ("Knowledge audit", (presale_dir / "knowledge-audit.yaml").exists()),
-        ("Validated assumptions", (presale_dir / "discovery" / "validated-assumptions.yaml").exists()),
-        ("Updated risks", (presale_dir / "discovery" / "updated-risks.yaml").exists()),
-    ]
-
-    UI.subheader("Discovery Artifacts:")
-    for name, exists in checks:
-        icon = UI.badge("OK", C.GREEN) if exists else UI.path("--")
-        print(f"  [{icon}] {name}")
-
-    UI.subheader("To manage discovery interactively:")
-    UI.action(f"Use {C.GREEN}/otaman:discovery{C.RESET} in Claude Code")
-    UI.muted("It will guide you through assumption validation and risk mitigation.")
-    return 0
-
-
-def cmd_handoff(args: list[str]) -> int:
-    """Show handoff readiness."""
-    UI.header("Otaman Handoff")
-
-    d = Path.cwd()
-    presale_dir = None
-    for _ in range(10):
-        new_ = d / ".otaman-presale"
-        if new_.is_dir():
-            presale_dir = new_
-            break
-        if (d / ".maestro-presale").is_dir():  # legacy: fallback for pre-rebrand presale dirs
-            presale_dir = d / ".maestro-presale"  # legacy: pre-rebrand directory name
-            break
-        parent = d.parent
-        if parent == d:
-            break
-        d = parent
-
-    if not presale_dir:
-        UI.error("No .otaman-presale/ (or legacy: .maestro-presale/) directory found.")
-        return 1
-
-    UI.kv("Presale dir", str(presale_dir))
-    has_estimation = list((presale_dir / "estimation").glob("estimate-*.md")) if (presale_dir / "estimation").is_dir() else []
-    has_platform = (presale_dir.parent / "platform.yaml").exists()
-
-    UI.subheader("Handoff readiness:")
-    est_icon = UI.badge("OK", C.GREEN) if has_estimation else UI.path("--")
-    ka_icon = UI.badge("OK", C.GREEN) if (presale_dir / 'knowledge-audit.yaml').exists() else UI.path("--")
-    py_icon = UI.badge("SKIP", C.YELLOW) if has_platform else UI.path("--")
-    print(f"  [{est_icon}] Estimation document")
-    print(f"  [{ka_icon}] Knowledge audit")
-    print(f"  [{py_icon}] platform.yaml {'(already exists)' if has_platform else '(will be generated)'}")
-
-    UI.subheader("To execute handoff:")
-    UI.action(f"Use {C.GREEN}/otaman:handoff execute{C.RESET} in Claude Code")
-    UI.muted("It will generate platform.yaml, create ADRs, and migrate artifacts.")
-    return 0
-
-
-def cmd_audit_knowledge(args: list[str]) -> int:
-    """Show knowledge audit status."""
-    UI.header("Otaman Knowledge Audit")
-
-    # Check multiple locations for audit file
-    for candidate in [".otaman-presale/knowledge-audit.yaml", ".maestro-presale/knowledge-audit.yaml", ".agents/knowledge-audit.yaml"]:  # legacy: presale fallback
-        p = Path(candidate)
-        if p.exists():
-            try:
-                import yaml
-                audit = yaml.safe_load(p.read_text(encoding="utf-8"))
-                UI.kv("Audit date", audit.get('audit_date', '?'))
-                UI.kv("Overall readiness", f"{audit.get('overall_readiness', '?')}%")
-                print()
-                for item in audit.get("items", []):
-                    conf = item.get("confidence", "?")
-                    icon = {"high": UI.badge("OK", C.GREEN), "medium": UI.badge("??", C.YELLOW),
-                            "low": UI.badge("!!", C.RED), "none": UI.badge("XX", C.RED)}.get(conf, "??")
-                    print(f"  [{icon}] {item.get('tech', '?'):30s} {conf:8s} {item.get('action', '')}")
-            except Exception as e:
-                UI.error(f"Failed to read audit: {e}")
-            return 0
-
-    UI.muted("No knowledge audit found.")
-    UI.subheader("To run the audit:")
-    UI.action(f"Use {C.GREEN}/otaman:audit-knowledge{C.RESET} in Claude Code")
-    UI.muted("It will assess Claude's confidence per tech stack item.")
-    return 0
-
-
 def cmd_team(args: list[str], desc: str) -> int:
     """Orchestrate a cross-repo feature."""
     UI.header("Otaman Team Orchestration")
@@ -3342,46 +3095,6 @@ def cmd_team(args: list[str], desc: str) -> int:
     UI.subheader("To orchestrate this feature:")
     UI.action(f"Use {C.GREEN}/otaman:team {feature}{C.RESET} in Claude Code")
     UI.muted("It will decompose into tasks, assign to agents via bus, and track progress.")
-    return 0
-
-
-def cmd_gate(args: list[str]) -> int:
-    """Check gate readiness for a phase transition."""
-    UI.header("Otaman Gate Check")
-
-    root = find_project_root()
-    transition = args[0] if args else None
-
-    # Determine current phase
-    for meta_loc in [".otaman-presale/project-meta.yaml", ".maestro-presale/project-meta.yaml", ".agents/project-meta.yaml"]:  # legacy: presale fallback
-        p = Path(meta_loc) if not root else root / meta_loc
-        if p.exists():
-            try:
-                import yaml
-                meta = yaml.safe_load(p.read_text(encoding="utf-8"))
-                phase = meta.get("current_phase", "?")
-                UI.kv("Current phase", phase, C.BOLD)
-                if not transition:
-                    # Auto-detect next transition
-                    default_order = ["presale", "discovery", "development", "support"]
-                    if phase in default_order:
-                        idx = default_order.index(phase)
-                        if idx + 1 < len(default_order):
-                            next_phase = default_order[idx + 1]
-                            transition = f"{phase}-to-{next_phase}"
-            except Exception:
-                pass
-            break
-
-    if transition:
-        UI.kv("Transition", transition, C.BOLD)
-    else:
-        UI.error("Could not determine transition. Specify: otaman gate <from>-to-<to>")
-        return 1
-
-    UI.subheader("To run full gate validation:")
-    UI.action(f"Use {C.GREEN}/otaman:gate {transition}{C.RESET} in Claude Code")
-    UI.muted("It will check required artifacts, run validations, and apply domain-specific checks.")
     return 0
 
 
@@ -3551,8 +3264,6 @@ def main() -> int:
         return cmd_init_companion_repos(rest[1:])
 
     # Extract flags
-    fmt = "markdown"
-    reviewer = "all"
     desc = ""
     update = False
     dry_run = False
@@ -3565,13 +3276,7 @@ def main() -> int:
 
     i = 0
     while i < len(rest):
-        if rest[i] == "--format" and i + 1 < len(rest):
-            fmt = rest[i + 1]
-            i += 2
-        elif rest[i] == "--reviewer" and i + 1 < len(rest):
-            reviewer = rest[i + 1]
-            i += 2
-        elif rest[i] in ("-d", "--desc") and i + 1 < len(rest):
+        if rest[i] in ("-d", "--desc") and i + 1 < len(rest):
             desc = rest[i + 1]
             i += 2
         elif rest[i] == "--update":
@@ -3613,23 +3318,14 @@ def main() -> int:
         "send": lambda: cmd_send(rest),
         "whoami": lambda: cmd_whoami(rest),
         "iam": lambda: cmd_whoami(rest),
-        "owner-paths": lambda: cmd_owner_paths(rest),
         "ack": lambda: cmd_ack(positional, ack_status),
         "cleanup": lambda: cmd_cleanup(positional, dry_run),
         "propose": lambda: cmd_propose(positional, desc),
         "assign": lambda: cmd_assign(positional),
-        "review": lambda: cmd_review(positional, reviewer),
-        "validate": lambda: cmd_validate(positional),
-        "validate-messages": lambda: cmd_validate_messages(positional),
-        "compliance": lambda: cmd_compliance(positional, fmt),
         "launcher": lambda: cmd_launcher(rest),
         "set-agent": lambda: cmd_set_agent(positional),
         "presale": lambda: cmd_presale(positional),
         "retrospective": lambda: cmd_retrospective(positional),
-        "discovery": lambda: cmd_discovery_phase(positional),
-        "handoff": lambda: cmd_handoff(positional),
-        "audit-knowledge": lambda: cmd_audit_knowledge(positional),
-        "gate": lambda: cmd_gate(positional),
         "team": lambda: cmd_team(positional, desc),
     }
 

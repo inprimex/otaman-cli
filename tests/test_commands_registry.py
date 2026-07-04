@@ -87,6 +87,8 @@ MIGRATED_COMMANDS = (
     "blocked", "scan", "check", "approve", "complete", "doctor", "migrate",
     "notify-change", "watchdog", "models", "accounts", "routing", "ping", "afk",
     "bridge", "mcp-config", "session", "install-cli", "onboard", "login", "logout", "token",
+    "owner-paths", "review", "validate", "validate-messages", "compliance",
+    "discovery", "handoff", "audit-knowledge", "gate",
 )
 
 

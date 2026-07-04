@@ -78,6 +78,7 @@ from otaman_cli.commands import doctor as _doctor  # noqa: E402,F401
 from otaman_cli.commands import git_host as _git_host  # noqa: E402,F401
 from otaman_cli.commands import hitl as _hitl  # noqa: E402,F401
 from otaman_cli.commands import migrate as _migrate  # noqa: E402,F401
+from otaman_cli.commands import misc_readonly as _misc_readonly  # noqa: E402,F401
 from otaman_cli.commands import outcome as _outcome  # noqa: E402,F401
 from otaman_cli.commands import persona as _persona  # noqa: E402,F401
 from otaman_cli.commands import pm as _pm  # noqa: E402,F401
