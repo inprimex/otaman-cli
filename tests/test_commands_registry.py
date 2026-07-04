@@ -89,7 +89,7 @@ MIGRATED_COMMANDS = (
     "bridge", "mcp-config", "session", "install-cli", "onboard", "login", "logout", "token",
     "owner-paths", "review", "validate", "validate-messages", "compliance",
     "discovery", "handoff", "audit-knowledge", "gate", "presale", "retrospective",
-    "propose", "team",
+    "propose", "team", "send", "read", "ack", "assign",
 )
 
 

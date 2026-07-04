@@ -72,6 +72,7 @@ def dispatch(name: str, args: list[str]) -> int | None:
 # modules. Add a line here as each new command group migrates out of main.py.
 from otaman_cli.commands import approve as _approve  # noqa: E402,F401
 from otaman_cli.commands import blocked as _blocked  # noqa: E402,F401
+from otaman_cli.commands import bus_messaging as _bus_messaging  # noqa: E402,F401
 from otaman_cli.commands import check as _check  # noqa: E402,F401
 from otaman_cli.commands import complete as _complete  # noqa: E402,F401
 from otaman_cli.commands import doctor as _doctor  # noqa: E402,F401
