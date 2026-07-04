@@ -192,6 +192,14 @@ def _build_platform_yaml(answers: dict[str, Any]) -> dict[str, Any]:
         })
     doc["bus"] = {"routing_rules": routing_rules}
 
+    # git-flow-branch-config task 2.2 — scaffold a default standards.git
+    # block instead of leaving the section absent entirely. trunk-based is
+    # the simplest correct default (every merge to main ships); no
+    # `environments` block, since that requires the project to actually
+    # know its branch/environment mapping, which a fresh wizard run
+    # doesn't have.
+    doc["standards"] = {"git": {"branching": "trunk-based"}}
+
     return doc
 
 

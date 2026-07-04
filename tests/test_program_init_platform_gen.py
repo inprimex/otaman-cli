@@ -97,6 +97,16 @@ class TestBuildPlatformYaml:
         assert "ee" in doc
         assert doc["ee"]["organisation"] == "acme-org"
 
+    def test_standards_git_defaults_to_trunk_based(self):
+        """git-flow-branch-config task 2.2 — a freshly scaffolded project
+        gets standards.git.branching: trunk-based rather than an absent
+        standards.git section entirely."""
+        doc = _build_platform_yaml(_BASE_ANSWERS)
+        assert doc["standards"]["git"]["branching"] == "trunk-based"
+        # v1 scaffold: no environments block (project doesn't know its
+        # branch/environment mapping yet)
+        assert "environments" not in doc["standards"]["git"]
+
 
 class TestWritePlatformYaml:
     def test_creates_file(self, tmp_path):
