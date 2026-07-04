@@ -169,15 +169,82 @@ def _git_host_resolve_repo(gh, root: Path, repo_arg: str | None):
     return repo_dir, info
 
 
+def _git_host_pr_target_branch(root: Path) -> int:
+    """`otaman git-host pr target-branch` — git-flow-branch-config 2.1.
+
+    Read-only advisory: resolves and prints a default target branch for
+    `gh pr create -B <resolved>`, creating nothing. `otaman` has no
+    PR-create capability today (no adapter `create_pr` method, no CLI
+    action, across all 5 supported git-host providers) — building that is
+    out of scope for this change (design.md's "declared-intent, not live
+    behavior" v1 philosophy). Needs no `git_host:` config/token — this is
+    pure `standards.git` resolution, independent of provider wiring.
+
+    Resolution order:
+      1. first `branch`-keyed entry (skipping any `tag_pattern`-keyed
+         entries, which have no branch to target) in
+         `standards.git.environments`
+      2. `standards.git.development_branch`
+      3. informational "no branch preference declared" (exit 0, not an
+         error)
+    """
+    import yaml
+    platform_yaml = root / "platform.yaml"
+    data: dict = {}
+    if platform_yaml.is_file():
+        try:
+            data = yaml.safe_load(platform_yaml.read_text(encoding="utf-8")) or {}
+        except Exception:
+            data = {}
+    if not isinstance(data, dict):
+        data = {}
+
+    git_cfg = (data.get("standards") or {}).get("git") or {}
+    if not isinstance(git_cfg, dict):
+        git_cfg = {}
+
+    environments = git_cfg.get("environments") or []
+    if isinstance(environments, list):
+        for entry in environments:
+            if isinstance(entry, dict):
+                branch = entry.get("branch")
+                if branch:
+                    print(branch)
+                    UI.muted(f"(from standards.git.environments: {entry.get('environment', '?')})")
+                    return 0
+
+    dev_branch = git_cfg.get("development_branch")
+    if dev_branch:
+        print(dev_branch)
+        UI.muted("(from standards.git.development_branch)")
+        return 0
+
+    UI.muted(
+        "No branch preference declared "
+        "(standards.git.environments / development_branch absent)"
+    )
+    return 0
+
+
 def _git_host_pr(gh, args: list[str]) -> int:
-    """`otaman git-host pr list|get|for-branch|comment`"""
+    """`otaman git-host pr list|get|for-branch|comment|target-branch`"""
     if not args:
         UI.error("Missing subcommand")
-        UI.muted("Usage: otaman git-host pr [list|get|for-branch|comment] [args...]")
+        UI.muted("Usage: otaman git-host pr [list|get|for-branch|comment|target-branch] [args...]")
         return 1
 
     action = args[0].lower()
     rest = args[1:]
+
+    # target-branch is pure platform.yaml config resolution — no
+    # git_host:/adapter/repo-detection needed, unlike every other `pr`
+    # action below, so it's dispatched before that setup.
+    if action == "target-branch":
+        root = find_project_root()
+        if not root:
+            UI.error("Not in an otaman project")
+            return 1
+        return _git_host_pr_target_branch(root)
 
     # Parse --repo NAME and --body TEXT out of rest.
     repo_arg: str | None = None
