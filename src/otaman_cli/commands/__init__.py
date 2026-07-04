@@ -82,6 +82,7 @@ from otaman_cli.commands import misc_readonly as _misc_readonly  # noqa: E402,F4
 from otaman_cli.commands import outcome as _outcome  # noqa: E402,F401
 from otaman_cli.commands import persona as _persona  # noqa: E402,F401
 from otaman_cli.commands import pm as _pm  # noqa: E402,F401
+from otaman_cli.commands import presale as _presale  # noqa: E402,F401
 from otaman_cli.commands import project as _project  # noqa: E402,F401
 from otaman_cli.commands import scan as _scan  # noqa: E402,F401
 from otaman_cli.commands import simple_dispatch as _simple_dispatch  # noqa: E402,F401
