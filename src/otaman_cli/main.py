@@ -1320,21 +1320,6 @@ def cmd_clone(args: list[str], target: str = "") -> int:
     return 1 if failed else 0
 
 
-def _cmd_notify_change_dispatch(args: list[str]) -> int:
-    """Lazy-import wrapper for `otaman notify-change` (post-merge-spec-notify 1.1)."""
-    from otaman_cli.notify_change import cmd_notify_change
-    return cmd_notify_change(args)
-
-
-def _cmd_watchdog_dispatch(args: list[str]) -> int:
-    """Lazy-import wrapper for `otaman watchdog ...` so urllib + endpoint
-    discovery don't load on every CLI invocation (the watchdog is a
-    rarely-used surface; most operators never hit it).
-    """
-    from otaman_cli.watchdog import cmd_watchdog
-    return cmd_watchdog(args)
-
-
 def cmd_set_status(args: list[str]) -> int:
     """agent-status-presence task 1.5 — write a status record for the current agent.
 
@@ -2954,131 +2939,6 @@ def cmd_validate_messages(args: list[str]) -> int:
     return result.returncode
 
 
-def cmd_models(args: list[str]) -> int:
-    """Show model/effort defaults shipped with the plugin and diff vs platform.yaml overrides."""
-    UI.header("Otaman Model/Effort Report")
-    try:
-        result = run_script("models-report.py", *args)
-        return result.returncode
-    except SystemExit as e:
-        return int(e.code) if e.code is not None else 1
-
-
-def cmd_accounts(args: list[str]) -> int:
-    """Manage Claude Code account definitions in launch-settings.yaml.
-
-    Subcommands: add, list, remove. Forwards to scripts/accounts.py with
-    its own argparse-based arg handling.
-    """
-    UI.header("Otaman Accounts")
-    try:
-        result = run_script("accounts.py", *args)
-        return result.returncode
-    except SystemExit as e:
-        return int(e.code) if e.code is not None else 1
-
-
-def cmd_ping(args: list[str]) -> int:
-    """Post a Telegram / bridge notification immediately.
-
-    Forwards to scripts/ping.py. Unlike the automatic Stop-hook
-    notification, this is always delivered regardless of AFK state
-    and without debounce — it's an explicit user/agent-invoked call.
-    """
-    UI.header("Otaman Ping")
-    try:
-        result = run_script("ping.py", *args)
-        return result.returncode
-    except SystemExit as e:
-        return int(e.code) if e.code is not None else 1
-
-
-def cmd_afk(args: list[str]) -> int:
-    """Toggle remote-approval AFK mode (.otaman/afk flag file).
-
-    Subcommands: on [DURATION], off, status. Forwards to scripts/afk.py.
-    """
-    UI.header("Otaman AFK")
-    try:
-        result = run_script("afk.py", *args)
-        return result.returncode
-    except SystemExit as e:
-        return int(e.code) if e.code is not None else 1
-
-
-def cmd_bridge(args: list[str]) -> int:
-    """Run / status / stop the remote-approval bridge daemon.
-
-    Forwards to bridge/cli.py. T2a ships null transport only; T2b adds
-    Telegram. The daemon runs one per account; it listens on loopback
-    HTTP for PreToolUse hook requests and surfaces them via the
-    configured transport.
-    """
-    UI.header("Otaman Bridge")
-    try:
-        result = run_script("bridge/cli.py", *args)
-        return result.returncode
-    except KeyboardInterrupt:
-        return 130
-    except SystemExit as e:
-        return int(e.code) if e.code is not None else 1
-
-
-def cmd_mcp_config(args: list[str]) -> int:
-    """Emit a Claude Code .mcp.json snippet pointing at the bridge.
-
-    Forwards to otaman_cli.mcp_config. Reads the cached OIDC token
-    from `otaman login` and prints (or writes) the JSON block Claude
-    Code needs to connect to the bridge's MCP endpoint with the right
-    bearer auth.
-    """
-    UI.header("Otaman MCP Config")
-    try:
-        from otaman_cli.mcp_config import main as mcp_main
-        return mcp_main(args)
-    except SystemExit as e:
-        return int(e.code) if e.code is not None else 1
-
-
-def cmd_session(args: list[str]) -> int:
-    """Manage otaman sessions: spawn (more to come).
-
-    Subcommands:
-        spawn   Spawn a session via the local runner under the
-                logged-in user's identity (reads token from
-                `otaman login` cache).
-    """
-    UI.header("Otaman Session")
-    if not args:
-        UI.error("Missing subcommand")
-        UI.muted("Usage: otaman session <spawn> [args...]")
-        return 1
-    sub, rest = args[0], args[1:]
-    try:
-        if sub == "spawn":
-            from otaman_cli.session_spawn import main as spawn_main
-            return spawn_main(rest)
-        UI.error(f"Unknown session subcommand: {sub}")
-        UI.muted("Usage: otaman session <spawn> [args...]")
-        return 1
-    except SystemExit as e:
-        return int(e.code) if e.code is not None else 1
-
-
-def cmd_install_cli(args: list[str]) -> int:
-    """Put the `otaman` command on PATH (POSIX symlink or Windows setx).
-
-    Delegates to scripts/install_cli.py. Default mode is dry-run: the
-    command prints what it *would* change. Pass ``--apply`` to actually
-    edit PATH / create the symlink.
-    """
-    UI.header("Otaman Install CLI")
-    try:
-        return run_script("install_cli.py", *args).returncode
-    except SystemExit as e:
-        return int(e.code) if e.code is not None else 1
-
-
 def cmd_launcher(args: list[str]) -> int:
     """Launcher management: scaffold, list, add, remove, register.
 
@@ -3656,29 +3516,6 @@ def cmd_help() -> int:
     return 0
 
 
-def cmd_onboard(args: list[str]) -> int:
-    """Dispatch to the otaman onboard CLI subcommands.
-
-    The onboard package owns its own argparse; we pass through ``args``
-    (everything after ``onboard``) verbatim and return its exit code.
-    """
-    from otaman_cli.onboard.cli import main as _onboard_main
-    return _onboard_main(args)
-
-
-
-def cmd_login(args: list[str]) -> int:
-    """Dispatch to the otaman login / auth subcommands.
-
-    Implements OAuth 2.0 Device Authorization Grant. Subcommands:
-      login   — initiate device-flow auth (default if no subcommand)
-      logout  — remove cached token
-      show    — print cached-token metadata (no secrets)
-    """
-    from otaman_cli.auth.login import main as _login_main
-    return _login_main(args)
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -3772,13 +3609,11 @@ def main() -> int:
         "clone": lambda: cmd_clone(positional, target=maestro_dir or ""),
         "status": lambda: cmd_status(rest),
         "set-status": lambda: cmd_set_status(rest),
-        "watchdog": lambda: _cmd_watchdog_dispatch(positional),
         "read": lambda: cmd_read(positional),
         "send": lambda: cmd_send(rest),
         "whoami": lambda: cmd_whoami(rest),
         "iam": lambda: cmd_whoami(rest),
         "owner-paths": lambda: cmd_owner_paths(rest),
-        "notify-change": lambda: _cmd_notify_change_dispatch(positional),
         "ack": lambda: cmd_ack(positional, ack_status),
         "cleanup": lambda: cmd_cleanup(positional, dry_run),
         "propose": lambda: cmd_propose(positional, desc),
@@ -3787,16 +3622,7 @@ def main() -> int:
         "validate": lambda: cmd_validate(positional),
         "validate-messages": lambda: cmd_validate_messages(positional),
         "compliance": lambda: cmd_compliance(positional, fmt),
-        "accounts": lambda: cmd_accounts(rest),
-        "routing": lambda: cmd_accounts(rest),
-        "afk": lambda: cmd_afk(rest),
-        "bridge": lambda: cmd_bridge(rest),
-        "mcp-config": lambda: cmd_mcp_config(rest),
-        "session": lambda: cmd_session(rest),
-        "ping": lambda: cmd_ping(rest),
         "launcher": lambda: cmd_launcher(rest),
-        "install-cli": lambda: cmd_install_cli(rest),
-        "models": lambda: cmd_models(rest),
         "set-agent": lambda: cmd_set_agent(positional),
         "presale": lambda: cmd_presale(positional),
         "retrospective": lambda: cmd_retrospective(positional),
@@ -3805,10 +3631,6 @@ def main() -> int:
         "audit-knowledge": lambda: cmd_audit_knowledge(positional),
         "gate": lambda: cmd_gate(positional),
         "team": lambda: cmd_team(positional, desc),
-        "login": lambda: cmd_login(["login"] + rest),
-        "logout": lambda: cmd_login(["logout"] + rest),
-        "token": lambda: cmd_login(["show"] + rest),
-        "onboard": lambda: cmd_onboard(rest),
     }
 
     if command not in commands:

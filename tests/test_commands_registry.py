@@ -82,7 +82,12 @@ class TestDispatch:
 # Commands migrated out of main.py so far, in migration order. Extend this
 # tuple as each new F020 migration PR lands -- it's the single source of
 # truth both tests below check against.
-MIGRATED_COMMANDS = ("outcome", "solution", "persona", "hitl", "project", "pm", "git-host", "upgrade", "blocked", "scan", "check", "approve", "complete", "doctor", "migrate")
+MIGRATED_COMMANDS = (
+    "outcome", "solution", "persona", "hitl", "project", "pm", "git-host", "upgrade",
+    "blocked", "scan", "check", "approve", "complete", "doctor", "migrate",
+    "notify-change", "watchdog", "models", "accounts", "routing", "ping", "afk",
+    "bridge", "mcp-config", "session", "install-cli", "onboard", "login", "logout", "token",
+)
 
 
 class TestMigratedCommands:
