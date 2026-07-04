@@ -90,6 +90,7 @@ MIGRATED_COMMANDS = (
     "owner-paths", "review", "validate", "validate-messages", "compliance",
     "discovery", "handoff", "audit-knowledge", "gate", "presale", "retrospective",
     "propose", "team", "send", "read", "ack", "assign",
+    "status", "set-status", "whoami", "iam", "cleanup",
 )
 
 
