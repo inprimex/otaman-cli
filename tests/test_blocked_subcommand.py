@@ -153,3 +153,58 @@ def test_clear_only_section_leaves_empty_file(project: Path) -> None:
     # File either absent or has no Blocked: sections left
     if blocked.exists():
         assert "## Blocked:" not in blocked.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# issue #94 — --clear falls back to substring/Proposal-stem match when the
+# full title doesn't match exactly
+
+
+def test_clear_with_partial_title_substring_matches(project: Path) -> None:
+    """A short slug that's a substring of the full title (but not equal to
+    it) used to silently match nothing. It should now resolve unambiguously
+    when only one section contains it."""
+    blocked = project / ".agents" / "blocked" / "cli-agent.md"
+    blocked.write_text(
+        "## Blocked: cli-git-flow-branch-config-task-2.2\n"
+        "- **Blocked since**: 2026-05-28T00:00:00Z\n",
+        encoding="utf-8",
+    )
+    result = _run(project, "--clear", "git-flow-branch-config")
+    assert result.returncode == 0, result.stdout
+    assert "Cleared" in result.stdout
+    remaining = blocked.read_text(encoding="utf-8") if blocked.exists() else ""
+    assert "## Blocked:" not in remaining
+
+
+def test_clear_with_proposal_stem_matches(project: Path) -> None:
+    """A value matching only the `**Proposal**:` stem (not the title) —
+    the workaround the issue called the 'working path' for `blocked clear
+    <stem>` — should now also resolve via plain `--clear`."""
+    blocked = project / ".agents" / "blocked" / "cli-agent.md"
+    blocked.write_text(BLOCKED_TWO, encoding="utf-8")
+    result = _run(project, "--clear", "20260528T113653-proposal.md")
+    assert result.returncode == 0, result.stdout
+    remaining = blocked.read_text(encoding="utf-8")
+    assert "change-alpha" not in remaining
+    assert "change-beta" in remaining
+
+
+def test_clear_ambiguous_partial_match_lists_candidates_and_errors(project: Path) -> None:
+    """When a fallback value matches more than one section, refuse to guess
+    — report the candidates and exit non-zero rather than clearing the
+    wrong entry."""
+    blocked = project / ".agents" / "blocked" / "cli-agent.md"
+    blocked.write_text(
+        "## Blocked: feature-x-phase-1\n- **Blocked since**: 2026-05-28T00:00:00Z\n\n"
+        "## Blocked: feature-x-phase-2\n- **Blocked since**: 2026-05-29T00:00:00Z\n",
+        encoding="utf-8",
+    )
+    result = _run(project, "--clear", "feature-x")
+    assert result.returncode == 1
+    assert "feature-x-phase-1" in result.stdout
+    assert "feature-x-phase-2" in result.stdout
+    # Nothing was cleared
+    remaining = blocked.read_text(encoding="utf-8")
+    assert "feature-x-phase-1" in remaining
+    assert "feature-x-phase-2" in remaining
