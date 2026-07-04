@@ -22,7 +22,11 @@ def cmd_blocked(args: list[str]) -> int:
     """List, clear, or register blocked tasks for the current agent.
 
     `otaman blocked --list`              — list blocked entries (current agent)
-    `otaman blocked --clear <slug>`      — remove a blocked entry (current agent)
+    `otaman blocked --clear <value>`     — remove a blocked entry (current agent).
+                                            Matches the exact title first; if
+                                            nothing matches exactly, falls back
+                                            to a substring-of-title or Proposal
+                                            stem match (issue #94).
     `otaman blocked clear <stem>`        — tombstone any matching entry across
                                             ALL agents' files by Proposal stem
                                             (auto-clear-blocked-entries 2.1)
@@ -88,21 +92,7 @@ def cmd_blocked(args: list[str]) -> int:
         return 0
 
     if clear_slug:
-        if not blocked_file.is_file():
-            UI.muted(f"No blocked task found: {clear_slug}")
-            return 0
-        text = blocked_file.read_text(encoding="utf-8")
-        pattern = re.compile(
-            rf"^## Blocked: {re.escape(clear_slug)}\s*\n.*?(?=^## Blocked:|\Z)",
-            re.MULTILINE | re.DOTALL,
-        )
-        new_text = pattern.sub("", text).rstrip("\n")
-        if new_text == text.rstrip("\n"):
-            UI.muted(f"No blocked task found: {clear_slug}")
-            return 0
-        blocked_file.write_text(new_text + "\n" if new_text else "", encoding="utf-8")
-        UI.ok(f"Cleared blocked task: {clear_slug}")
-        return 0
+        return _cmd_blocked_clear(blocked_file, clear_slug)
 
     # agent-status-presence task 1.8 — register a new blocked entry +
     # set status. `otaman blocked <slug> [--blocked-by NAME]`.
@@ -135,9 +125,81 @@ def cmd_blocked(args: list[str]) -> int:
 
     UI.error("Specify --list, --clear <slug>, or pass a slug to register")
     UI.muted("  otaman blocked --list")
-    UI.muted("  otaman blocked --clear <slug>")
+    UI.muted("  otaman blocked --clear <slug>          (title, substring, or Proposal stem)")
+    UI.muted("  otaman blocked clear <proposal-stem>   (tombstones across ALL agents)")
     UI.muted("  otaman blocked <slug> [--blocked-by NAME]")
     return 1
+
+
+def _cmd_blocked_clear(blocked_file: Path, clear_slug: str) -> int:
+    """`otaman blocked --clear <value>` — remove a blocked entry (issue #94).
+
+    Previously required *value* to equal the ENTIRE `## Blocked: <title>`
+    line exactly — a short/partial slug silently matched nothing, even
+    though `otaman blocked clear <stem>` (`_cmd_blocked_clear_by_stem`)
+    happily matches on the shorter `**Proposal**:` stem. Now:
+
+    1. Exact title match (unchanged, most specific — removes all sections
+       whose title equals *value* exactly, same as before).
+    2. Falling back when there's no exact match: any section whose title
+       CONTAINS *value* as a substring, or whose `**Proposal**:` field
+       equals *value*, is a candidate.
+       - Exactly one candidate → clear it.
+       - Zero candidates → "not found".
+       - More than one → ambiguous; list them and ask for a more specific
+         value rather than guessing which one to clear.
+    """
+    if not blocked_file.is_file():
+        UI.muted(f"No blocked task found: {clear_slug}")
+        return 0
+
+    text = blocked_file.read_text(encoding="utf-8")
+
+    exact_pattern = re.compile(
+        rf"^## Blocked: {re.escape(clear_slug)}\s*\n.*?(?=^## Blocked:|\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    new_text = exact_pattern.sub("", text).rstrip("\n")
+    if new_text != text.rstrip("\n"):
+        blocked_file.write_text(new_text + "\n" if new_text else "", encoding="utf-8")
+        UI.ok(f"Cleared blocked task: {clear_slug}")
+        return 0
+
+    # No exact title match — fall back to substring-of-title or proposal-stem.
+    section_re = re.compile(
+        r"^## Blocked: (.+?)$(.*?)(?=^## Blocked:|\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    proposal_field_re = re.compile(r"\*\*Proposal\*\*:\s*(\S+)")
+
+    candidates: list[str] = []  # matched titles, in file order
+    for m in section_re.finditer(text):
+        title = m.group(1).strip()
+        body = m.group(2)
+        proposal_m = proposal_field_re.search(body)
+        proposal_stem = proposal_m.group(1).strip() if proposal_m else None
+        if clear_slug in title or proposal_stem == clear_slug:
+            candidates.append(title)
+
+    if not candidates:
+        UI.muted(f"No blocked task found: {clear_slug}")
+        return 0
+
+    if len(candidates) > 1:
+        UI.error(f"'{clear_slug}' matches {len(candidates)} blocked entries — be more specific")
+        for title in candidates:
+            UI.muted(f"  {title}")
+        return 1
+
+    matched_title = candidates[0]
+    match_pattern = re.compile(
+        rf"^## Blocked: {re.escape(matched_title)}\s*\n.*?(?=^## Blocked:|\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    new_text = match_pattern.sub("", text).rstrip("\n")
+    blocked_file.write_text(new_text + "\n" if new_text else "", encoding="utf-8")
+    UI.ok(f"Cleared blocked task: {matched_title} (matched '{clear_slug}')")
+    return 0
 
 
 def _cmd_blocked_clear_by_stem(root: Path, stem: str) -> int:
@@ -256,5 +318,5 @@ def _status_hook_after_blocked(root: Path, agent: str, slug: str, by: str) -> No
 register(CommandSpec(
     name="blocked",
     handler=cmd_blocked,
-    help="List blocked tasks for the current agent",
+    help="List/clear/register blocked tasks (--clear matches title, substring, or Proposal stem)",
 ))
