@@ -204,6 +204,16 @@ def cmd_check(args: list[str]) -> int:
     blocked_file = root / ".agents" / "blocked" / f"{agent}.md"
     if blocked_file.exists():
         blocked_content = blocked_file.read_text(encoding="utf-8").strip()
+        # Tombstoned entries (`otaman blocked --clear` / `blocked clear <stem>`)
+        # are wrapped in `<!-- ... cleared YYYY-MM-DD — manually-cleared -->`
+        # rather than deleted outright. Strip them before parsing, otherwise
+        # the split below fails to find a bare "\n## Blocked: " boundary
+        # (the tombstoned line reads "<!-- ## Blocked: ...", not "## Blocked:
+        # ..."), so the whole file — including already-cleared entries — is
+        # treated as one active block and nagged forever.
+        blocked_content = re.sub(
+            r"<!--.*?-->", "", blocked_content, flags=re.DOTALL,
+        ).strip()
         if blocked_content:
             print()
             UI.blocked("BLOCKED TASKS:")
