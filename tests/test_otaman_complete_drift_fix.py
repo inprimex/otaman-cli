@@ -26,13 +26,19 @@ def _stage_project(tmp_path: Path, agent: str | None = "cli-agent") -> Path:
 
     *agent*: written to `.agents/current-agent`.  Pass None to omit the file
     entirely (tests the FileNotFoundError safe-default).
+
+    `repos:` is intentionally empty — `resolve_agent_identity()`'s
+    CWD→platform.yaml→owner step (priority 3b) outranks `.agents/current-agent`
+    (priority 4), so a `repos[].path: .` entry would resolve identity from
+    its `owner:` field regardless of what `.agents/current-agent` says,
+    silently defeating any test that stages the file to prove file-based
+    fallback behavior.
     """
     (tmp_path / ".agents" / "bus" / "active" / "acks").mkdir(parents=True, exist_ok=True)
     if agent is not None:
         (tmp_path / ".agents" / "current-agent").write_text(agent, encoding="utf-8")
     (tmp_path / "platform.yaml").write_text(
-        "project: tst\nversion: '1.0'\n"
-        "repos:\n  - {name: tst, path: ., owner: cli-agent}\n",
+        "project: tst\nversion: '1.0'\nrepos: []\n",
         encoding="utf-8",
     )
     return tmp_path
@@ -40,41 +46,63 @@ def _stage_project(tmp_path: Path, agent: str | None = "cli-agent") -> Path:
 
 # ---------------------------------------------------------------- task 1.1 + 1.4(a-c)
 class TestIsSpecAgent:
-    def test_returns_true_when_agent_is_spec_agent(self, tmp_path: Path, monkeypatch):
-        _stage_project(tmp_path, agent="spec-agent")
-        monkeypatch.chdir(tmp_path)
-        assert _is_spec_agent() is True
+    """`_is_spec_agent(agent)` is a pure predicate over the already-resolved
+    identity string — issue #93 fixed the divergent resolver that used to
+    re-read `.agents/current-agent` directly instead of trusting the same
+    `resolve_agent_identity()` chain `cmd_complete` already used."""
 
-    def test_returns_false_when_agent_is_cli_agent(self, tmp_path: Path, monkeypatch):
+    def test_returns_true_when_agent_is_spec_agent(self):
+        assert _is_spec_agent("spec-agent") is True
+
+    def test_returns_false_when_agent_is_cli_agent(self):
+        assert _is_spec_agent("cli-agent") is False
+
+    def test_returns_false_when_agent_is_any_other(self):
+        for other in ("plugin-agent", "runner-agent", "deploy-agent", "human", ""):
+            assert _is_spec_agent(other) is False, f"agent={other!r} should NOT be spec-agent"
+
+    def test_returns_false_when_agent_is_unknown_agent(self):
+        assert _is_spec_agent("unknown-agent") is False
+
+
+# ---------------------------------------------------------------- issue #93 regression
+class TestIsSpecAgentIdentityResolution:
+    """Regression: `cmd_complete` must honor the SAME identity resolver
+    (`resolve_agent_identity()`, which checks `OTAMAN_AGENT` / `.otaman`
+    `agent:` fields ahead of `.agents/current-agent`) for both the
+    displayed agent name AND the spec-agent gate. Before the fix,
+    `_is_spec_agent()` read `.agents/current-agent` directly, so a
+    session resolved to spec-agent via `OTAMAN_AGENT` (with a stale or
+    absent `.agents/current-agent`) would print 'current agent is
+    spec-agent' yet still skip the tasks.md tick."""
+
+    def test_otaman_agent_env_overrides_stale_current_agent_file(
+        self, tmp_path: Path, monkeypatch,
+    ):
+        # .agents/current-agent says cli-agent (stale/wrong for this session),
+        # but OTAMAN_AGENT says spec-agent — the higher-priority source.
         _stage_project(tmp_path, agent="cli-agent")
         monkeypatch.chdir(tmp_path)
-        assert _is_spec_agent() is False
+        monkeypatch.setenv("OTAMAN_AGENT", "spec-agent")
 
-    def test_returns_false_when_agent_is_any_other(self, tmp_path: Path, monkeypatch):
-        for other in ("plugin-agent", "runner-agent", "deploy-agent", "human", ""):
-            # Re-stage cleanly per loop iteration (use a fresh tmp dir)
-            sub = tmp_path / f"agent-{other or 'empty'}"
-            sub.mkdir(exist_ok=True)
-            _stage_project(sub, agent=other)
-            monkeypatch.chdir(sub)
-            assert _is_spec_agent() is False, f"agent={other!r} should NOT be spec-agent"
+        from otaman_cli.commands import complete as _m
+        calls: list[tuple] = []
+        stub_result = MagicMock(
+            returncode=0,
+            stdout='{"updated": 1, "already_done": 0, "not_found": [], "tasks_file": "x"}',
+            stderr="",
+        )
+        def _stub_run_script(name, *args, **kw):
+            calls.append((name, args))
+            return stub_result
+        monkeypatch.setattr(_m, "run_script", _stub_run_script)
 
-    def test_returns_false_when_current_agent_file_absent(self, tmp_path: Path, monkeypatch):
-        _stage_project(tmp_path, agent=None)
-        monkeypatch.chdir(tmp_path)
-        # Project root resolves (platform.yaml exists) but the identity file doesn't
-        assert _is_spec_agent() is False
-
-    def test_returns_false_when_no_project_root(self, tmp_path: Path, monkeypatch):
-        # Empty tmp_path → find_project_root returns None
-        monkeypatch.chdir(tmp_path)
-        assert _is_spec_agent() is False
-
-    def test_trims_whitespace_around_agent_name(self, tmp_path: Path, monkeypatch):
-        _stage_project(tmp_path, agent="  spec-agent\n  ")
-        monkeypatch.chdir(tmp_path)
-        # `.read_text().strip()` per the design
-        assert _is_spec_agent() is True
+        rc = cmd_complete(["test-change", "--tasks", "1.1"])
+        assert rc == 0
+        assert any(name == "actualize-tasks.py" for name, _ in calls), (
+            "OTAMAN_AGENT=spec-agent must drive the tasks.md tick even when "
+            f".agents/current-agent disagrees. Calls: {calls}"
+        )
 
 
 # ---------------------------------------------------------------- task 1.4(d-f) + 1.5
@@ -100,6 +128,11 @@ class TestCmdCompleteBranching:
     def test_spec_agent_invokes_actualize_tasks(self, tmp_path: Path, monkeypatch):
         _stage_project(tmp_path, agent="spec-agent")
         monkeypatch.chdir(tmp_path)
+        # Isolate from the ambient OTAMAN_AGENT (this suite may itself be
+        # running under an agent session) so identity resolves from the
+        # staged .agents/current-agent file, per resolve_agent_identity()'s
+        # priority chain.
+        monkeypatch.delenv("OTAMAN_AGENT", raising=False)
 
         # Capture the run_script invocation
         from otaman_cli.commands import complete as _m
@@ -121,6 +154,7 @@ class TestCmdCompleteBranching:
     def test_cli_agent_skips_actualize_tasks_sends_bus(self, tmp_path: Path, monkeypatch, capsys):
         _stage_project(tmp_path, agent="cli-agent")
         monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("OTAMAN_AGENT", raising=False)
 
         from otaman_cli.commands import complete as _m
         calls: list[tuple] = []
@@ -144,6 +178,7 @@ class TestCmdCompleteBranching:
 
     # 1.4 (f) — exit code 0 in both branches
     def test_exit_code_zero_in_both_branches(self, tmp_path: Path, monkeypatch):
+        monkeypatch.delenv("OTAMAN_AGENT", raising=False)
         for agent in ("spec-agent", "cli-agent"):
             _stage_project(tmp_path, agent=agent)
             monkeypatch.chdir(tmp_path)
