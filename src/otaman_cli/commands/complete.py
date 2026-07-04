@@ -84,24 +84,18 @@ def _find_task_assignment_sender(active_dir: "Path", change_name: str, root: "Pa
     return "human"
 
 
-def _is_spec_agent() -> bool:
+def _is_spec_agent(agent: str) -> bool:
     """fix-otaman-complete-task-drift task 1.1 — true only when the current
     agent is spec-agent.
 
-    Reads `.agents/current-agent` relative to the project root.  Returns:
-      - True only when the file's stripped value is exactly `"spec-agent"`
-      - False on FileNotFoundError (no identity file → safe default;
-        treats unknown identity as non-spec-agent so tasks.md is not edited)
-      - False on any read error (same safe default)
+    Takes the already-resolved identity (issue #93: this used to re-read
+    `.agents/current-agent` directly via a second, divergent resolver that
+    ignored `OTAMAN_AGENT` / `.otaman` `agent:` fields — so a session that
+    correctly resolved to `spec-agent` via `resolve_agent_identity()` could
+    still see `is_spec_agent() == False` and silently skip the tasks.md
+    tick). Reuse the one identity `cmd_complete` already resolved instead.
     """
-    root = find_project_root()
-    if root is None:
-        return False
-    p = root / ".agents" / "current-agent"
-    try:
-        return p.read_text(encoding="utf-8").strip() == "spec-agent"
-    except (FileNotFoundError, OSError):
-        return False
+    return agent == "spec-agent"
 
 
 def cmd_complete(args: list[str]) -> int:
@@ -161,7 +155,7 @@ def cmd_complete(args: list[str]) -> int:
     # other agent, the local working-tree edit gets silently reverted on
     # the next `git pull --ff-only` — this silent drift had ~130 tasks
     # stuck on the wrong state before the fix landed (see PR #96 backfill).
-    is_spec = _is_spec_agent()
+    is_spec = _is_spec_agent(agent)
     if is_spec:
         # Step 1: Update tasks.md via actualize-tasks.py (spec-agent only)
         script_args = ["--change", change_name, "--agent", agent, "--project-root", str(root)]
