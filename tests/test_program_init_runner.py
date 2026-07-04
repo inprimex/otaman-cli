@@ -223,6 +223,66 @@ class TestStrategyOptIn:
         content = platform.read_text()
         assert "strategy" in content
 
+    def test_strategy_opt_in_true_adds_to_processes_via_builtin_fallback(self, tmp_path, monkeypatch):
+        """Same scenario as above, but with `_find_questions_yaml` forced to
+        return None so `_builtin_questions()` is exercised regardless of
+        whether a sibling `otaman-meta` checkout happens to be present.
+
+        Regression: `_builtin_questions()` was missing the `role_cofounder`
+        follow-up that the otaman-meta YAML has right after `roles`
+        (conditioned on `'cofounder' in roles`). CI never checks out
+        otaman-meta, so it always exercises the builtin fallback — while a
+        full otaman-dev workspace checkout (as used for local development)
+        has the sibling repo and silently uses the real YAML instead,
+        masking the drift. The one-question gap shifted every later answer
+        by one position, eventually feeding the currency_symbol answer
+        ("$") into the currency_decimals (number) question and crashing
+        with `ValueError: invalid literal for int() with base 10: '$'`.
+        This test pins the builtin path so the two question sets can't
+        silently drift apart again undetected.
+        """
+        monkeypatch.setattr(
+            "otaman_cli.onboard.program_init.checkpoint._STATE_DIR_BASE",
+            tmp_path / "state",
+        )
+        from otaman_cli.onboard.program_init import runner as runner_mod
+        monkeypatch.setattr(runner_mod, "_find_questions_yaml", lambda override=None: None)
+
+        import otaman_cli.onboard.program_init.questions as qmod
+        orig = qmod._Q_AVAILABLE
+        qmod._Q_AVAILABLE = False
+
+        responses = iter([
+            "strat-app",          # program_name
+            "Strategy test",      # description
+            str(tmp_path / "strat-app" / "strat-app-specs"),  # primary_repo
+            "",                   # claude_config_dir (optional; blank = absent)
+            "",                   # domains
+            "5",                  # roles → cofounder (5th option in list: CEO CPO CTO BA cofounder)
+            "",                   # role_cofounder (blank)
+            "",                   # processes (no outcomes etc.)
+            "y",                  # strategy_opt_in → Yes (cofounder is present)
+            "USD",                # currency_code
+            "$",                  # currency_symbol
+            "2",                  # currency_decimals
+            "",                   # skill_profile
+            "",                   # git_platform
+            "",                   # secret_backend
+        ])
+        monkeypatch.setattr("builtins.input", lambda _: next(responses, ""))
+
+        try:
+            args = _args(program="strat-app")
+            rc = run_program_init(args)
+        finally:
+            qmod._Q_AVAILABLE = orig
+
+        assert rc == 0
+        platform = tmp_path / "strat-app" / "strat-app-specs" / "platform.yaml"
+        assert platform.is_file()
+        content = platform.read_text()
+        assert "strategy" in content
+
 
 class TestCliWiring:
     """Smoke tests for the CLI argparse wiring."""

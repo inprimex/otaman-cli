@@ -131,6 +131,18 @@ def _builtin_questions() -> list[dict[str, Any]]:
             "default": [],
             "output_mapping": "roles",
         },
+        # Issue: this follow-up existed in the otaman-meta YAML but was
+        # missing here, so the builtin fallback (used whenever no otaman-meta
+        # sibling is checked out, e.g. in CI) silently never captured who
+        # plays the cofounder role, and asked one question fewer than
+        # production — shifting every later answer by one position.
+        {
+            "id": "role_cofounder", "step": "roles", "type": "text",
+            "label": "Who plays the cofounder role?",
+            "default": "",
+            "condition": "'cofounder' in answers.get('roles', [])",
+            "output_mapping": "role_assignments.cofounder",
+        },
         # ── step: processes ──────────────────────────────────────────────────
         {
             "id": "processes", "step": "processes", "type": "checkbox",
