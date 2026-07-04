@@ -359,12 +359,16 @@ class TestMaestroUpgrade:
     def test_non_interactive_without_yes_refuses_before_running_anything(
         self, isolated_registry: Path, tmp_path: Path
     ) -> None:
-        """Subprocess invocation has no TTY attached -- exercises the
-        non-interactive refusal path without needing to mock isatty."""
+        """Explicit empty stdin (input="") forces a real closed pipe rather
+        than whatever the CI runner's inherited stdin happens to be --
+        sys.stdin.isatty() on an inherited handle is not reliably False
+        across platforms/runners, so this is the deterministic way to
+        exercise the non-interactive refusal path."""
         launcher = _make_fake_launcher(tmp_path, "local1", conn_type="local")
         self._run(["launcher", "add", str(launcher)], isolated_registry)
         r = self._run(
-            ["upgrade", "--skip-pull", "--skip-init"], isolated_registry
+            ["upgrade", "--skip-pull", "--skip-init"], isolated_registry,
+            input="",
         )
         assert r.returncode != 0
         assert "--yes" in (r.stdout + r.stderr)
@@ -387,7 +391,8 @@ class TestMaestroUpgrade:
         launcher = _make_fake_launcher(tmp_path, "ssh1", conn_type="ssh")
         self._run(["launcher", "add", str(launcher)], isolated_registry)
         r = self._run(
-            ["upgrade", "--skip-pull", "--skip-init"], isolated_registry
+            ["upgrade", "--skip-pull", "--skip-init"], isolated_registry,
+            input="",
         )
         assert r.returncode != 0  # refused (no --yes, no TTY)
         assert "1 launcher" in r.stdout
