@@ -170,7 +170,7 @@ class TestEndToEnd:
         )
 
         # Run helper directly (cmd_init is heavier; we test the scaffold step)
-        from otaman_cli.main import _scaffold_launcher_after_init
+        from otaman_cli.commands.init import _scaffold_launcher_after_init
 
         _scaffold_launcher_after_init(platform_yaml, yes=True)
 
@@ -269,7 +269,7 @@ class TestAmendmentMetaAgent:
             "  - {name: meta-test-meta-agent, role: orchestration}\n",
             encoding="utf-8",
         )
-        from otaman_cli.main import _scaffold_launcher_after_init
+        from otaman_cli.commands.init import _scaffold_launcher_after_init
         _scaffold_launcher_after_init(platform_yaml, yes=True)
 
         live = yaml.safe_load((tmp_path / "launcher" / "launch-settings.yaml").read_text())
@@ -294,7 +294,7 @@ class TestAmendmentMetaAgent:
             "  - {name: no-meta-specs, path: ., owner: spec-agent}\n",
             encoding="utf-8",
         )
-        from otaman_cli.main import _scaffold_launcher_after_init
+        from otaman_cli.commands.init import _scaffold_launcher_after_init
         _scaffold_launcher_after_init(platform_yaml, yes=True)
 
         live = yaml.safe_load((tmp_path / "launcher" / "launch-settings.yaml").read_text())

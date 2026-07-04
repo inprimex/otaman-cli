@@ -13,7 +13,7 @@ from unittest import mock
 
 import pytest
 
-from otaman_cli import main as cli_main
+from otaman_cli.commands import init as cli_main
 
 
 @pytest.fixture
@@ -69,9 +69,9 @@ def test_init_preflight_picks_up_draft_when_user_accepts(tmp_cwd: Path):
     draft = _draft(tmp_cwd)
     promoted = draft.with_name("platform.yaml")
 
-    with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=True), \
+    with mock.patch("otaman_cli.commands.init.sys.stdin.isatty", return_value=True), \
          mock.patch("builtins.input", return_value="y"), \
-         mock.patch("otaman_cli.main.cmd_init", return_value=0) as mock_init:
+         mock.patch("otaman_cli.commands.init.cmd_init", return_value=0) as mock_init:
         rc = cli_main._init_preflight([])
 
     assert rc == 0
@@ -87,9 +87,9 @@ def test_init_preflight_picks_up_draft_when_user_accepts(tmp_cwd: Path):
 def test_init_preflight_picks_up_draft_user_declines_falls_through(tmp_cwd: Path):
     """User says n → draft is NOT promoted; flow falls back to existing logic."""
     draft = _draft(tmp_cwd)
-    with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=True), \
+    with mock.patch("otaman_cli.commands.init.sys.stdin.isatty", return_value=True), \
          mock.patch("builtins.input", side_effect=["n", "n"]), \
-         mock.patch("otaman_cli.main.cmd_init") as mock_init, \
+         mock.patch("otaman_cli.commands.init.cmd_init") as mock_init, \
          mock.patch("otaman_cli.onboard.program_init.run_program_init") as mock_wizard:
         cli_main._init_preflight([])
     # Draft survives — user declined the promotion
@@ -104,7 +104,7 @@ def test_init_preflight_refuses_to_overwrite_existing_platform_yaml(tmp_cwd: Pat
     existing = draft.with_name("platform.yaml")
     existing.write_text("project: existing\n", encoding="utf-8")
 
-    with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=True), \
+    with mock.patch("otaman_cli.commands.init.sys.stdin.isatty", return_value=True), \
          mock.patch("builtins.input", return_value="y"):
         rc = cli_main._init_preflight([])
     assert rc == 1
@@ -122,7 +122,7 @@ def test_init_preflight_multiple_drafts_lists_them_falls_through(tmp_cwd: Path, 
     _draft(tmp_cwd, "alpha-otaman")
     _draft(tmp_cwd, "beta-otaman")
     # Both prompts (sibling repos? new project?) declined to keep test simple
-    with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=True), \
+    with mock.patch("otaman_cli.commands.init.sys.stdin.isatty", return_value=True), \
          mock.patch("builtins.input", side_effect=["n", "n"]):
         cli_main._init_preflight([])
     output = capsys.readouterr().out
@@ -137,7 +137,7 @@ def test_init_preflight_multiple_drafts_lists_them_falls_through(tmp_cwd: Path, 
 
 def test_init_preflight_non_tty_with_draft_mentions_it_in_error(tmp_cwd: Path, capsys):
     _draft(tmp_cwd)
-    with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=False):
+    with mock.patch("otaman_cli.commands.init.sys.stdin.isatty", return_value=False):
         rc = cli_main._init_preflight([])
     assert rc == 2
     output = capsys.readouterr().out
@@ -146,7 +146,7 @@ def test_init_preflight_non_tty_with_draft_mentions_it_in_error(tmp_cwd: Path, c
 
 
 def test_init_preflight_non_tty_no_draft_unchanged_message(tmp_cwd: Path, capsys):
-    with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=False):
+    with mock.patch("otaman_cli.commands.init.sys.stdin.isatty", return_value=False):
         rc = cli_main._init_preflight([])
     assert rc == 2
     output = capsys.readouterr().out
@@ -162,7 +162,7 @@ def test_existing_platform_yaml_skips_draft_check(tmp_cwd: Path):
     (tmp_cwd / "platform.yaml").write_text("project: x\n")
     _draft(tmp_cwd)  # would normally trigger the prompt
     # _init_preflight returns None (skip preflight) before checking drafts
-    with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=True), \
+    with mock.patch("otaman_cli.commands.init.sys.stdin.isatty", return_value=True), \
          mock.patch("builtins.input", side_effect=AssertionError("must not prompt")):
         rc = cli_main._init_preflight([])
     assert rc is None
@@ -179,9 +179,9 @@ def test_init_preflight_chdir_into_meta_dir_before_cmd_init(tmp_cwd: Path):
     draft = _draft(tmp_cwd, subdir="myprog-otaman")
     expected_cwd_after = draft.parent.resolve()
 
-    with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=True), \
+    with mock.patch("otaman_cli.commands.init.sys.stdin.isatty", return_value=True), \
          mock.patch("builtins.input", return_value="y"), \
-         mock.patch("otaman_cli.main.cmd_init", return_value=0):
+         mock.patch("otaman_cli.commands.init.cmd_init", return_value=0):
         cli_main._init_preflight([])
 
     assert Path(_os.getcwd()).resolve() == expected_cwd_after, (

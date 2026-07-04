@@ -91,7 +91,7 @@ MIGRATED_COMMANDS = (
     "discovery", "handoff", "audit-knowledge", "gate", "presale", "retrospective",
     "propose", "team", "send", "read", "ack", "assign",
     "status", "set-status", "whoami", "iam", "cleanup",
-    "clone", "launcher", "set-agent",
+    "clone", "launcher", "set-agent", "init",
 )
 
 

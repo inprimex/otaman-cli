@@ -193,7 +193,7 @@ def _make_settings_project(tmp_path: Path) -> tuple[Path, Path]:
 
 def test_ensure_settings_default_mode_writes_field(tmp_path: Path) -> None:
     """_ensure_settings_default_mode adds defaultMode:auto to existing settings.local.json."""
-    from otaman_cli.main import _ensure_settings_default_mode
+    from otaman_cli.commands.init import _ensure_settings_default_mode
 
     meta, settings_path = _make_settings_project(tmp_path)
     settings_path.write_text(json.dumps({"permissions": {"allow": ["Bash(git:*)"]}}), encoding="utf-8")
@@ -207,7 +207,7 @@ def test_ensure_settings_default_mode_writes_field(tmp_path: Path) -> None:
 
 
 def test_ensure_settings_default_mode_idempotent(tmp_path: Path) -> None:
-    from otaman_cli.main import _ensure_settings_default_mode
+    from otaman_cli.commands.init import _ensure_settings_default_mode
 
     meta, settings_path = _make_settings_project(tmp_path)
     settings_path.write_text(

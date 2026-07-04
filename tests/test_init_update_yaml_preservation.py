@@ -98,7 +98,7 @@ class TestInitUpdateStructurePreservation:
     """
 
     def test_inserts_otaman_agent_prefix(self, project):
-        from otaman_cli.main import _cmd_init_update
+        from otaman_cli.commands.init import _cmd_init_update
 
         rc = _cmd_init_update()
         assert rc == 0
@@ -108,7 +108,7 @@ class TestInitUpdateStructurePreservation:
         assert "OTAMAN_AGENT=cli-agent claude" in text
 
     def test_preserves_top_level_key_order(self, project):
-        from otaman_cli.main import _cmd_init_update
+        from otaman_cli.commands.init import _cmd_init_update
 
         _cmd_init_update()
 
@@ -123,7 +123,7 @@ class TestInitUpdateStructurePreservation:
         )
 
     def test_preserves_comments(self, project):
-        from otaman_cli.main import _cmd_init_update
+        from otaman_cli.commands.init import _cmd_init_update
 
         _cmd_init_update()
 
@@ -138,7 +138,7 @@ class TestInitUpdateStructurePreservation:
         `- description:` and the launcher sees zero repos. This test catches
         that specific regression.
         """
-        from otaman_cli.main import _cmd_init_update
+        from otaman_cli.commands.init import _cmd_init_update
 
         _cmd_init_update()
 
@@ -153,7 +153,7 @@ class TestInitUpdateStructurePreservation:
         )
 
     def test_preserves_inline_list_style(self, project):
-        from otaman_cli.main import _cmd_init_update
+        from otaman_cli.commands.init import _cmd_init_update
 
         _cmd_init_update()
 
@@ -164,7 +164,7 @@ class TestInitUpdateStructurePreservation:
 
     def test_idempotent(self, project):
         """Running --update twice must not change the file after the first run."""
-        from otaman_cli.main import _cmd_init_update
+        from otaman_cli.commands.init import _cmd_init_update
 
         _cmd_init_update()
         after_first = (project / "platform.yaml").read_text(encoding="utf-8")
