@@ -13,14 +13,9 @@ import re
 from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
+from otaman_cli.commands.status_cluster import cmd_fleet_status
 from otaman_cli.identity import find_project_root, resolve_agent_identity
-from otaman_cli.main import (
-    C,
-    UI,
-    _get_agent_ack_status,
-    _resolve_bus_paths,
-    cmd_fleet_status,
-)
+from otaman_cli.main import C, UI, _get_agent_ack_status, _resolve_bus_paths
 
 
 def cmd_check(args: list[str]) -> int:

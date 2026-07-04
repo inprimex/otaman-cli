@@ -74,6 +74,7 @@ from otaman_cli.commands import approve as _approve  # noqa: E402,F401
 from otaman_cli.commands import blocked as _blocked  # noqa: E402,F401
 from otaman_cli.commands import bus_messaging as _bus_messaging  # noqa: E402,F401
 from otaman_cli.commands import check as _check  # noqa: E402,F401
+from otaman_cli.commands import cleanup as _cleanup  # noqa: E402,F401
 from otaman_cli.commands import complete as _complete  # noqa: E402,F401
 from otaman_cli.commands import doctor as _doctor  # noqa: E402,F401
 from otaman_cli.commands import git_host as _git_host  # noqa: E402,F401
@@ -89,4 +90,5 @@ from otaman_cli.commands import propose_team as _propose_team  # noqa: E402,F401
 from otaman_cli.commands import scan as _scan  # noqa: E402,F401
 from otaman_cli.commands import simple_dispatch as _simple_dispatch  # noqa: E402,F401
 from otaman_cli.commands import solution as _solution  # noqa: E402,F401
+from otaman_cli.commands import status_cluster as _status_cluster  # noqa: E402,F401
 from otaman_cli.commands import upgrade as _upgrade  # noqa: E402,F401
