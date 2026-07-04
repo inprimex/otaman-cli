@@ -17,9 +17,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from otaman_cli.commands.bus_messaging import MESSAGE_TYPES, _OUTCOME_SUBJECT_RE
 from otaman_cli.main import (
-    MESSAGE_TYPES,
-    _OUTCOME_SUBJECT_RE,
     _detect_strategic_agents,
     _ensure_routing_rules,
 )

@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from otaman_cli.commands.bus_messaging import _write_spec_owner
 from otaman_cli.commands.complete import _read_spec_owner
-from otaman_cli.main import _write_spec_owner
 
 
 # ---------------------------------------------------------------------------
