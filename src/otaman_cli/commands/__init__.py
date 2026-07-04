@@ -75,6 +75,7 @@ from otaman_cli.commands import blocked as _blocked  # noqa: E402,F401
 from otaman_cli.commands import bus_messaging as _bus_messaging  # noqa: E402,F401
 from otaman_cli.commands import check as _check  # noqa: E402,F401
 from otaman_cli.commands import cleanup as _cleanup  # noqa: E402,F401
+from otaman_cli.commands import clone_launcher_setagent as _clone_launcher_setagent  # noqa: E402,F401
 from otaman_cli.commands import complete as _complete  # noqa: E402,F401
 from otaman_cli.commands import doctor as _doctor  # noqa: E402,F401
 from otaman_cli.commands import git_host as _git_host  # noqa: E402,F401

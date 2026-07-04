@@ -1250,76 +1250,6 @@ def cmd_init(args: list[str], dry_run: bool = False, skip_doctor: bool = False, 
     return cmd_doctor([str(config_path.parent)])
 
 
-def cmd_clone(args: list[str], target: str = "") -> int:
-    """Clone all project repos from a otaman configuration."""
-    if not args:
-        UI.error("Source required (local path, git URL, or user@host:path)")
-        UI.muted("Usage: otaman clone <source> [--target <dir>]")
-        UI.muted("  otaman clone git@github.com:org/project-otaman.git")
-        UI.muted("  otaman clone user@server:/path/to/otaman/")
-        UI.muted("  otaman clone /local/path/to/platform.yaml")
-        return 1
-
-    UI.header("Otaman Clone")
-
-    source = args[0]
-    UI.kv("Source", source)
-    if target:
-        UI.kv("Target", target)
-    print()
-
-    script_args = [source]
-    if target:
-        script_args.extend(["--target", target])
-
-    result = run_script("clone-project.py", *script_args, capture=True, stream_stderr=True)
-
-    import json
-    try:
-        report = json.loads(result.stdout)
-    except (json.JSONDecodeError, ValueError):
-        if result.returncode != 0:
-            UI.error(result.stderr or result.stdout or "Clone failed")
-        else:
-            print(result.stdout)
-        return result.returncode
-
-    # Display results
-    cloned = report.get("cloned", [])
-    skipped = report.get("skipped", [])
-    failed = report.get("failed", [])
-
-    if cloned:
-        UI.subheader(f"Cloned ({len(cloned)}):")
-        for name in cloned:
-            UI.ok(name)
-    if skipped:
-        UI.subheader(f"Already existed ({len(skipped)}):")
-        for name in skipped:
-            UI.info(name)
-    if failed:
-        UI.subheader(f"Failed ({len(failed)}):")
-        for f_ in failed:
-            UI.error(f'{f_["name"]}: {f_.get("error", "unknown")}')
-
-    # Doctor summary
-    doctor = report.get("doctor", {})
-    if doctor:
-        p, w, f_ = doctor.get("passed", 0), doctor.get("warned", 0), doctor.get("failed", 0)
-        print()
-        if f_ == 0:
-            UI.ok(f"Environment: {p} checks passed, {w} warnings")
-        else:
-            UI.warn(f"Environment: {p} passed, {w} warnings, {f_} failed — run otaman doctor for details")
-
-    maestro_dir = report.get("maestro_dir", "")
-    print()
-    UI.kv("Otaman folder", maestro_dir)
-    UI.muted("Next: launch agents or run otaman doctor for full environment check")
-
-    return 1 if failed else 0
-
-
 def _resolve_bus_paths(root: Path) -> tuple[Path, Path]:
     """Resolve bus active dir and acks dir from project root."""
     try:
@@ -1528,123 +1458,6 @@ def _normalize_ce_platform_yaml_for_validation(config_path: Path) -> tuple[Path,
     return tmp_path, hints
 
 
-def cmd_launcher(args: list[str]) -> int:
-    """Launcher management: scaffold, list, add, remove, register.
-
-    Subcommands:
-      otaman launcher list              -- show registered launchers
-      otaman launcher add <path>         -- register manually
-      otaman launcher remove <path>      -- unregister
-      otaman launcher register <path>    -- silent register (used by launcher hooks)
-      otaman launcher <target> [opts]    -- scaffold a new launcher folder
-    """
-    if not args:
-        UI.error("subcommand or target folder required")
-        UI.muted("Usage:")
-        UI.muted("  otaman launcher list                    -- show registered launchers")
-        UI.muted("  otaman launcher add <path>              -- register manually")
-        UI.muted("  otaman launcher remove <path>           -- unregister")
-        UI.muted("  otaman launcher register <path>         -- silent register (hook use)")
-        UI.muted("  otaman launcher <target> [...flags]      -- scaffold a new launcher folder")
-        return 1
-
-    sub = args[0].lower()
-
-    # Registry-management subcommands
-    if sub in ("list", "add", "remove", "register"):
-        try:
-            from otaman_cli import _launchers_registry as reg  # type: ignore
-        except ImportError as e:
-            UI.error(f"Failed to load registry helper: {e}")
-            return 1
-
-        if sub == "list":
-            entries = reg.list_entries()
-            if not entries:
-                UI.muted("No launchers registered. They auto-register on first launch, or:")
-                UI.muted("  otaman launcher add <path>")
-                return 0
-            UI.header(f"Registered Launchers ({len(entries)})")
-            for entry in entries:
-                exists = Path(entry["path"]).is_dir()
-                marker = "" if exists else f" {C.RED}[missing]{C.RESET}"
-                last_used = entry.get("last_used", "?")
-                print(f"  {entry['path']}{marker}")
-                UI.muted(f"    last used: {last_used}")
-            return 0
-
-        if sub in ("add", "register"):
-            if len(args) < 2:
-                UI.error("path required")
-                UI.muted(f"Usage: otaman launcher {sub} <path>")
-                return 1
-            path = Path(args[1]).expanduser()
-            if sub == "add" and not path.is_dir():
-                UI.error(f"Not a directory: {path}")
-                return 1
-            try:
-                was_new, entry = reg.register(path)
-            except Exception as e:
-                UI.error(f"Failed to register: {e}")
-                return 1
-            if sub == "register":
-                # Silent mode for launcher-hook use; emit nothing on success.
-                return 0
-            if was_new:
-                UI.ok(f"Registered: {entry['path']}")
-            else:
-                UI.muted(f"Already registered (last_used updated): {entry['path']}")
-            return 0
-
-        if sub == "remove":
-            if len(args) < 2:
-                UI.error("path required")
-                UI.muted("Usage: otaman launcher remove <path>")
-                return 1
-            try:
-                removed = reg.unregister(args[1])
-            except Exception as e:
-                UI.error(f"Failed to unregister: {e}")
-                return 1
-            if removed:
-                UI.ok(f"Unregistered: {args[1]}")
-                return 0
-            UI.warn(f"Not in registry: {args[1]}")
-            return 1
-
-    # Default: scaffold a new launcher folder.
-    UI.header("Otaman Launcher Scaffold")
-    try:
-        result = run_script("scaffold-launcher.py", *args)
-        return result.returncode
-    except SystemExit as e:
-        return int(e.code) if e.code is not None else 1
-
-
-def cmd_set_agent(args: list[str]) -> int:
-    """DEPRECATED: otaman set-agent no longer mutates any file.
-
-    Identity is now resolved from $OTAMAN_AGENT env var or the .otaman
-    'agent:' field in the CWD (written by 'otaman init --update').
-    This subcommand exits non-zero and prints migration guidance.
-    """
-    name = args[0] if args else "<name>"
-    print(
-        "DEPRECATED: 'otaman set-agent' no longer mutates global state.\n"
-        "Identity now resolves from $OTAMAN_AGENT or the .otaman 'agent:' field in CWD.\n"
-        "\n"
-        "To override identity in the current shell:\n"
-        f"  export OTAMAN_AGENT={name}             # direct\n"
-        f"  otaman-agent {name}                    # shell function (install via `otaman init --shell`)\n"
-        f"  OTAMAN_AGENT={name} otaman <cmd>       # one-shot\n"
-        "\n"
-        "To make identity automatic, run from inside a repo whose .otaman has 'agent: <name>'.\n"
-        "Run 'otaman init --update' to write agent: fields to all repos.",
-        file=sys.stderr,
-    )
-    return 1
-
-
 def cmd_help() -> int:
     """Show help."""
     print(f"""
@@ -1814,7 +1627,6 @@ def main() -> int:
     update = False
     dry_run = False
     skip_doctor = False
-    maestro_dir: str | None = None
     shell_flag = False
     yes_flag = False
     positional: list[str] = []
@@ -1836,9 +1648,6 @@ def main() -> int:
         elif rest[i] == "--skip-doctor":
             skip_doctor = True
             i += 1
-        elif rest[i] in ("--maestro-dir", "--otaman-dir", "--target") and i + 1 < len(rest):  # legacy: backward-compat arg
-            maestro_dir = rest[i + 1]
-            i += 2
         elif rest[i].startswith("-"):
             i += 1  # skip unknown flags
         else:
@@ -1847,9 +1656,6 @@ def main() -> int:
 
     commands = {
         "init": lambda: cmd_init(positional, dry_run=dry_run, skip_doctor=skip_doctor, update=update, shell=shell_flag, yes=yes_flag),
-        "clone": lambda: cmd_clone(positional, target=maestro_dir or ""),
-        "launcher": lambda: cmd_launcher(rest),
-        "set-agent": lambda: cmd_set_agent(positional),
     }
 
     if command not in commands:
