@@ -568,13 +568,13 @@ def cmd_help() -> int:
   {C.GREEN}scan{C.RESET} [path] [--otaman-dir D]    Scan repos, create otaman folder with draft config
   {C.GREEN}init{C.RESET} [config]                 Initialize an otaman project. Creates platform.yaml if none exists.
   {C.GREEN}init companion-repos{C.RESET} [opts]     Scaffold business/strategy companion repos (CE local; no bridge)
-  {C.GREEN}migrate{C.RESET} [name]                Migrate legacy layout to dedicated otaman folder
+  {C.GREEN}migrate{C.RESET} [name] [--dry-run] [--yes]   Migrate legacy layout to dedicated otaman folder
   {C.GREEN}clone{C.RESET} <source> [--target D]    Clone all repos from otaman config (git URL, SSH, local)
   {C.GREEN}doctor{C.RESET}                        Check environment readiness (git, runtimes, CLI, tmux, MCP)
   {C.GREEN}validate{C.RESET} [config]             Validate platform.yaml against the schema
   {C.GREEN}validate-messages{C.RESET} [file]      Validate bus message files
   {C.GREEN}install-cli{C.RESET} [--prefix DIR]     Install ``otaman`` shim on PATH (so launchers find it)
-  {C.GREEN}upgrade{C.RESET} [--dry-run]            Walk launcher registry: git pull + otaman init each
+  {C.GREEN}upgrade{C.RESET} [--dry-run] [--yes]    Walk launcher registry: git pull + otaman init each
   {C.GREEN}compliance{C.RESET} [--format F]        Generate compliance audit report (HIPAA / ISO / GDPR)
 
 {C.BOLD}Bus & messages:{C.RESET}
@@ -658,7 +658,8 @@ def cmd_help() -> int:
   -d, --desc TEXT            Description for propose / team commands
   --tasks "2.1,3.1-3.5"     Task IDs to mark complete (for complete)
   --all                      Mark all tasks complete (for complete)
-  --dry-run                  Preview without making changes (cleanup, upgrade)
+  --dry-run                  Preview without making changes (cleanup, upgrade, migrate, init --update)
+  --yes, -y                  Skip confirmation prompt in non-interactive contexts (migrate, upgrade)
   --read / --resolved        Ack status (resolved is default)
   --launcher PATH            Restrict upgrade to one registered launcher
 

@@ -173,3 +173,51 @@ class TestInitUpdateStructurePreservation:
         after_second = (project / "platform.yaml").read_text(encoding="utf-8")
 
         assert after_first == after_second
+
+
+class TestInitUpdateDryRun:
+    """destructive-command-safety task 1.3 — `otaman init --update --dry-run`.
+
+    `--dry-run` was parsed by `cmd_init` but never passed into
+    `_cmd_init_update()` -- the flag was a silent no-op. Regression
+    coverage for the fix: `dry_run=True` must produce zero filesystem
+    mutations on every code path (per-repo `.otaman` marker, platform.yaml
+    launch-command patch, meta `.otaman` marker), not just the top-level
+    function.
+    """
+
+    def test_dry_run_writes_nothing(self, project):
+        from otaman_cli.commands.init import _cmd_init_update
+
+        platform_yaml = project / "platform.yaml"
+        before = platform_yaml.read_text(encoding="utf-8")
+        before_mtime = platform_yaml.stat().st_mtime
+
+        rc = _cmd_init_update(dry_run=True)
+
+        assert rc == 0
+        assert platform_yaml.read_text(encoding="utf-8") == before
+        assert platform_yaml.stat().st_mtime == before_mtime
+        # No .otaman marker created in either sibling repo dir
+        assert not (project.parent / "sample-core" / ".otaman").exists()
+        assert not (project.parent / "sample-cli" / ".otaman").exists()
+        # No agent: field added to the meta .otaman marker either
+        assert "agent:" not in (project / ".otaman").read_text(encoding="utf-8")
+
+    def test_dry_run_reports_planned_changes(self, project, capsys):
+        from otaman_cli.commands.init import _cmd_init_update
+
+        _cmd_init_update(dry_run=True)
+        output = capsys.readouterr().out
+        assert "dry-run" in output.lower()
+        assert "would" in output.lower()
+
+    def test_dry_run_then_real_run_both_succeed(self, project):
+        """Dry-run must not leave the project in a state that breaks a real
+        (non-dry-run) run immediately after."""
+        from otaman_cli.commands.init import _cmd_init_update
+
+        assert _cmd_init_update(dry_run=True) == 0
+        assert _cmd_init_update() == 0
+        # The real run actually wrote the marker this time
+        assert (project.parent / "sample-core" / ".otaman").is_file()

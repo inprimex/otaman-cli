@@ -336,8 +336,18 @@ def _ensure_routing_rules(platform_yaml: Path) -> int:
         return 0
 
 
-def _cmd_init_update() -> int:
-    """Patch .otaman agent: fields + regenerate launch commands across all repos (--update, D5)."""
+def _cmd_init_update(dry_run: bool = False) -> int:
+    """Patch .otaman agent: fields + regenerate launch commands across all repos (--update, D5).
+
+    destructive-command-safety task 1.3: dry_run previously reached
+    cmd_init's own flag parsing but was never passed into this function —
+    the flag was silently discarded. Now threaded through every mutating
+    code path below (each .otaman marker write, the platform.yaml launch-
+    command patch, the meta marker write, and the two nested helper calls
+    _ensure_settings_default_mode/_ensure_routing_rules), not just the
+    top-level function -- a --dry-run that reaches only the entrypoint but
+    not a called mutation helper is the exact failure mode being fixed.
+    """
     root = find_project_root()
     if not root:
         UI.error("Not in an otaman project")
@@ -355,7 +365,7 @@ def _cmd_init_update() -> int:
         UI.error(f"Failed to read platform.yaml: {e}")
         return 2
 
-    UI.header("Otaman Init --update")
+    UI.header("Otaman Init --update" + (" (dry-run)" if dry_run else ""))
     updated = 0
     skipped = 0
     launch_updated = 0
@@ -396,8 +406,11 @@ def _cmd_init_update() -> int:
             agent_line = ("agent: " + owner + chr(10)) if owner else ""
             new_content = existing.rstrip(chr(10)) + chr(10) + agent_line
 
-        marker.write_text(new_content, encoding="utf-8")
-        UI.ok(name + "/.otaman updated" + ((" (agent: " + owner + ")") if owner else ""))
+        if dry_run:
+            UI.muted(f"  would update {name}/.otaman" + ((" (agent: " + owner + ")") if owner else ""))
+        else:
+            marker.write_text(new_content, encoding="utf-8")
+            UI.ok(name + "/.otaman updated" + ((" (agent: " + owner + ")") if owner else ""))
         updated += 1
 
         # Count repos whose launch commands would change (D4).
@@ -415,52 +428,67 @@ def _cmd_init_update() -> int:
     # track current repo's owner via `  owner: <name>` markers; any line in
     # the same block containing `claude` gets the OTAMAN_AGENT prefix applied.
     if launch_updated > 0:
-        try:
-            original_text = platform_yaml.read_text(encoding="utf-8")
-            owner_line_pat = re.compile(r"^\s+owner:\s*(\S+)")
-            current_owner = None
-            new_lines = []
-            for line in original_text.splitlines(keepends=True):
-                m = owner_line_pat.match(line)
-                if m:
-                    current_owner = m.group(1)
-                if current_owner and "claude" in line:
-                    line = _inject_agent_env_into_command(line, current_owner)
-                new_lines.append(line)
-            platform_yaml.write_text("".join(new_lines), encoding="utf-8")
-            UI.ok(f"platform.yaml updated ({launch_updated} repo(s) launch commands patched)")
-        except Exception as e:
-            UI.warn(f"Failed to write platform.yaml: {e}")
+        if dry_run:
+            UI.muted(f"  would update platform.yaml ({launch_updated} repo(s) launch commands patched)")
+        else:
+            try:
+                original_text = platform_yaml.read_text(encoding="utf-8")
+                owner_line_pat = re.compile(r"^\s+owner:\s*(\S+)")
+                current_owner = None
+                new_lines = []
+                for line in original_text.splitlines(keepends=True):
+                    m = owner_line_pat.match(line)
+                    if m:
+                        current_owner = m.group(1)
+                    if current_owner and "claude" in line:
+                        line = _inject_agent_env_into_command(line, current_owner)
+                    new_lines.append(line)
+                platform_yaml.write_text("".join(new_lines), encoding="utf-8")
+                UI.ok(f"platform.yaml updated ({launch_updated} repo(s) launch commands patched)")
+            except Exception as e:
+                UI.warn(f"Failed to write platform.yaml: {e}")
 
     meta_marker = root / ".otaman"
     if meta_marker.is_file():
         existing = meta_marker.read_text(encoding="utf-8")
         has_agent = any(l.strip().startswith("agent:") for l in existing.splitlines())
         if not has_agent:
-            meta_marker.write_text(existing.rstrip(chr(10)) + chr(10) + "agent: human" + chr(10), encoding="utf-8")
-            UI.ok("otaman-meta/.otaman updated (agent: human)")
+            if dry_run:
+                UI.muted("  would update otaman-meta/.otaman (agent: human)")
+            else:
+                meta_marker.write_text(existing.rstrip(chr(10)) + chr(10) + "agent: human" + chr(10), encoding="utf-8")
+                UI.ok("otaman-meta/.otaman updated (agent: human)")
             updated += 1
         else:
             UI.muted("otaman-meta/.otaman already has agent: field")
     elif meta_marker.is_dir():
         # Directory-shape .otaman (otaman-meta legacy case): write .otaman/agent
-        agent_file = meta_marker / "agent"
-        agent_file.write_text("human" + chr(10), encoding="utf-8")
-        UI.ok("otaman-meta/.otaman/agent written (agent: human)")
+        if dry_run:
+            UI.muted("  would write otaman-meta/.otaman/agent (agent: human)")
+        else:
+            agent_file = meta_marker / "agent"
+            agent_file.write_text("human" + chr(10), encoding="utf-8")
+            UI.ok("otaman-meta/.otaman/agent written (agent: human)")
         updated += 1
     else:
         UI.muted("otaman-meta/.otaman not found")
 
-    # Ensure defaultMode: auto in each repo's settings.local.json
-    _ensure_settings_default_mode(root, config)
+    if dry_run:
+        UI.muted("  would check .claude/settings.local.json defaultMode across repos")
+        UI.muted("  would check platform.yaml bus.routing_rules defaults")
+    else:
+        # Ensure defaultMode: auto in each repo's settings.local.json
+        _ensure_settings_default_mode(root, config)
 
-    # bus-cc-routing task 2.5 — ensure routing_rules defaults exist in platform.yaml
-    if _ensure_routing_rules(platform_yaml):
-        UI.ok("platform.yaml: bus.routing_rules defaults added")
+        # bus-cc-routing task 2.5 — ensure routing_rules defaults exist in platform.yaml
+        if _ensure_routing_rules(platform_yaml):
+            UI.ok("platform.yaml: bus.routing_rules defaults added")
 
     print()
     UI.kv("Updated", str(updated))
     UI.kv("Skipped", str(skipped))
+    if dry_run:
+        UI.warn("(dry run — no changes made)")
     return 0
 
 
@@ -882,7 +910,7 @@ def cmd_init(args: list[str]) -> int:
 
     # --update mode: patch .otaman agent: fields across all repos and exit
     if update:
-        return _cmd_init_update()
+        return _cmd_init_update(dry_run=dry_run)
 
     # Pre-flight: smart-init routing when no platform.yaml present (task 1.1, 1.2)
     preflight_rc = _init_preflight(args)

@@ -353,6 +353,62 @@ class TestMaestroUpgrade:
         assert "git pull" not in r.stdout
         assert "bash -l -c 'otaman init'" in r.stdout
 
+    # -----------------------------------------------------------------
+    # destructive-command-safety task 1.4 — batch-level confirm gate
+
+    def test_non_interactive_without_yes_refuses_before_running_anything(
+        self, isolated_registry: Path, tmp_path: Path
+    ) -> None:
+        """Explicit empty stdin (input="") forces a real closed pipe rather
+        than whatever the CI runner's inherited stdin happens to be --
+        sys.stdin.isatty() on an inherited handle is not reliably False
+        across platforms/runners, so this is the deterministic way to
+        exercise the non-interactive refusal path."""
+        launcher = _make_fake_launcher(tmp_path, "local1", conn_type="local")
+        self._run(["launcher", "add", str(launcher)], isolated_registry)
+        r = self._run(
+            ["upgrade", "--skip-pull", "--skip-init"], isolated_registry,
+            input="",
+        )
+        assert r.returncode != 0
+        assert "--yes" in (r.stdout + r.stderr)
+        assert "succeeded" not in r.stdout  # per-launcher loop never ran
+
+    def test_yes_flag_bypasses_batch_confirm(
+        self, isolated_registry: Path, tmp_path: Path
+    ) -> None:
+        launcher = _make_fake_launcher(tmp_path, "local1", conn_type="local")
+        self._run(["launcher", "add", str(launcher)], isolated_registry)
+        r = self._run(
+            ["upgrade", "--yes", "--skip-pull", "--skip-init"], isolated_registry
+        )
+        assert r.returncode == 0
+        assert "1 succeeded" in r.stdout
+
+    def test_batch_summary_reports_launcher_and_host_counts(
+        self, isolated_registry: Path, tmp_path: Path
+    ) -> None:
+        launcher = _make_fake_launcher(tmp_path, "ssh1", conn_type="ssh")
+        self._run(["launcher", "add", str(launcher)], isolated_registry)
+        r = self._run(
+            ["upgrade", "--skip-pull", "--skip-init"], isolated_registry,
+            input="",
+        )
+        assert r.returncode != 0  # refused (no --yes, no TTY)
+        assert "1 launcher" in r.stdout
+        assert "1 host" in r.stdout
+
+    def test_dry_run_skips_the_confirm_gate_entirely(
+        self, isolated_registry: Path, tmp_path: Path
+    ) -> None:
+        """--dry-run already makes zero mutations -- it must not additionally
+        require --yes."""
+        launcher = _make_fake_launcher(tmp_path, "local1", conn_type="local")
+        self._run(["launcher", "add", str(launcher)], isolated_registry)
+        r = self._run(["upgrade", "--dry-run"], isolated_registry)
+        assert r.returncode == 0
+        assert "--yes" not in r.stdout
+
     def test_dry_run_skip_init(
         self, isolated_registry: Path, tmp_path: Path
     ) -> None:
