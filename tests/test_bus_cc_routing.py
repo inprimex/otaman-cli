@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from otaman_cli.main import _ensure_routing_rules
+from otaman_cli.commands.init import _ensure_routing_rules
 from otaman_cli.onboard.program_init.platform_gen import write_platform_yaml
 
 

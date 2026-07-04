@@ -18,10 +18,7 @@ import pytest
 import yaml
 
 from otaman_cli.commands.bus_messaging import MESSAGE_TYPES, _OUTCOME_SUBJECT_RE
-from otaman_cli.main import (
-    _detect_strategic_agents,
-    _ensure_routing_rules,
-)
+from otaman_cli.commands.init import _detect_strategic_agents, _ensure_routing_rules
 
 
 # ---------------------------------------------------------------- task 3.1

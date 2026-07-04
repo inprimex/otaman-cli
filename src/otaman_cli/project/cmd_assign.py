@@ -120,7 +120,7 @@ def cmd_project_assign(
     # this step, downstream identity resolution from inside the assigned
     # repo would fall back to the deprecated current-agent file.
     import os as _os
-    from otaman_cli.main import _cmd_init_update
+    from otaman_cli.commands.init import _cmd_init_update
     prev_cwd = _os.getcwd()
     try:
         _os.chdir(root)

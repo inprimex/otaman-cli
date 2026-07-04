@@ -666,7 +666,7 @@ def run_program_init(args: argparse.Namespace) -> int:
     # repo to customize connection mode / agent set / tmux layout.
     if not getattr(args, "dry_run", False):
         try:
-            from otaman_cli.main import _scaffold_launcher_after_init
+            from otaman_cli.commands.init import _scaffold_launcher_after_init
             _scaffold_launcher_after_init(platform_out, yes=True)
         except Exception as _launcher_exc:
             _note(f"Launcher scaffold skipped: {_launcher_exc}")

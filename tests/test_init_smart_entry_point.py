@@ -17,7 +17,7 @@ from unittest import mock
 
 import pytest
 
-from otaman_cli import main as cli_main
+from otaman_cli.commands import init as cli_main
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ def tmp_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_non_tty_stdin_prints_error_and_exits_2(tmp_cwd: Path, capsys) -> None:
-    with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=False):
+    with mock.patch("otaman_cli.commands.init.sys.stdin.isatty", return_value=False):
         rc = cli_main._init_preflight([])
     assert rc == 2
     captured = capsys.readouterr()
@@ -41,7 +41,7 @@ def test_non_tty_stdin_prints_error_and_exits_2(tmp_cwd: Path, capsys) -> None:
 
 
 def test_non_tty_does_not_call_wizard(tmp_cwd: Path) -> None:
-    with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=False), \
+    with mock.patch("otaman_cli.commands.init.sys.stdin.isatty", return_value=False), \
          mock.patch("otaman_cli.onboard.program_init.run_program_init") as mock_wizard:
         cli_main._init_preflight([])
     mock_wizard.assert_not_called()
@@ -52,7 +52,7 @@ def test_non_tty_does_not_call_wizard(tmp_cwd: Path) -> None:
 
 
 def test_tty_no_repos_user_accepts_wizard_called(tmp_cwd: Path) -> None:
-    with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=True), \
+    with mock.patch("otaman_cli.commands.init.sys.stdin.isatty", return_value=True), \
          mock.patch("builtins.input", return_value=""), \
          mock.patch("otaman_cli.onboard.program_init.run_program_init", return_value=0) as mock_wizard:
         rc = cli_main._init_preflight([])
@@ -68,7 +68,7 @@ def test_tty_no_repos_user_accepts_wizard_called(tmp_cwd: Path) -> None:
 
 
 def test_tty_no_repos_user_declines_wizard_not_called(tmp_cwd: Path) -> None:
-    with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=True), \
+    with mock.patch("otaman_cli.commands.init.sys.stdin.isatty", return_value=True), \
          mock.patch("builtins.input", return_value="n"), \
          mock.patch("otaman_cli.onboard.program_init.run_program_init") as mock_wizard:
         rc = cli_main._init_preflight([])
@@ -92,7 +92,7 @@ def test_sibling_repos_user_accepts_calls_scan(tmp_path: Path, monkeypatch: pyte
     monkeypatch.chdir(cwd)
     monkeypatch.delenv("OTAMAN_INIT_CWD_IS_GIT", raising=False)
 
-    with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=True), \
+    with mock.patch("otaman_cli.commands.init.sys.stdin.isatty", return_value=True), \
          mock.patch("builtins.input", return_value="y"), \
          mock.patch("otaman_cli.commands.scan.cmd_scan", return_value=0) as mock_scan:
         rc = cli_main._init_preflight([])
@@ -118,7 +118,7 @@ def test_sibling_repos_user_declines_falls_through_to_wizard(
     monkeypatch.delenv("OTAMAN_INIT_CWD_IS_GIT", raising=False)
 
     # Two inputs: "n" to scan prompt, then "y" to wizard prompt
-    with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=True), \
+    with mock.patch("otaman_cli.commands.init.sys.stdin.isatty", return_value=True), \
          mock.patch("builtins.input", side_effect=["n", "y"]), \
          mock.patch("otaman_cli.commands.scan.cmd_scan") as mock_scan, \
          mock.patch("otaman_cli.onboard.program_init.run_program_init", return_value=0) as mock_wizard:
@@ -161,7 +161,7 @@ def test_cwd_is_git_sets_env_var_when_calling_wizard(tmp_path: Path, monkeypatch
         captured_env["OTAMAN_INIT_CWD_IS_GIT"] = os.environ.get("OTAMAN_INIT_CWD_IS_GIT", "")
         return 0
 
-    with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=True), \
+    with mock.patch("otaman_cli.commands.init.sys.stdin.isatty", return_value=True), \
          mock.patch("builtins.input", return_value="y"), \
          mock.patch("otaman_cli.onboard.program_init.run_program_init", side_effect=_capture_env):
         cli_main._init_preflight([])
@@ -178,7 +178,7 @@ def test_cwd_not_git_does_not_set_env_var(tmp_cwd: Path) -> None:
         captured_env["val"] = os.environ.get("OTAMAN_INIT_CWD_IS_GIT", "<unset>")
         return 0
 
-    with mock.patch("otaman_cli.main.sys.stdin.isatty", return_value=True), \
+    with mock.patch("otaman_cli.commands.init.sys.stdin.isatty", return_value=True), \
          mock.patch("builtins.input", return_value="y"), \
          mock.patch("otaman_cli.onboard.program_init.run_program_init", side_effect=_capture_env):
         cli_main._init_preflight([])
@@ -253,18 +253,18 @@ def test_update_flag_does_not_invoke_preflight(tmp_cwd: Path) -> None:
     """`otaman init --update` early-returns at the top of cmd_init; pre-flight
     never runs. We verify by patching _cmd_init_update and _init_preflight.
     """
-    with mock.patch("otaman_cli.main._cmd_init_update", return_value=0) as mock_update, \
-         mock.patch("otaman_cli.main._init_preflight") as mock_pre:
-        rc = cli_main.cmd_init([], update=True)
+    with mock.patch("otaman_cli.commands.init._cmd_init_update", return_value=0) as mock_update, \
+         mock.patch("otaman_cli.commands.init._init_preflight") as mock_pre:
+        rc = cli_main.cmd_init(["--update"])
     assert rc == 0
     mock_update.assert_called_once()
     mock_pre.assert_not_called()
 
 
 def test_shell_flag_does_not_invoke_preflight(tmp_cwd: Path) -> None:
-    with mock.patch("otaman_cli.main._cmd_init_shell", return_value=0) as mock_shell, \
-         mock.patch("otaman_cli.main._init_preflight") as mock_pre:
-        rc = cli_main.cmd_init([], shell=True)
+    with mock.patch("otaman_cli.commands.init._cmd_init_shell", return_value=0) as mock_shell, \
+         mock.patch("otaman_cli.commands.init._init_preflight") as mock_pre:
+        rc = cli_main.cmd_init(["--shell"])
     assert rc == 0
     mock_shell.assert_called_once()
     mock_pre.assert_not_called()
