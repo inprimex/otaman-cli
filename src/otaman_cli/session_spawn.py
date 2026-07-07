@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -34,6 +35,52 @@ from pathlib import Path
 
 DEFAULT_TOKEN_CACHE = Path.home() / ".otaman" / "token.cache"
 DEFAULT_RUNNER_ENDPOINT = Path.home() / ".otaman" / "runner.endpoint"
+
+# F032 (security GAP finding, 2026-07-04, plan confirmed by Roman 2026-07-07)
+# Part B — the runner bearer token must not travel plaintext HTTP to a
+# non-loopback host. otaman-runner has no TLS support today (tracked
+# separately with runner-agent); this is the CLI-side fail-closed guard,
+# safe to ship regardless of when/whether that lands.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+_INSECURE_RUNNER_ESCAPE_HATCH = "OTAMAN_ALLOW_INSECURE_RUNNER"
+
+
+def _validate_spawn_target(host: str, scheme: str) -> str | None:
+    """Return an error message if (host, scheme) is unsafe to send the
+    runner bearer token to, else None.
+
+    https:// -- always fine (once otaman-runner supports it).
+    http:// + loopback -- fine, the common case: the runner defaults to
+        binding 127.0.0.1, so this traffic never leaves the machine.
+    http:// + non-loopback + OTAMAN_ALLOW_INSECURE_RUNNER set -- allowed,
+        but warns loudly on every use.
+    http:// + non-loopback + no escape hatch -- refused (fail closed) --
+        `--host` on the runner side is operator-overridable for the
+        multi-user "spawn as logged-in user" topology this command exists
+        for, so non-loopback is a real, not hypothetical, deployment shape.
+    anything else -- refused.
+    """
+    if scheme == "https":
+        return None
+    if scheme != "http":
+        return f"Unknown runner endpoint scheme {scheme!r} (expected http or https)"
+    if host in _LOOPBACK_HOSTS:
+        return None
+    if os.environ.get(_INSECURE_RUNNER_ESCAPE_HATCH, "").strip():
+        print(
+            f"WARNING: runner endpoint {host!r} is non-loopback and uses plaintext "
+            f"http:// — the runner bearer token travels unencrypted. Allowed only "
+            f"because {_INSECURE_RUNNER_ESCAPE_HATCH} is set.",
+            file=sys.stderr,
+        )
+        return None
+    return (
+        f"Refusing to send the runner token to non-loopback host {host!r} over "
+        f"plaintext http:// — it would travel unencrypted. Set "
+        f"{_INSECURE_RUNNER_ESCAPE_HATCH}=1 if you've accepted the risk, or "
+        f"configure scheme=https in the runner endpoint file once the runner "
+        f"supports TLS."
+    )
 
 
 def jwt_sub(token: str):
@@ -71,13 +118,19 @@ def load_token(path: Path):
 
 
 def load_runner_endpoint(path: Path):
-    """Return (host, port, token) from runner endpoint file, or None."""
+    """Return (host, port, token, scheme) from runner endpoint file, or None.
+
+    `scheme` (F032 Part B) defaults to `"http"` when the endpoint file
+    doesn't declare one — backward compatible with existing otaman-runner
+    deployments, none of which support TLS yet.
+    """
     if not path.is_file():
         return None
     text = path.read_text(encoding="utf-8")
     host = "127.0.0.1"
     port = None
     token = None
+    scheme = "http"
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -90,9 +143,11 @@ def load_runner_endpoint(path: Path):
             port = int(v)
         elif k == "token":
             token = v
+        elif k == "scheme":
+            scheme = v
     if port is None or token is None:
         return None
-    return host, port, token
+    return host, port, token, scheme
 
 
 def build_spawn_body(args, user_id) -> dict:
@@ -122,9 +177,9 @@ def build_spawn_body(args, user_id) -> dict:
     return body
 
 
-def post_spawn(*, host, port, token, body, opener=None, timeout=30.0):
+def post_spawn(*, host, port, token, body, scheme="http", opener=None, timeout=30.0):
     """POST to runner /spawn. Returns (status_code, response_dict)."""
-    url = f"http://{host}:{port}/spawn"
+    url = f"{scheme}://{host}:{port}/spawn"
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         url, data=data, method="POST",
@@ -197,11 +252,17 @@ def main(argv=None) -> int:
             file=sys.stderr,
         )
         return 1
-    host, port, runner_token = ep
+    host, port, runner_token, scheme = ep
+
+    # F032 Part B — fail closed before sending the bearer token anywhere.
+    unsafe = _validate_spawn_target(host, scheme)
+    if unsafe:
+        print(f"ERROR: {unsafe}", file=sys.stderr)
+        return 1
 
     body = build_spawn_body(args, user_id)
     status, resp = post_spawn(
-        host=host, port=port, token=runner_token, body=body,
+        host=host, port=port, token=runner_token, body=body, scheme=scheme,
     )
 
     if status != 200:

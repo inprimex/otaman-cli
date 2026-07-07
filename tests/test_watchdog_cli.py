@@ -144,6 +144,22 @@ class TestCallWatchdog:
         with pytest.raises(ValueError):
             call_watchdog("dance", endpoint_path=tmp_path / "x")
 
+    def test_non_loopback_http_endpoint_refused(self, tmp_path: Path, monkeypatch):
+        """F032 Part B — same bearer-token-over-plaintext-HTTP guard as
+        session_spawn.post_spawn; this hits the same endpoint file/token."""
+        monkeypatch.delenv("OTAMAN_ALLOW_INSECURE_RUNNER", raising=False)
+        ep = _endpoint_file(tmp_path, host="10.0.0.5")
+        status, payload = call_watchdog("status", endpoint_path=ep)
+        assert status == 0
+        assert "plaintext" in payload["error"]
+
+    def test_https_scheme_endpoint_allowed(self, tmp_path: Path):
+        ep = tmp_path / "runner.endpoint"
+        ep.write_text("host=10.0.0.5\nport=8444\ntoken=tok-xyz\nscheme=https\n", encoding="utf-8")
+        opener = _FakeOpener(_FakeResponse(200, json.dumps({"state": "active"}).encode()))
+        status, payload = call_watchdog("status", endpoint_path=ep, opener=opener)
+        assert status == 200
+
 
 # ---------------------------------------------------------------- format_status
 class TestFormatStatus:
