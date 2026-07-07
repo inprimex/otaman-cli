@@ -15,6 +15,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from otaman_core.identity import resolve_enforcement_identity
+
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, resolve_agent_identity
 from otaman_cli.main import UI, _read_platform_specs_path, _resolve_bus_paths, run_script
@@ -88,12 +90,18 @@ def _is_spec_agent(agent: str) -> bool:
     """fix-otaman-complete-task-drift task 1.1 — true only when the current
     agent is spec-agent.
 
-    Takes the already-resolved identity (issue #93: this used to re-read
-    `.agents/current-agent` directly via a second, divergent resolver that
-    ignored `OTAMAN_AGENT` / `.otaman` `agent:` fields — so a session that
-    correctly resolved to `spec-agent` via `resolve_agent_identity()` could
-    still see `is_spec_agent() == False` and silently skip the tasks.md
-    tick). Reuse the one identity `cmd_complete` already resolved instead.
+    Takes an already-resolved identity string (issue #93: this used to
+    re-read `.agents/current-agent` directly via a second, divergent
+    resolver that ignored `OTAMAN_AGENT` / `.otaman` `agent:` fields — so a
+    session that correctly resolved to `spec-agent` via
+    `resolve_agent_identity()` could still see `is_spec_agent() == False`
+    and silently skip the tasks.md tick).
+
+    F013: `cmd_complete` now passes `resolve_enforcement_identity()`'s
+    result here specifically, not the general convenience resolver — this
+    gate decides whether a privileged file write (otaman-specs' tasks.md)
+    happens, so it must not trust `OTAMAN_AGENT` / `.agents/current-agent`,
+    both self-asserted signals any agent's own tool calls can set.
     """
     return agent == "spec-agent"
 
@@ -155,7 +163,17 @@ def cmd_complete(args: list[str]) -> int:
     # other agent, the local working-tree edit gets silently reverted on
     # the next `git pull --ff-only` — this silent drift had ~130 tasks
     # stuck on the wrong state before the fix landed (see PR #96 backfill).
-    is_spec = _is_spec_agent(agent)
+    #
+    # F013: this is a privileged-write gate, so it resolves identity via
+    # otaman_core.identity.resolve_enforcement_identity() rather than the
+    # general `agent` above — the latter is display/bus-message-from
+    # convenience and trusts self-asserted signals (OTAMAN_AGENT env,
+    # .agents/current-agent) that this gate must not. The two can disagree
+    # (e.g. OTAMAN_AGENT claims spec-agent with no .otaman marker to back
+    # it up) — reported below using the enforcement value, not `agent`,
+    # so the skip message doesn't contradict itself.
+    enforcement_agent = resolve_enforcement_identity().agent
+    is_spec = _is_spec_agent(enforcement_agent or "")
     if is_spec:
         # Step 1: Update tasks.md via actualize-tasks.py (spec-agent only)
         script_args = ["--change", change_name, "--agent", agent, "--project-root", str(root)]
@@ -194,7 +212,7 @@ def cmd_complete(args: list[str]) -> int:
         # Non-spec-agent: skip the tasks.md write entirely.  The bus
         # message below is the canonical signal; spec-agent's sweep
         # (Part B of this change) applies the tick on next session start.
-        UI.muted(f"(skipping tasks.md write — current agent is {agent!r}, not spec-agent)")
+        UI.muted(f"(skipping tasks.md write — enforcement identity is {enforcement_agent!r}, not spec-agent)")
 
     # Step 2: Create task-complete bus message
     # D1: locate originating task-assignment to route reply to assigner only

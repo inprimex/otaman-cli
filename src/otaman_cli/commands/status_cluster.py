@@ -413,12 +413,37 @@ def _cmd_whoami_for_path(raw_path: str) -> int:
     return 0
 
 
+def _cmd_whoami_resolve_only() -> int:
+    """F013 — lightweight non-interactive wrapper around
+    `otaman_core.identity.resolve_enforcement_identity()`.
+
+    Exists so non-Python callers (the Bash PreToolUse hook,
+    `otaman-plugin/scripts/_resolve.sh`) can shell out to this instead of
+    reimplementing the enforcement-identity priority chain themselves —
+    that exact kind of drift between independently-maintained resolvers
+    already caused a real incident (MCP misattributing every `otaman_send`
+    call to `plugin-agent`, 2026-06-08).
+
+    Prints ONLY the resolved agent name on success (nothing else, so a
+    shell can capture it directly via `$(...)`), and exits 1 with no
+    output when identity can't be resolved.
+    """
+    from otaman_core.identity import resolve_enforcement_identity
+
+    result = resolve_enforcement_identity()
+    if not result.agent:
+        return 1
+    print(result.agent)
+    return 0
+
+
 def cmd_whoami(args: list[str]) -> int:
     """Print current agent identity + project + routing + bus state.
 
     Usage:
       otaman whoami [--json]
       otaman whoami --for-path <path>    # monorepo-path-ownership 2.1
+      otaman whoami --resolve-only       # F013: enforcement identity only
 
     Useful for confirming which agent / project / routing identity is
     loaded in this tab, especially when terminal tab titles get
@@ -434,6 +459,12 @@ def cmd_whoami(args: list[str]) -> int:
             UI.muted("Usage: otaman whoami --for-path <path>")
             return 1
         return _cmd_whoami_for_path(args[idx + 1])
+
+    # F013 — `--resolve-only` dispatches before the heavier display logic
+    # below (routing/tmux/bus-state lookups); it's meant to be cheap enough
+    # for a hook to shell out to on every relevant tool call.
+    if "--resolve-only" in args:
+        return _cmd_whoami_resolve_only()
 
     json_mode = "--json" in args
 
