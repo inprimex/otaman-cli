@@ -15,6 +15,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from otaman_core.validate_message import PRIVILEGED_TYPES
+
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, resolve_agent_identity
 from otaman_cli.main import C, UI, _read_platform_specs_path, _resolve_bus_paths, run_script
@@ -23,6 +25,13 @@ from otaman_cli.main import C, UI, _read_platform_specs_path, _resolve_bus_paths
 # validation.  Keep this list lean: deliberately limited to types that have
 # bus-server / CLI / downstream-agent semantics today.  Adding a new type is
 # a spec-level change.
+#
+# F012 (security GAP finding, 2026-07-04): `spec-change-approved` and
+# `spec-change-rejected` are deliberately ABSENT here even though otaman-core's
+# `validate_message.py` VALID_TYPES includes them — they're PRIVILEGED_TYPES
+# (assert a human decision was made) and must only be producible via
+# `otaman approve`'s TTY-gated confirmation, never the general send path.
+# See the PRIVILEGED_TYPES check in cmd_send below.
 MESSAGE_TYPES: frozenset[str] = frozenset({
     "info",
     "question",
@@ -30,13 +39,18 @@ MESSAGE_TYPES: frozenset[str] = frozenset({
     "task-complete",
     "spec-change",
     "spec-change-request",
-    "spec-change-approved",
-    "spec-change-rejected",
     "contract-change",
     "review-request",
     "proposal",
     "outcome-proposal",
 })
+
+_PRIVILEGED_TYPE_HINTS: dict[str, str] = {
+    "spec-change-approved": "Use `otaman approve approve <stem>` instead.",
+    "spec-change-rejected": "Use `otaman approve reject <stem>` instead.",
+    "emergency-halt": "Use `otaman emergency-halt` instead.",
+    "human-decision": "Use `otaman hitl take <stem>` instead.",
+}
 
 # outcome-proposal-routing task 3.2 — subject-line keywords that suggest
 # the operator probably meant `--type outcome-proposal` instead of the
@@ -75,6 +89,18 @@ def cmd_send(args: list[str]) -> int:
         UI.error("send requires <to>, --subject, and --body")
         UI.muted("Usage: otaman send <to> --subject \"...\" --body \"...\" "
                  "[--type ...] [--priority ...]")
+        return 2
+
+    # F012 — privileged types assert a human decision; forging one defeats
+    # the platform's HITL guarantee.  Reject them from the general send path
+    # entirely, with a pointer to the dedicated, TTY-gated command that can
+    # actually produce them — checked BEFORE the general registry lookup
+    # below so the error is directed, not a generic "unknown type".
+    if ns.msg_type in PRIVILEGED_TYPES:
+        UI.error(f"'{ns.msg_type}' is a privileged message type and cannot be sent via `otaman send`.")
+        UI.muted("  " + _PRIVILEGED_TYPE_HINTS.get(
+            ns.msg_type, "This type asserts a human decision and requires a dedicated command.",
+        ))
         return 2
 
     # outcome-proposal-routing task 3.1 — validate message type against the

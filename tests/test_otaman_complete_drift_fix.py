@@ -21,11 +21,22 @@ import pytest
 from otaman_cli.commands.complete import _is_spec_agent, cmd_complete
 
 
-def _stage_project(tmp_path: Path, agent: str | None = "cli-agent") -> Path:
+def _stage_project(
+    tmp_path: Path,
+    agent: str | None = "cli-agent",
+    *,
+    otaman_marker_agent: str | None = None,
+) -> Path:
     """Stage a minimal otaman project root.
 
     *agent*: written to `.agents/current-agent`.  Pass None to omit the file
     entirely (tests the FileNotFoundError safe-default).
+
+    *otaman_marker_agent*: when given, writes a `.otaman` file with an
+    `agent:` field — the ONLY signal F013's `resolve_enforcement_identity()`
+    trusts (see TestIsSpecAgentIdentityResolution). Tests exercising the
+    privileged tasks.md-write gate must set this; `.agents/current-agent`
+    alone is deliberately not enough for that gate anymore.
 
     `repos:` is intentionally empty — `resolve_agent_identity()`'s
     CWD→platform.yaml→owner step (priority 3b) outranks `.agents/current-agent`
@@ -37,6 +48,10 @@ def _stage_project(tmp_path: Path, agent: str | None = "cli-agent") -> Path:
     (tmp_path / ".agents" / "bus" / "active" / "acks").mkdir(parents=True, exist_ok=True)
     if agent is not None:
         (tmp_path / ".agents" / "current-agent").write_text(agent, encoding="utf-8")
+    if otaman_marker_agent is not None:
+        (tmp_path / ".otaman").write_text(
+            f"otaman_root: .\nagent: {otaman_marker_agent}\n", encoding="utf-8",
+        )
     (tmp_path / "platform.yaml").write_text(
         "project: tst\nversion: '1.0'\nrepos: []\n",
         encoding="utf-8",
@@ -67,23 +82,50 @@ class TestIsSpecAgent:
 
 # ---------------------------------------------------------------- issue #93 regression
 class TestIsSpecAgentIdentityResolution:
-    """Regression: `cmd_complete` must honor the SAME identity resolver
-    (`resolve_agent_identity()`, which checks `OTAMAN_AGENT` / `.otaman`
-    `agent:` fields ahead of `.agents/current-agent`) for both the
-    displayed agent name AND the spec-agent gate. Before the fix,
-    `_is_spec_agent()` read `.agents/current-agent` directly, so a
-    session resolved to spec-agent via `OTAMAN_AGENT` (with a stale or
-    absent `.agents/current-agent`) would print 'current agent is
-    spec-agent' yet still skip the tasks.md tick."""
+    """Regression (issue #93, since narrowed by F013): `cmd_complete` must
+    resolve the spec-agent gate consistently, not via a second divergent
+    resolver. Originally fixed by routing the gate through
+    `resolve_agent_identity()` (same chain as the displayed agent name).
+    F013 (security GAP finding, 2026-07-04) narrowed this further: the gate
+    is a privileged-write decision, so it now uses
+    `otaman_core.identity.resolve_enforcement_identity()`, which trusts
+    ONLY the per-repo `.otaman` `agent:` marker — NOT `OTAMAN_AGENT` env or
+    `.agents/current-agent`, both self-asserted signals any agent's own
+    tool calls can set. The tests below assert the CURRENT (F013) behavior;
+    see git history for the original #93 regression test this replaced."""
 
-    def test_otaman_agent_env_overrides_stale_current_agent_file(
+    def test_otaman_agent_env_alone_does_not_grant_the_write(
         self, tmp_path: Path, monkeypatch,
     ):
-        # .agents/current-agent says cli-agent (stale/wrong for this session),
-        # but OTAMAN_AGENT says spec-agent — the higher-priority source.
+        """OTAMAN_AGENT=spec-agent with no `.otaman` marker must NOT drive
+        the tasks.md tick — closes exactly the env-var spoofing vector
+        resolve_enforcement_identity() exists to prevent."""
         _stage_project(tmp_path, agent="cli-agent")
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("OTAMAN_AGENT", "spec-agent")
+
+        from otaman_cli.commands import complete as _m
+        calls: list[tuple] = []
+        def _stub_run_script(name, *args, **kw):
+            calls.append((name, args))
+            return MagicMock(returncode=0, stdout="{}", stderr="")
+        monkeypatch.setattr(_m, "run_script", _stub_run_script)
+
+        rc = cmd_complete(["test-change", "--tasks", "1.1"])
+        assert rc == 0
+        assert not any(name == "actualize-tasks.py" for name, _ in calls), (
+            "OTAMAN_AGENT alone (no .otaman marker) must NOT grant the "
+            f"privileged tasks.md write. Calls: {calls}"
+        )
+
+    def test_otaman_marker_grants_the_write_even_without_current_agent_file(
+        self, tmp_path: Path, monkeypatch,
+    ):
+        """A `.otaman agent: spec-agent` marker is sufficient on its own —
+        no `.agents/current-agent` file needed."""
+        _stage_project(tmp_path, agent=None, otaman_marker_agent="spec-agent")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("OTAMAN_AGENT", raising=False)
 
         from otaman_cli.commands import complete as _m
         calls: list[tuple] = []
@@ -100,8 +142,7 @@ class TestIsSpecAgentIdentityResolution:
         rc = cmd_complete(["test-change", "--tasks", "1.1"])
         assert rc == 0
         assert any(name == "actualize-tasks.py" for name, _ in calls), (
-            "OTAMAN_AGENT=spec-agent must drive the tasks.md tick even when "
-            f".agents/current-agent disagrees. Calls: {calls}"
+            f".otaman agent: spec-agent must grant the tasks.md tick. Calls: {calls}"
         )
 
 
@@ -126,12 +167,16 @@ class TestCmdCompleteBranching:
 
     # 1.4 (d) — spec-agent path: actualize-tasks.py runs
     def test_spec_agent_invokes_actualize_tasks(self, tmp_path: Path, monkeypatch):
-        _stage_project(tmp_path, agent="spec-agent")
+        # F013: the privileged-write gate now needs a `.otaman` marker, not
+        # just `.agents/current-agent` — the latter still drives the
+        # *displayed* agent name (bus message `from:` etc.) but no longer
+        # the tasks.md-write decision.
+        _stage_project(tmp_path, agent="spec-agent", otaman_marker_agent="spec-agent")
         monkeypatch.chdir(tmp_path)
         # Isolate from the ambient OTAMAN_AGENT (this suite may itself be
-        # running under an agent session) so identity resolves from the
-        # staged .agents/current-agent file, per resolve_agent_identity()'s
-        # priority chain.
+        # running under an agent session) so the displayed agent resolves
+        # from the staged .agents/current-agent file, per
+        # resolve_agent_identity()'s priority chain.
         monkeypatch.delenv("OTAMAN_AGENT", raising=False)
 
         # Capture the run_script invocation

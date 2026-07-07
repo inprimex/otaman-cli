@@ -1,10 +1,20 @@
-"""Shared confirmation gate for DESTRUCTIVE-CROSS-DIRECTORY commands.
+"""Shared confirmation gates for DESTRUCTIVE and PRIVILEGED commands.
 
-See openspec/changes/destructive-command-safety/ (design.md's command-risk
+`confirm_destructive_operation` — see
+openspec/changes/destructive-command-safety/ (design.md's command-risk
 classification, spec.md's formal requirements) for the full rationale --
 triggered by the 2026-07-04 `otaman migrate` incident, where a command
 mutated a directory resolved via upward path-walking with no echo and no
 confirmation gate.
+
+`confirm_human_decision` — F012 (security GAP finding, 2026-07-04): gates
+commands that produce a PRIVILEGED bus message (one asserting `from: human`
+-- `otaman approve`, `otaman emergency-halt`). Deliberately has NO
+`--yes`/scripted bypass, unlike `confirm_destructive_operation` above: the
+whole point is that a Bash-tool-driven agent session (which has no real
+TTY) cannot satisfy it, only an actual human at an actual terminal can. Any
+override flag here would hand agents a scriptable way around the human
+gate it exists to enforce.
 
 Lives in otaman-cli, not otaman-core, per design.md's two-consumer-rule
 decision: only otaman-cli needs this today. Revisit only if otaman-plugin's
@@ -58,3 +68,41 @@ def confirm_destructive_operation(
         print()
         return False
     return answer in ("y", "yes")
+
+
+def confirm_human_decision(description: str, expected_phrase: str = "CONFIRM") -> bool:
+    """Gate for producing a PRIVILEGED bus message (asserts ``from: human``).
+
+    Echoes *description*, then refuses outright -- no prompt, no bypass --
+    if stdin isn't a real TTY. Only when it is does it ask the caller to
+    type *expected_phrase* verbatim (case-sensitive); anything else, or a
+    non-interactive EOF/interrupt, refuses.
+
+    This is a practical proxy for "a human is driving this" specifically
+    because Claude Code's Bash tool (and similar agent-harness shells) does
+    not attach a real interactive TTY to the processes it spawns -- an
+    agent session cannot satisfy this check by itself, only a genuine
+    terminal session can.
+
+    Returns True if the caller should proceed, False if it should abort
+    without writing anything.
+    """
+    print()
+    print(description)
+    print()
+
+    if not sys.stdin.isatty():
+        print(
+            "Refusing: this action asserts a human decision and requires an "
+            "interactive terminal. Non-interactive/scripted callers -- "
+            "including agent Bash-tool sessions -- cannot satisfy this.",
+            file=sys.stderr,
+        )
+        return False
+
+    try:
+        typed = input(f"Type '{expected_phrase}' to confirm: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    return typed == expected_phrase

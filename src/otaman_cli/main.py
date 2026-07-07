@@ -602,6 +602,7 @@ def cmd_help() -> int:
 {C.BOLD}Workflow & specs:{C.RESET}
   {C.GREEN}propose{C.RESET} <title> [-d desc]     Propose a spec change (pending human approval)
   {C.GREEN}approve{C.RESET} [list|approve|reject]   Review/approve agent-initiated spec-change-requests
+  {C.GREEN}emergency-halt{C.RESET} --reason "..."  Broadcast an emergency halt to every agent (requires interactive confirmation)
   {C.GREEN}assign{C.RESET} [tasks.md]             Map OpenSpec tasks to repo owners
   {C.GREEN}complete{C.RESET} <change> --tasks T    Report task completion, update tasks.md
   {C.GREEN}review{C.RESET} [--reviewer R]         Trigger observer review (CTO / security / all)

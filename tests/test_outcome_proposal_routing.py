@@ -28,10 +28,20 @@ class TestMessageTypeRegistry:
 
     def test_canonical_types_still_registered(self):
         for t in ("info", "question", "task-assignment", "task-complete",
-                  "spec-change", "spec-change-request", "spec-change-approved",
-                  "spec-change-rejected", "contract-change", "review-request",
+                  "spec-change", "spec-change-request",
+                  "contract-change", "review-request",
                   "proposal"):
             assert t in MESSAGE_TYPES, f"missing canonical type {t!r}"
+
+    def test_privileged_types_deliberately_excluded(self):
+        """F012 (security GAP finding, 2026-07-04): spec-change-approved/
+        -rejected assert a human decision was made and must only be
+        producible via `otaman approve`'s TTY-gated confirmation, never
+        the general send path — so they're deliberately absent from
+        MESSAGE_TYPES even though otaman-core's VALID_TYPES includes them
+        as legitimate bus message types overall."""
+        assert "spec-change-approved" not in MESSAGE_TYPES
+        assert "spec-change-rejected" not in MESSAGE_TYPES
 
 
 def _project_root(tmp_path: Path) -> Path:
