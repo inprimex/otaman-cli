@@ -7,6 +7,11 @@ failing on `main` for several merges — unrelated to any single PR's diff,
 since the flagged lines predate them all — because nothing exercised the
 script locally before push. Running it here as a real test surfaces the
 same failure before it reaches CI.
+
+Windows-excluded, mirroring the CI workflow's own `if: runner.os !=
+'Windows'` guard on this step: plain `bash` on GitHub's Windows runners
+resolves to the WSL launcher stub (no distribution installed), not Git
+Bash, so it fails immediately regardless of the script's content.
 """
 from __future__ import annotations
 
@@ -20,6 +25,10 @@ REPO_ROOT = Path(__file__).parent.parent
 AUDIT_SCRIPT = REPO_ROOT.parent / "otaman-core" / "scripts" / "audit-maestro-refs.sh"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="bash on Windows CI runners resolves to the WSL stub, not Git Bash (matches the real CI step's own Windows exclusion)",
+)
 @pytest.mark.skipif(
     not AUDIT_SCRIPT.is_file(),
     reason="otaman-core sibling checkout not present locally (always present in CI)",
