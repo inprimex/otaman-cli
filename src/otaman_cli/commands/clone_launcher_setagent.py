@@ -23,7 +23,7 @@ def cmd_clone(args: list[str]) -> int:
     positional: list[str] = []
     i = 0
     while i < len(args):
-        if args[i] in ("--maestro-dir", "--otaman-dir", "--target") and i + 1 < len(args):
+        if args[i] in ("--maestro-dir", "--otaman-dir", "--target") and i + 1 < len(args):  # legacy: backward-compat arg
             target = args[i + 1]
             i += 2
         else:
