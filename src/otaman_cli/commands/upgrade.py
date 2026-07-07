@@ -286,8 +286,8 @@ def _upgrade_one(
             # (where pip --user installs otaman) is not on PATH. `bash -l`
             # loads the login profile (~/.bash_profile / ~/.profile), which
             # does include ~/.local/bin. Earlier attempt used
-            # `python3 <plugin>/cli/maestro.py init` but that entry-point
-            # never existed (legacy reference), so the upgrade silently
+            # legacy: `python3 <plugin>/cli/maestro.py init` but that entry-point
+            # never existed, so the upgrade silently
             # failed on every SSH launcher. Reported by plugin-agent 2026-06-08.
             if not plugin_path:
                 UI.warn("    Cannot run otaman init -- no ssh_plugin_path configured")

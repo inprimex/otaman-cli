@@ -1,7 +1,7 @@
 """`otaman scan` — migrated from main.py.
 
 Previously relied on main()'s shared flag loop to pre-parse --update/
---maestro-dir (+legacy --otaman-dir/--target aliases)/--dry-run/--name
+--maestro-dir (legacy: +--otaman-dir/--target aliases)/--dry-run/--name
 into keyword args before calling in. Folded that parsing into cmd_scan
 itself so it takes raw argv like every other registry command (F021/
 F022). The shared loop still parses --update/--dry-run too, since `init`
@@ -278,7 +278,7 @@ def cmd_scan(args: list[str]) -> int:
                 m_dir_str = report.get("maestro_dir", "")
                 otaman_dir_for_post = Path(m_dir_str) if m_dir_str else draft_path.parent
                 program_slug_for_post = (
-                    otaman_dir_for_post.name.removesuffix("-otaman").removesuffix("-maestro")
+                    otaman_dir_for_post.name.removesuffix("-otaman").removesuffix("-maestro")  # legacy: -maestro suffix until otaman-core 1.0
                     or resolved.name
                 )
                 _ps_result = _post_scan_run(
