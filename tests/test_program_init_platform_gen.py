@@ -137,11 +137,12 @@ class TestUpdatePlatformYaml:
             "# My handcrafted comment — must survive the round-trip\n"
             "project: old-name\n"
             "version: '1.0'\n"
-            "extra_key: should-survive\n"
+            "extra_key: should-survive\n",
+            encoding="utf-8",
         )
         answers = {**_BASE_ANSWERS, "program_name": "new-name"}
         update_platform_yaml(answers, platform)
-        content = platform.read_text()
+        content = platform.read_text(encoding="utf-8")
         # Updated field
         assert "new-name" in content
         # Preserved extra key

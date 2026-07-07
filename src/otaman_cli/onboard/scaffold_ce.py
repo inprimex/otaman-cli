@@ -13,8 +13,11 @@ For each companion repo kind in `compute_companion_repos(processes)`:
 
 from __future__ import annotations
 
+import os
 import shutil
+import stat
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -28,6 +31,22 @@ from ruamel.yaml import YAML
 _YAML = YAML()
 _YAML.preserve_quotes = True
 _YAML.indent(mapping=2, sequence=4, offset=2)
+
+
+def _clear_readonly_recursive(path: Path) -> None:
+    """Windows-only: `git init` leaves loose objects under `.git/objects/`
+    read-only. Unlike POSIX (where deleting a read-only file only needs
+    write permission on the containing directory), Windows' `DeleteFile`
+    honors the file's own read-only attribute, so `shutil.rmtree` raises
+    `PermissionError: [WinError 5] Access is denied` on them. Clear the
+    attribute on every entry before removing the tree.
+    """
+    for root, dirs, files in os.walk(path):
+        for name in dirs + files:
+            try:
+                (Path(root) / name).chmod(stat.S_IWRITE)
+            except OSError:
+                pass
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
@@ -151,6 +170,8 @@ def scaffold_companion_repos_ce(
 
         # Force-recreate: remove existing dir tree (after caller-side confirmation)
         if target.exists() and force:
+            if sys.platform == "win32":
+                _clear_readonly_recursive(target)
             try:
                 shutil.rmtree(target)
             except OSError as exc:

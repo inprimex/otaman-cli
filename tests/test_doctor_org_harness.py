@@ -69,7 +69,17 @@ def _make_executable(path: Path, content: str = "#!/usr/bin/env bash\necho 'v2.3
 class TestCheckOrgHarnesses:
     """Use the current test user as the org's system_user, with their real
     home dir as ~<org>.  Stage binaries under ~/.local/bin/<test-prefix-...>
-    to avoid clobbering anything real, then point min_version at our stub."""
+    to avoid clobbering anything real, then point min_version at our stub.
+
+    `otaman doctor --org` resolves ANOTHER local system user's home
+    directory via the POSIX `pwd` module -- there's no Windows equivalent,
+    so `_check_org_harnesses` short-circuits with a graceful "requires a
+    POSIX system" result there (see TestPosixOnlyGracefulDegradation).
+    Every test below that needs to get past that point to exercise the
+    real lookup logic is therefore POSIX-only; the three preconditions
+    above the pwd lookup (missing platform.yaml / org / system_user field)
+    still run on every platform.
+    """
 
     def test_no_platform_yaml(self, fake_root: Path):
         rc, results = _check_org_harnesses(fake_root, "any")
@@ -88,6 +98,7 @@ class TestCheckOrgHarnesses:
         assert rc == 1
         assert "system_user" in results[0]["error"]
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="pwd-based lookup is POSIX-only")
     def test_org_unknown_system_user(self, fake_root: Path):
         _write_platform(
             fake_root,
@@ -97,6 +108,7 @@ class TestCheckOrgHarnesses:
         assert rc == 1
         assert "does not exist" in results[0]["error"]
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="pwd-based lookup is POSIX-only")
     def test_no_runner_harnesses(self, fake_root: Path, tmp_path: Path):
         user = getpass.getuser()
         _write_platform(
@@ -107,6 +119,7 @@ class TestCheckOrgHarnesses:
         assert rc == 1
         assert "runner.harnesses" in results[0]["error"]
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="pwd-based lookup is POSIX-only")
     def test_missing_binary_fails_with_install_hint(self, fake_root: Path):
         user = getpass.getuser()
         _write_platform(
@@ -120,6 +133,7 @@ class TestCheckOrgHarnesses:
         assert results[0]["status"] == "missing"
         assert results[0]["harness_id"] == "claude-code"
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="pwd-based lookup is POSIX-only")
     def test_present_binary_no_version_pin_passes(self, fake_root: Path):
         user = getpass.getuser()
         home = Path.home()
@@ -140,6 +154,7 @@ class TestCheckOrgHarnesses:
             if bin_path.exists():
                 bin_path.unlink()
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="pwd-based lookup is POSIX-only")
     def test_min_version_satisfied(self, fake_root: Path):
         user = getpass.getuser()
         home = Path.home()
@@ -161,6 +176,7 @@ class TestCheckOrgHarnesses:
             if bin_path.exists():
                 bin_path.unlink()
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="pwd-based lookup is POSIX-only")
     def test_min_version_too_old(self, fake_root: Path):
         user = getpass.getuser()
         home = Path.home()
@@ -180,6 +196,31 @@ class TestCheckOrgHarnesses:
         finally:
             if bin_path.exists():
                 bin_path.unlink()
+
+
+# --------------------------------------------------------------------- non-POSIX graceful degradation
+class TestPosixOnlyGracefulDegradation:
+    """`_check_org_harnesses` used to crash with ModuleNotFoundError on any
+    platform lacking `pwd` (Windows) once it got past the platform.yaml/org/
+    system_user preconditions -- an unhandled ImportError, not a reported
+    result. Simulates the module-absent case directly (via monkeypatch)
+    rather than relying on actually running on Windows, so this is exercised
+    on every CI platform, not just one."""
+
+    def test_missing_pwd_module_returns_graceful_error(self, fake_root: Path, monkeypatch):
+        from otaman_cli.commands import doctor as m
+
+        monkeypatch.setattr(m, "_pwd", None)
+        user = getpass.getuser()
+        _write_platform(
+            fake_root,
+            f"orgs:\n  myorg:\n    system_user: {user}\n"
+            "runner:\n  harnesses:\n"
+            "    - {id: claude-code, binary: claude}\n",
+        )
+        rc, results = _check_org_harnesses(fake_root, "myorg")
+        assert rc == 1
+        assert "POSIX" in results[0]["error"]
 
 
 # --------------------------------------------------------------------- _print_org_harness_report
