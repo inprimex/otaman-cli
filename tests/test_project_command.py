@@ -145,6 +145,12 @@ def _run(meta: Path, *cli_args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", *cli_args],
         capture_output=True, text=True, cwd=str(meta), env=env,
+        # Force a real closed pipe rather than inheriting the runner's
+        # stdin: on Windows CI it isn't reliably a non-TTY handle the way
+        # it is on Linux/macOS, so sys.stdin.isatty() can take the TTY
+        # branch instead of the deterministic non-interactive one (same
+        # class of bug fixed for the upgrade batch-confirm tests, 42eb7a4).
+        input="",
     )
 
 

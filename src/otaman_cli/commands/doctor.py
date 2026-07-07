@@ -16,6 +16,15 @@ from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root
 from otaman_cli.main import C, UI, run_script
 
+try:
+    import pwd as _pwd
+except ImportError:
+    # Windows has no pwd module -- `otaman doctor --org` resolves another
+    # local system user's home directory, a POSIX-only concept. Handled as
+    # a normal precondition-error result in _check_org_harnesses below,
+    # not a crash.
+    _pwd = None  # type: ignore[assignment]
+
 
 def _parse_version_tuple(text: str) -> tuple[int, ...] | None:
     """Parse a version string into a tuple of ints; return None on failure.
@@ -85,7 +94,15 @@ def _check_org_harnesses(root: Path, org_name: str) -> tuple[int, list[dict]]:
 
     # Resolve the org user's home directory via pwd (more precise than expanduser,
     # which returns the literal ~name when the user is missing).
-    import pwd as _pwd
+    if _pwd is None:
+        return 1, [{
+            "status": "error",
+            "error": (
+                "otaman doctor --org requires a POSIX system "
+                "(the pwd module, used to resolve another user's home "
+                "directory, is unavailable on this platform)"
+            ),
+        }]
     try:
         org_home = Path(_pwd.getpwnam(system_user).pw_dir)
     except KeyError:
