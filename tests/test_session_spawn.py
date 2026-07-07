@@ -107,8 +107,14 @@ class TestLoadFiles:
     def test_load_runner_endpoint_parses_fields(self, tmp_path):
         ep = tmp_path / "runner.endpoint"
         _write_runner_endpoint(ep, port=9090, token="abc")
-        host, port, token = session_spawn.load_runner_endpoint(ep)
-        assert (host, port, token) == ("127.0.0.1", 9090, "abc")
+        host, port, token, scheme = session_spawn.load_runner_endpoint(ep)
+        assert (host, port, token, scheme) == ("127.0.0.1", 9090, "abc", "http")
+
+    def test_load_runner_endpoint_parses_scheme_field(self, tmp_path):
+        ep = tmp_path / "runner.endpoint"
+        ep.write_text("host=10.0.0.5\nport=9090\ntoken=abc\nscheme=https\n", encoding="utf-8")
+        host, port, token, scheme = session_spawn.load_runner_endpoint(ep)
+        assert (host, scheme) == ("10.0.0.5", "https")
 
     def test_load_runner_endpoint_missing_returns_none(self, tmp_path):
         assert session_spawn.load_runner_endpoint(tmp_path / "nope") is None
@@ -211,8 +217,8 @@ class TestMain:
                              opener=opener or globals()["_OPENER_FOR_TEST"], timeout=timeout)
         # Instead, patch post_spawn entirely:
         captured = {}
-        def fake_post(*, host, port, token, body, opener=None, timeout=30.0):
-            captured.update(body=body, host=host, port=port, token=token)
+        def fake_post(*, host, port, token, body, scheme="http", opener=None, timeout=30.0):
+            captured.update(body=body, host=host, port=port, token=token, scheme=scheme)
             return 200, {
                 "session_id": "sess-xyz", "mode": "interactive", "pid": 1234,
                 "attach": {"host": "127.0.0.1", "backend": "tmux", "session_name": "n"},
@@ -270,3 +276,88 @@ class TestMain:
         ])
         assert rc == 1
         assert "bad repo" in capsys.readouterr().err
+
+
+# ---- F032 Part B — fail-closed plaintext-to-non-loopback guard --------
+
+
+class TestValidateSpawnTarget:
+    def test_https_always_allowed(self):
+        assert session_spawn._validate_spawn_target("10.0.0.5", "https") is None
+
+    def test_http_loopback_allowed(self):
+        assert session_spawn._validate_spawn_target("127.0.0.1", "http") is None
+        assert session_spawn._validate_spawn_target("localhost", "http") is None
+        assert session_spawn._validate_spawn_target("::1", "http") is None
+
+    def test_http_non_loopback_refused_by_default(self, monkeypatch):
+        monkeypatch.delenv("OTAMAN_ALLOW_INSECURE_RUNNER", raising=False)
+        err = session_spawn._validate_spawn_target("10.0.0.5", "http")
+        assert err is not None
+        assert "plaintext" in err
+
+    def test_http_non_loopback_allowed_with_escape_hatch(self, monkeypatch, capsys):
+        monkeypatch.setenv("OTAMAN_ALLOW_INSECURE_RUNNER", "1")
+        err = session_spawn._validate_spawn_target("10.0.0.5", "http")
+        assert err is None
+        assert "WARNING" in capsys.readouterr().err
+
+    def test_unknown_scheme_refused(self):
+        err = session_spawn._validate_spawn_target("127.0.0.1", "ftp")
+        assert err is not None
+        assert "Unknown" in err
+
+
+class TestMainFailClosed:
+    def test_non_loopback_http_endpoint_refuses_and_never_posts(self, tmp_path, capsys, monkeypatch):
+        cache = tmp_path / "token.cache"
+        _write_token(cache, sub="user-A")
+        ep = tmp_path / "runner.endpoint"
+        ep.write_text("host=10.0.0.5\nport=8091\ntoken=RTOK\n", encoding="utf-8")
+
+        import otaman_cli.session_spawn as ss
+        monkeypatch.delenv("OTAMAN_ALLOW_INSECURE_RUNNER", raising=False)
+        monkeypatch.setattr(
+            ss, "post_spawn",
+            lambda **kw: (_ for _ in ()).throw(AssertionError("post_spawn must not be called")),
+        )
+        rc = session_spawn.main([
+            "--agent", "a", "--repo", "r", "--project-root", "/tmp/p",
+            "--token-cache", str(cache), "--runner-endpoint", str(ep),
+        ])
+        assert rc == 1
+        assert "plaintext" in capsys.readouterr().err
+
+    def test_scheme_propagated_to_post_spawn(self, tmp_path, monkeypatch):
+        cache = tmp_path / "token.cache"
+        _write_token(cache, sub="user-A")
+        ep = tmp_path / "runner.endpoint"
+        ep.write_text("host=127.0.0.1\nport=8091\ntoken=RTOK\nscheme=https\n", encoding="utf-8")
+
+        import otaman_cli.session_spawn as ss
+        captured = {}
+        def fake_post(*, host, port, token, body, scheme="http", opener=None, timeout=30.0):
+            captured["scheme"] = scheme
+            return 200, {"session_id": "s1", "attach": None}
+        monkeypatch.setattr(ss, "post_spawn", fake_post)
+
+        rc = session_spawn.main([
+            "--agent", "a", "--repo", "r", "--project-root", "/tmp/p",
+            "--token-cache", str(cache), "--runner-endpoint", str(ep),
+        ])
+        assert rc == 0
+        assert captured["scheme"] == "https"
+
+
+class TestPostSpawnUrl:
+    def test_default_scheme_is_http(self):
+        opener = _StubOpener(response=_StubResponse(json.dumps({"session_id": "s"})))
+        session_spawn.post_spawn(host="127.0.0.1", port=9090, token="t", body={}, opener=opener)
+        assert opener.calls[0][0].startswith("http://127.0.0.1:9090/spawn")
+
+    def test_https_scheme_builds_https_url(self):
+        opener = _StubOpener(response=_StubResponse(json.dumps({"session_id": "s"})))
+        session_spawn.post_spawn(
+            host="10.0.0.5", port=9090, token="t", body={}, scheme="https", opener=opener,
+        )
+        assert opener.calls[0][0].startswith("https://10.0.0.5:9090/spawn")

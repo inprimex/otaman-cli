@@ -35,12 +35,56 @@ from pathlib import Path
 
 DEFAULT_SCOPE = "openid profile urn:zitadel:iam:org:projects:roles"
 
+# F032 (security GAP finding, 2026-07-04, plan confirmed by Roman 2026-07-07):
+# device_code/access_token/refresh_token must not traverse plaintext HTTP.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+_INSECURE_OIDC_ESCAPE_HATCH = "OTAMAN_ALLOW_INSECURE_OIDC"
+
+
+def _validate_issuer_scheme(issuer: str) -> None:
+    """Reject a plaintext-HTTP issuer unless it's loopback or explicitly
+    allowed via the escape hatch.
+
+    https:// -- always fine.
+    http:// + loopback host -- fine, no warning (the common local-dev-Zitadel
+        case; this module's own flow docstring example issuer is otherwise a
+        real non-loopback address, so loopback is the only case that's safe
+        by default).
+    http:// + non-loopback + OTAMAN_ALLOW_INSECURE_OIDC set -- allowed, but
+        loudly warns on every use, not just once.
+    http:// + non-loopback + no escape hatch -- refused.
+    anything else (missing/unknown scheme) -- refused.
+    """
+    parsed = urllib.parse.urlparse(issuer)
+    if parsed.scheme == "https":
+        return
+    if parsed.scheme != "http":
+        raise LoginError(
+            f"OIDC_ISSUER must use https:// (or http:// for loopback/dev only): {issuer!r}"
+        )
+    if parsed.hostname in _LOOPBACK_HOSTS:
+        return
+    if os.environ.get(_INSECURE_OIDC_ESCAPE_HATCH, "").strip():
+        print(
+            f"WARNING: OIDC_ISSUER uses plaintext http:// to a non-loopback host "
+            f"({issuer!r}) — device_code/access_token/refresh_token travel "
+            f"unencrypted. Allowed only because {_INSECURE_OIDC_ESCAPE_HATCH} is set.",
+            file=sys.stderr,
+        )
+        return
+    raise LoginError(
+        f"OIDC_ISSUER uses plaintext http:// to a non-loopback host ({issuer!r}) — "
+        f"refusing: device_code/access_token/refresh_token would travel unencrypted. "
+        f"Use https://, or set {_INSECURE_OIDC_ESCAPE_HATCH}=1 if you've accepted the risk "
+        f"(e.g. a private dev network)."
+    )
+
 
 @dataclass
 class DeviceFlowConfig:
     """Where to authenticate and how to identify ourselves."""
 
-    issuer: str                                 # e.g. http://100.65.57.73:8080
+    issuer: str                                 # e.g. https://zitadel.example.com (F032: http:// only for loopback/dev, see _validate_issuer_scheme)
     client_id: str                              # Native OIDC client_id from Zitadel
     project_id: str = ""                        # if set, added to scope for project-aud
     scopes: list[str] = field(default_factory=list)
@@ -200,6 +244,7 @@ def config_from_env() -> DeviceFlowConfig:
             "OIDC config missing: set OIDC_ISSUER and OIDC_CLI_CLIENT_ID "
             "(values come from zitadel-bootstrap.py output)"
         )
+    _validate_issuer_scheme(issuer)
     path = Path(os.environ.get("OTAMAN_TOKEN_CACHE", "")) if os.environ.get("OTAMAN_TOKEN_CACHE") else Path.home() / ".otaman" / "token.cache"
     return DeviceFlowConfig(
         issuer=issuer,

@@ -115,29 +115,72 @@ class TestConfigFromEnv:
             config_from_env()
 
     def test_minimal_config(self, monkeypatch):
-        monkeypatch.setenv("OIDC_ISSUER", "http://zitadel.test")
+        monkeypatch.setenv("OIDC_ISSUER", "https://zitadel.test")
         monkeypatch.setenv("OIDC_CLI_CLIENT_ID", "cli-id")
         monkeypatch.delenv("OIDC_PROJECT_ID", raising=False)
         monkeypatch.delenv("OIDC_EXTERNAL_HOST", raising=False)
         cfg = config_from_env()
-        assert cfg.issuer == "http://zitadel.test"
+        assert cfg.issuer == "https://zitadel.test"
         assert cfg.client_id == "cli-id"
         assert cfg.project_id == ""
 
     def test_project_id_propagated(self, monkeypatch):
-        monkeypatch.setenv("OIDC_ISSUER", "http://x")
+        monkeypatch.setenv("OIDC_ISSUER", "https://x")
         monkeypatch.setenv("OIDC_CLI_CLIENT_ID", "c")
         monkeypatch.setenv("OIDC_PROJECT_ID", "p-123")
         cfg = config_from_env()
         assert cfg.project_id == "p-123"
 
     def test_token_cache_override(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("OIDC_ISSUER", "http://x")
+        monkeypatch.setenv("OIDC_ISSUER", "https://x")
         monkeypatch.setenv("OIDC_CLI_CLIENT_ID", "c")
         override = tmp_path / "custom-token.cache"
         monkeypatch.setenv("OTAMAN_TOKEN_CACHE", str(override))
         cfg = config_from_env()
         assert cfg.token_path == override
+
+    # ------------------------------------------------------------------- F032
+    def test_http_non_loopback_refused_by_default(self, monkeypatch):
+        monkeypatch.setenv("OIDC_ISSUER", "http://100.65.57.73:8080")
+        monkeypatch.setenv("OIDC_CLI_CLIENT_ID", "c")
+        monkeypatch.delenv("OTAMAN_ALLOW_INSECURE_OIDC", raising=False)
+        with pytest.raises(LoginError, match="plaintext http"):
+            config_from_env()
+
+    def test_http_loopback_allowed_without_escape_hatch(self, monkeypatch):
+        monkeypatch.setenv("OIDC_ISSUER", "http://127.0.0.1:8080")
+        monkeypatch.setenv("OIDC_CLI_CLIENT_ID", "c")
+        monkeypatch.delenv("OTAMAN_ALLOW_INSECURE_OIDC", raising=False)
+        cfg = config_from_env()
+        assert cfg.issuer == "http://127.0.0.1:8080"
+
+    def test_http_localhost_allowed_without_escape_hatch(self, monkeypatch):
+        monkeypatch.setenv("OIDC_ISSUER", "http://localhost:8080")
+        monkeypatch.setenv("OIDC_CLI_CLIENT_ID", "c")
+        monkeypatch.delenv("OTAMAN_ALLOW_INSECURE_OIDC", raising=False)
+        cfg = config_from_env()
+        assert cfg.issuer == "http://localhost:8080"
+
+    def test_http_non_loopback_allowed_with_escape_hatch(self, monkeypatch, capsys):
+        monkeypatch.setenv("OIDC_ISSUER", "http://100.65.57.73:8080")
+        monkeypatch.setenv("OIDC_CLI_CLIENT_ID", "c")
+        monkeypatch.setenv("OTAMAN_ALLOW_INSECURE_OIDC", "1")
+        cfg = config_from_env()
+        assert cfg.issuer == "http://100.65.57.73:8080"
+        assert "WARNING" in capsys.readouterr().err
+
+    def test_https_non_loopback_always_allowed(self, monkeypatch):
+        monkeypatch.setenv("OIDC_ISSUER", "https://accounts.example.com")
+        monkeypatch.setenv("OIDC_CLI_CLIENT_ID", "c")
+        monkeypatch.delenv("OTAMAN_ALLOW_INSECURE_OIDC", raising=False)
+        cfg = config_from_env()
+        assert cfg.issuer == "https://accounts.example.com"
+
+    def test_unknown_scheme_refused(self, monkeypatch):
+        monkeypatch.setenv("OIDC_ISSUER", "ftp://x")
+        monkeypatch.setenv("OIDC_CLI_CLIENT_ID", "c")
+        with pytest.raises(LoginError, match="must use https"):
+            config_from_env()
 
 
 # ---------------------------------------------------------------------------

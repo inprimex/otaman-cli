@@ -23,7 +23,11 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from otaman_cli.session_spawn import DEFAULT_RUNNER_ENDPOINT, load_runner_endpoint
+from otaman_cli.session_spawn import (
+    DEFAULT_RUNNER_ENDPOINT,
+    _validate_spawn_target,
+    load_runner_endpoint,
+)
 
 
 def _format_timestamp_short(iso: str | None) -> str:
@@ -78,9 +82,16 @@ def call_watchdog(
     ep = load_runner_endpoint(path)
     if ep is None:
         return 0, {"error": f"runner endpoint file missing or malformed: {path}"}
-    host, port, token = ep
+    host, port, token, scheme = ep
 
-    url = f"http://{host}:{port}/watchdog/{action}"
+    # F032 Part B — same bearer-token-over-plaintext-HTTP guard as
+    # session_spawn.post_spawn; this hits the same runner endpoint file
+    # with the same token, so it needs the same fail-closed check.
+    unsafe = _validate_spawn_target(host, scheme)
+    if unsafe:
+        return 0, {"error": unsafe}
+
+    url = f"{scheme}://{host}:{port}/watchdog/{action}"
     method = "GET" if action == "status" else "POST"
     headers = {
         "Authorization": f"Bearer {token}",
