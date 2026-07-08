@@ -1,18 +1,25 @@
 """Per-tab agent identity resolution (carved from legacy cli/maestro.py).  # legacy: filename
 
-Resolution priority chain (agent-identity-per-directory spec D1, amended 2026-05-28):
+Resolution priority chain (agent-identity-per-directory spec D1, amended 2026-05-28;
+R3 cross-check added 2026-07-08):
 
 1. ``OTAMAN_AGENT`` environment variable  (highest — automated session spawn)
+   — cross-checked against the CWD-resolved repo owner (see below); on
+   disagreement the CWD-resolved owner wins, loudly.
 2. ``.otaman`` ``agent:`` field found by walking up from CWD  (per-repo)
-3. ``.agents/current-agent`` file  (deprecated project-global fallback)
-4. ``None`` / ERROR — no identity; caller must prompt user
+3. CWD → platform.yaml (+ ``owner-paths``) → owner, via the same resolver
+   ``otaman whoami --for-path`` uses
+4. ``.agents/current-agent`` file  (deprecated project-global fallback,
+   validated against platform.yaml's declared agents)
+5. ``None`` / ERROR — no identity; caller must prompt user
 
 The CWD ancestry walk (step 2) starts at the current working directory and
 walks up parent directories.  A ``.otaman`` file WITHOUT an ``agent:`` field
 does NOT stop the walk — the walker continues up until an ``agent:`` value is
 found or the filesystem root is reached.
 
-Step 3 emits a DEPRECATED warning to stderr when it is the source.  Step 4
+Step 4 emits a DEPRECATED warning to stderr when it is the source, and is
+skipped (falls through to step 5) if its value isn't a declared agent. Step 5
 returns ``None``; callers that can't continue without an identity should exit
 with an instructive message.
 
@@ -21,8 +28,20 @@ session-local) and caused concurrent-session identity collisions (2026-05-28
 watchtower incident).  Per-repo ``.otaman agent:`` fields written by
 ``otaman init`` replace it entirely.
 
-The CWD→platform.yaml→owner fallback (2026-04-29 fix) is preserved within
-step 2 for repos not yet updated by ``otaman init --update``.
+R3 (security/correctness fix, 2026-07-08): step 1 used to be trusted
+unconditionally, with no cross-check against the repo the caller is actually
+sitting in. A stale/leaked ``OTAMAN_AGENT`` (e.g. a poisoned tmux
+server-global environment — the 2026-07-08 greenbin incident, 7 of 8 agent
+sessions misidentifying as one agent) then misattributed everything the
+session did. The CWD-resolved owner is now computed first and used to
+validate ``OTAMAN_AGENT``; on disagreement the CWD-resolved owner is
+authoritative (``platform.yaml`` is the source of truth an env var can't
+silently override) and a warning is printed so the underlying poisoning gets
+noticed and fixed at its source. Step 3 (CWD→platform.yaml→owner) also now
+delegates to ``owner_paths.resolve_owner_for_path()`` instead of a simpler,
+independently-maintained duplicate — picks up ``owner-paths`` glob overrides
+for free. Step 4 now validates its value against platform.yaml's declared
+agents (``agents:`` list ∪ ``repos[].owner``) instead of trusting it blindly.
 """
 
 from __future__ import annotations
@@ -87,6 +106,47 @@ def _read_otaman_agent_field(cwd: Path) -> str | None:
     return None
 
 
+def _resolve_cwd_owner(root: Path, cwd: Path) -> str | None:
+    """CWD → platform.yaml (+ ``owner-paths``) → owner.
+
+    Delegates to ``owner_paths.resolve_owner_for_path()`` — the same
+    resolver ``otaman whoami --for-path`` uses — instead of re-implementing
+    a simpler, glob-unaware duplicate (R3). Falls back to the git worktree's
+    main checkout (2026-04-29 fix) when the direct CWD lookup misses;
+    ``resolve_owner_for_path()`` has no worktree-awareness of its own.
+    """
+    from otaman_cli.owner_paths import resolve_owner_for_path
+
+    result = resolve_owner_for_path(cwd, project_root=root)
+    if result is not None:
+        return result.agent
+
+    try:
+        worktree_main = resolve_worktree_main(cwd)
+    except Exception:
+        worktree_main = None
+    if worktree_main is not None:
+        result = resolve_owner_for_path(worktree_main, project_root=root)
+        if result is not None:
+            return result.agent
+
+    return None
+
+
+def _declared_agents(root: Path) -> set[str]:
+    """platform.yaml's declared-agents roster (R3), for validating
+    ``.agents/current-agent`` instead of trusting it blindly. Reuses
+    ``owner_paths.declared_agents_from_platform`` — one roster, not a
+    second independently-maintained copy.
+    """
+    from otaman_cli.owner_paths import declared_agents_from_platform, load_platform_yaml
+
+    platform = load_platform_yaml(root)
+    if platform is None:
+        return set()
+    return declared_agents_from_platform(platform)
+
+
 def resolve_agent_identity(
     root: Path,
     cwd: Path | None = None,
@@ -94,68 +154,56 @@ def resolve_agent_identity(
 ) -> str | None:
     """Resolve which agent identity to act as.
 
-    Priority chain (D1, amended 2026-05-28 — no ~/.otaman-session):
+    Priority chain (D1, amended 2026-05-28 — no ~/.otaman-session; R3
+    cross-check added 2026-07-08):
     1. explicit arg (CLI --agent / direct call)
-    2. OTAMAN_AGENT environment variable
+    2. OTAMAN_AGENT environment variable — cross-checked against the
+       CWD-resolved repo owner; disagreement means the CWD-resolved owner
+       wins (see module docstring)
     3. .otaman ``agent:`` field found by CWD ancestry walk
-       (falls back to platform.yaml CWD->owner for un-updated repos)
-    4. .agents/current-agent (deprecated; emits warning)
-    5. None (caller decides whether to error)
+    4. CWD → platform.yaml (+ owner-paths) → owner
+    5. .agents/current-agent (deprecated; validated against declared
+       agents; emits warning)
+    6. None (caller decides whether to error)
     """
     # 1. Explicit argument always wins
     if explicit:
         return explicit
 
-    # 2. OTAMAN_AGENT environment variable
-    env_agent = os.environ.get("OTAMAN_AGENT", "").strip()
-    if env_agent:
-        return env_agent
-
     if cwd is None:
         cwd = Path.cwd()
     cwd = cwd.resolve()
 
-    # 3a. .otaman agent: field — CWD ancestry walk (keeps walking past .otaman without agent:)
+    # Resolved once, up front, so step 2 can cross-check against it and
+    # step 4 can reuse it without a second lookup.
+    cwd_owner = _resolve_cwd_owner(root, cwd)
+
+    # 2. OTAMAN_AGENT environment variable
+    env_agent = os.environ.get("OTAMAN_AGENT", "").strip()
+    if env_agent:
+        if cwd_owner and cwd_owner != env_agent:
+            print(
+                f"[otaman] WARNING: OTAMAN_AGENT={env_agent!r} disagrees with the "
+                f"repo owner resolved from cwd ({cwd_owner!r}) — using {cwd_owner!r}. "
+                f"This usually means a stale/leaked OTAMAN_AGENT (e.g. a poisoned "
+                f"tmux server-global environment); fix the source rather than this "
+                f"warning.",
+                file=sys.stderr,
+            )
+            return cwd_owner
+        return env_agent
+
+    # 3. .otaman agent: field — CWD ancestry walk (keeps walking past .otaman without agent:)
     dotoman_agent = _read_otaman_agent_field(cwd)
     if dotoman_agent:
         return dotoman_agent
 
-    # 3b. CWD → platform.yaml → owner (backwards compat for repos not yet updated
-    #     by `otaman init --update`; same logic as the 2026-04-29 fix)
-    try:
-        worktree_main = resolve_worktree_main(cwd)
-    except Exception:
-        worktree_main = None
+    # 4. CWD → platform.yaml (+ owner-paths) → owner — already resolved above
+    if cwd_owner:
+        return cwd_owner
 
-    platform_yaml = root / "platform.yaml"
-    if platform_yaml.is_file():
-        data: dict = {}
-        try:
-            import yaml as _yaml
-            data = _yaml.safe_load(platform_yaml.read_text(encoding="utf-8")) or {}
-        except Exception:
-            data = {}
-        repos = data.get("repos") or []
-        if isinstance(repos, list):
-            for r in repos:
-                if not isinstance(r, dict):
-                    continue
-                rpath = r.get("path")
-                owner = r.get("owner")
-                if not rpath or not owner:
-                    continue
-                try:
-                    resolved = (root / rpath).resolve()
-                except (OSError, ValueError):
-                    continue
-                if cwd == resolved or cwd.is_relative_to(resolved):
-                    return str(owner).strip()
-                if worktree_main is not None and (
-                    worktree_main == resolved or worktree_main.is_relative_to(resolved)
-                ):
-                    return str(owner).strip()
-
-    # 4. .agents/current-agent — deprecated fallback
+    # 5. .agents/current-agent — deprecated fallback, validated (R3) against
+    #    platform.yaml's declared agents before being trusted.
     agent_file = root / ".agents" / "current-agent"
     if agent_file.is_file():
         try:
@@ -167,13 +215,21 @@ def resolve_agent_identity(
         if lines:
             name = lines[0].strip()
             if name:
-                print(
-                    f"[otaman] DEPRECATED: identity resolved from .agents/current-agent ('{name}'). "
-                    "Run 'otaman init --update' to migrate to per-repo .otaman agent: fields, "
-                    "or set OTAMAN_AGENT in your launch config.",
-                    file=sys.stderr,
-                )
-                return name
+                declared = _declared_agents(root)
+                if declared and name not in declared:
+                    print(
+                        f"[otaman] WARNING: .agents/current-agent contains {name!r}, "
+                        f"which is not a declared agent in platform.yaml — ignoring.",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        f"[otaman] DEPRECATED: identity resolved from .agents/current-agent ('{name}'). "
+                        "Run 'otaman init --update' to migrate to per-repo .otaman agent: fields, "
+                        "or set OTAMAN_AGENT in your launch config.",
+                        file=sys.stderr,
+                    )
+                    return name
 
-    # 5. Nothing found
+    # 6. Nothing found
     return None

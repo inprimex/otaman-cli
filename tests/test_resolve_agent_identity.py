@@ -62,6 +62,13 @@ def project(tmp_path: Path) -> Path:
         """
 project: myplatform
 version: "1.0"
+agents:
+  # R3: .agents/current-agent's value is now validated against the
+  # declared-agents roster -- these extra names are declared so the
+  # deprecated-fallback tests below can keep using distinctive
+  # placeholder values instead of reusing a real repo owner name.
+  - name: global-fallback
+  - name: orphan-agent
 repos:
   - name: auth-service
     path: ../auth-service
@@ -165,6 +172,8 @@ def test_repo_missing_owner_field_skipped(project: Path, monkeypatch) -> None:
         """
 project: myplatform
 version: "1.0"
+agents:
+  - name: default-fallback
 repos:
   - name: auth-service
     path: ../auth-service

@@ -1,12 +1,15 @@
 """Tests for the identity resolution priority chain.
 
-Covers agent-identity-per-directory spec (D1, amended 2026-05-28):
+Covers agent-identity-per-directory spec (D1, amended 2026-05-28; R3
+cross-check amended 2026-07-08):
 1. explicit arg
-2. OTAMAN_AGENT env var
-3a. .otaman agent: field (CWD walk — keeps walking past files without agent:)
-3b. platform.yaml CWD->owner (backwards-compat for un-updated repos)
-4. .agents/current-agent (deprecated, emits warning)
-5. None when nothing resolves
+2. OTAMAN_AGENT env var — cross-checked (R3) against the CWD-resolved repo
+   owner; disagreement means the CWD-resolved owner wins, with a warning
+3. .otaman agent: field (CWD walk — keeps walking past files without agent:)
+4. CWD -> platform.yaml (+ owner-paths) -> owner, via resolve_owner_for_path()
+5. .agents/current-agent (deprecated; validated (R3) against declared
+   agents; emits warning)
+6. None when nothing resolves
 
 ~/.otaman-session is no longer in the chain (dropped by 2026-05-28 amendment).
 """
@@ -32,7 +35,17 @@ def project(tmp_path: Path) -> Path:
     (parent / "svc-api").mkdir()
     (parent / "svc-web").mkdir()
     (meta / "platform.yaml").write_text(
-        "project: platform\nrepos:\n"
+        "project: platform\n"
+        # R3: .agents/current-agent's value is now validated against the
+        # declared-agents roster (agents: list + repos[].owner) -- these
+        # extra names are declared so the deprecated-fallback tests below
+        # can keep using distinctive placeholder values instead of reusing
+        # a real repo owner name.
+        "agents:\n"
+        "  - name: fallback-agent\n"
+        "  - name: legacy-agent\n"
+        "  - name: real-agent\n"
+        "repos:\n"
         "  - name: svc-api\n    path: ../svc-api\n    owner: api-agent\n"
         "  - name: svc-web\n    path: ../svc-web\n    owner: web-agent\n",
         encoding="utf-8",
@@ -45,9 +58,26 @@ def project(tmp_path: Path) -> Path:
 
 
 def test_env_var_wins_over_dotoman_field(project: Path, monkeypatch) -> None:
-    (project.parent / "svc-api" / ".otaman").write_text("agent: api-agent\n")
-    monkeypatch.setenv("OTAMAN_AGENT", "env-override")
-    assert resolve_agent_identity(project, project.parent / "svc-api") == "env-override"
+    # svc-api's declared owner (platform.yaml) is api-agent -- keep
+    # OTAMAN_AGENT matching it so the R3 cross-check (see below) doesn't
+    # fire, isolating this test to priority ordering (env vs .otoman
+    # marker) rather than the cross-check behavior.
+    (project.parent / "svc-api" / ".otaman").write_text("agent: otoman-marker-agent\n")
+    monkeypatch.setenv("OTAMAN_AGENT", "api-agent")
+    assert resolve_agent_identity(project, project.parent / "svc-api") == "api-agent"
+
+
+def test_env_var_disagreeing_with_cwd_owner_is_overridden(project: Path, monkeypatch, capsys) -> None:
+    """R3 (2026-07-08, greenbin incident): a stale/leaked OTAMAN_AGENT must
+    not silently override the real repo owner resolved from cwd -- the
+    cwd-resolved owner wins, with a warning explaining why."""
+    monkeypatch.setenv("OTAMAN_AGENT", "stale-poisoned-agent")
+    result = resolve_agent_identity(project, project.parent / "svc-api")
+    assert result == "api-agent"
+    err = capsys.readouterr().err
+    assert "WARNING" in err
+    assert "stale-poisoned-agent" in err
+    assert "api-agent" in err
 
 
 def test_env_var_wins_over_current_agent(project: Path, monkeypatch) -> None:
