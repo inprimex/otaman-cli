@@ -206,6 +206,29 @@ class ValidationFinding:
     note: str | None = None
 
 
+def declared_agents_from_platform(platform: dict[str, Any]) -> set[str]:
+    """Return the set of agent names `platform.yaml` declares.
+
+    Sources: the explicit `agents:` list, plus every `repos[].owner` (a
+    repo's owner is a valid agent name even without an explicit `agents:`
+    list). Shared between `validate_owner_paths`'s ERROR check and
+    `identity.py`'s R3 validation of `.agents/current-agent` (2026-07-08) —
+    one roster, not two independently-maintained copies.
+    """
+    declared_agents: set[str] = set()
+    agents_field = platform.get("agents")
+    if isinstance(agents_field, list):
+        for a in agents_field:
+            if isinstance(a, dict):
+                name = a.get("name")
+                if isinstance(name, str) and name:
+                    declared_agents.add(name)
+    for r in platform.get("repos") or []:
+        if isinstance(r, dict) and isinstance(r.get("owner"), str) and r["owner"]:
+            declared_agents.add(r["owner"])
+    return declared_agents
+
+
 def validate_owner_paths(project_root: Path) -> list[ValidationFinding]:
     """Walk every repo's `owner-paths:` block + report issues.
 
@@ -225,28 +248,7 @@ def validate_owner_paths(project_root: Path) -> list[ValidationFinding]:
     if platform is None:
         return findings
 
-    declared_agents = set()
-    agents_field = platform.get("agents")
-    if isinstance(agents_field, list):
-        for a in agents_field:
-            if isinstance(a, dict):
-                name = a.get("name")
-                if isinstance(name, str) and name:
-                    declared_agents.add(name)
-    # repos[].owner is also a declaration source — without an explicit
-    # `agents:` list a repo's owner is still a valid agent name.
-    for r in platform.get("repos") or []:
-        if isinstance(r, dict) and isinstance(r.get("owner"), str):
-            declared_agents.add(r["owner"])
-        if isinstance(r, dict):
-            owner_paths_raw = r.get("owner-paths") or r.get("owner_paths") or {}
-            if isinstance(owner_paths_raw, dict):
-                for v in owner_paths_raw.values():
-                    if isinstance(v, str):
-                        # Don't auto-trust owner-paths values; the validator's
-                        # ERROR rule deliberately checks them.  Only add the
-                        # `agents:` list + repo `owner:` entries above.
-                        pass
+    declared_agents = declared_agents_from_platform(platform)
 
     for r in platform.get("repos") or []:
         if not isinstance(r, dict):
