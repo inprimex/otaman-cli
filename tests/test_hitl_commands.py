@@ -227,8 +227,12 @@ def project(tmp_path: Path) -> Path:
     return meta
 
 
-def test_cli_hitl_take_emits_human_decision(project: Path):
-    """End-to-end: planted request → `otaman hitl take` → human-decision emitted."""
+def test_cli_hitl_take_non_tty_refuses_and_writes_nothing(project: Path):
+    """`take` produces a PRIVILEGED `human-decision` message -- a piped,
+    non-interactive stdin (exactly what a subprocess `input=` pipe gives
+    you) must be refused outright, not fed through the decision prompts.
+    Same forgery class as F012's pre-fix `otaman approve`; regression guard
+    for the 2026-07-09 TTY-gate fix."""
     active = project / ".agents" / "bus" / "active"
     stem = "20260603T100000-bridge-to-human-request-human-review-approve-it"
     _write_request(
@@ -238,36 +242,19 @@ def test_cli_hitl_take_emits_human_decision(project: Path):
     )
 
     env = {**os.environ, "OTAMAN_AGENT": "human"}
-    # Six lines fed via stdin: decision, blank end-rationale, blank end-followup,
-    # blank "decided by" → default. (Empty rationale/followup are terminated by
-    # a blank line; the `Decided by` prompt accepts default on blank.)
-    stdin_input = (
-        "approve\n"   # decision
-        "\n"          # rationale (immediately blank → empty)
-        "\n"          # followup (immediately blank → empty)
-        "\n"          # decided-by → default 'human'
-    )
+    stdin_input = "approve\n\n\n\n"
 
     rc = subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "hitl", "take", stem],
         capture_output=True, text=True, cwd=str(project), env=env,
         input=stdin_input,
     )
-    assert rc.returncode == 0, rc.stderr or rc.stdout
+    assert rc.returncode != 0
+    assert "interactive terminal" in (rc.stdout + rc.stderr)
 
-    # Decision file written
-    decisions = [f for f in active.glob("*human-decision*") if f.is_file()]
-    assert len(decisions) == 1
-    text = decisions[0].read_text(encoding="utf-8")
-    assert "type: human-decision" in text
-    assert "in-reply-to: " + stem in text
-    assert "session-id: sess-xyz" in text
-    assert "decision: approve" in text
-
-    # Original request marked resolved
+    assert [f for f in active.glob("*human-decision*") if f.is_file()] == []
     ack = active / "acks" / f"{stem}.human.ack"
-    assert ack.is_file()
-    assert ack.read_text(encoding="utf-8").strip() == "resolved"
+    assert not ack.exists()
 
 
 def test_cli_hitl_list_shows_pending(project: Path):

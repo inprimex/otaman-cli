@@ -202,6 +202,19 @@ def cmd_take(args: dict[str, Any]) -> int:
     if req is None:
         return _bail(f"No pending request matching {target!r}")
 
+    # 2026-07-09 (same forgery class as F012): `take` produces a
+    # `human-decision` message -- a PRIVILEGED type -- via input()-based
+    # prompts with no TTY check, so a non-interactive/piped stdin could
+    # forge one. Gate on a real interactive terminal before collecting
+    # anything; deliberately no --yes/scripted bypass, same as
+    # confirm_human_decision.
+    from otaman_cli.safety import require_interactive_tty
+    if not require_interactive_tty(
+        f"About to take HITL item {req.msg_stem} ({req.subject!r}) -- "
+        f"this will produce a `human-decision` message asserting `from: human`."
+    ):
+        return _bail("Refusing to record a decision without an interactive terminal.")
+
     UI.header(f"HITL — taking {req.msg_stem}")
     print(f"  From:          {req.from_agent}")
     print(f"  Priority:      {req.priority}")
