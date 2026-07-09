@@ -70,22 +70,23 @@ def confirm_destructive_operation(
     return answer in ("y", "yes")
 
 
-def confirm_human_decision(description: str, expected_phrase: str = "CONFIRM") -> bool:
-    """Gate for producing a PRIVILEGED bus message (asserts ``from: human``).
+def require_interactive_tty(description: str) -> bool:
+    """Bare TTY gate for flows that assert a human decision: echoes
+    *description*, then refuses outright -- no prompt, no bypass -- if
+    stdin isn't a real TTY.
 
-    Echoes *description*, then refuses outright -- no prompt, no bypass --
-    if stdin isn't a real TTY. Only when it is does it ask the caller to
-    type *expected_phrase* verbatim (case-sensitive); anything else, or a
-    non-interactive EOF/interrupt, refuses.
+    Split out of `confirm_human_decision` (2026-07-09, `otaman hitl take`
+    TTY-gate follow-on to F012) for callers
+    that already run their own multi-step interactive dialogue after the
+    gate (e.g. `otaman hitl take`'s decision/rationale/followup prompts)
+    and don't want a redundant type-a-phrase step layered on top -- the
+    TTY check alone is the part that actually blocks a piped/non-EOF
+    non-interactive stdin from forging the message, same as
+    `confirm_human_decision` below.
 
-    This is a practical proxy for "a human is driving this" specifically
-    because Claude Code's Bash tool (and similar agent-harness shells) does
-    not attach a real interactive TTY to the processes it spawns -- an
-    agent session cannot satisfy this check by itself, only a genuine
-    terminal session can.
-
-    Returns True if the caller should proceed, False if it should abort
-    without writing anything.
+    Returns True if stdin is a real interactive terminal (caller may go on
+    to run its own prompts), False if it should abort without prompting
+    further.
     """
     print()
     print(description)
@@ -98,6 +99,30 @@ def confirm_human_decision(description: str, expected_phrase: str = "CONFIRM") -
             "including agent Bash-tool sessions -- cannot satisfy this.",
             file=sys.stderr,
         )
+        return False
+
+    return True
+
+
+def confirm_human_decision(description: str, expected_phrase: str = "CONFIRM") -> bool:
+    """Gate for producing a PRIVILEGED bus message (asserts ``from: human``).
+
+    Echoes *description*, then refuses outright -- no prompt, no bypass --
+    if stdin isn't a real TTY (via `require_interactive_tty`). Only when it
+    is does it ask the caller to type *expected_phrase* verbatim
+    (case-sensitive); anything else, or a non-interactive EOF/interrupt,
+    refuses.
+
+    This is a practical proxy for "a human is driving this" specifically
+    because Claude Code's Bash tool (and similar agent-harness shells) does
+    not attach a real interactive TTY to the processes it spawns -- an
+    agent session cannot satisfy this check by itself, only a genuine
+    terminal session can.
+
+    Returns True if the caller should proceed, False if it should abort
+    without writing anything.
+    """
+    if not require_interactive_tty(description):
         return False
 
     try:
