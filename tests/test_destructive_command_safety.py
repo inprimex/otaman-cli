@@ -133,6 +133,16 @@ class TestMigrateDryRun:
         assert "would move" in output.lower()
         assert "would git init" in output.lower() or "git init" in output.lower()
 
+    def test_dry_run_reports_mcp_json_and_claude_md_when_present(self, migrate_project: Path, capsys):
+        (migrate_project / ".mcp.json").write_text("{}\n", encoding="utf-8")
+        (migrate_project / "CLAUDE.md").write_text("# Otaman Agent Context\n", encoding="utf-8")
+        from otaman_cli.commands.migrate import cmd_migrate
+
+        cmd_migrate(["--dry-run"])
+        output = capsys.readouterr().out
+        assert "would move .mcp.json" in output.lower()
+        assert "would move claude.md" in output.lower()
+
 
 class TestMigrateConfirmGate:
 
@@ -156,6 +166,23 @@ class TestMigrateConfirmGate:
         assert (maestro_dir / "platform.yaml").is_file()
         assert not (migrate_project / "platform.yaml").exists()
         mock_run.assert_called()  # git init/add/commit invoked
+
+    def test_yes_flag_also_moves_mcp_json_and_claude_md(self, migrate_project: Path):
+        """uniform-ce-directory-layout 1.6b: .mcp.json and CLAUDE.md must land
+        inside the dedicated otaman folder too, matching ce-bootstrap.sh's
+        fresh-install scaffold (PROGRAM_OTAMAN_DIR contents) exactly."""
+        (migrate_project / ".mcp.json").write_text("{}\n", encoding="utf-8")
+        (migrate_project / "CLAUDE.md").write_text("# Otaman Agent Context\n", encoding="utf-8")
+        with mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=False), \
+             mock.patch("subprocess.run"):
+            from otaman_cli.commands.migrate import cmd_migrate
+            rc = cmd_migrate(["--yes"])
+        assert rc == 0
+        maestro_dir = migrate_project / "sampleproj-otaman"
+        assert (maestro_dir / ".mcp.json").is_file()
+        assert (maestro_dir / "CLAUDE.md").is_file()
+        assert not (migrate_project / ".mcp.json").exists()
+        assert not (migrate_project / "CLAUDE.md").exists()
 
     def test_interactive_decline_makes_zero_writes(self, migrate_project: Path):
         with mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=True), \
