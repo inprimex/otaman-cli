@@ -6,6 +6,13 @@ across it and git-inits a new repo -- exactly the incident this spec
 change addresses (2026-07-04 `otaman migrate` incident). Tasks 1.2/1.5:
 identity echo, confirm gate (or --yes), and a --dry-run it previously
 had none of.
+
+uniform-ce-directory-layout task 1.6b (2026-07-09): `_ARTIFACT_NAMES`
+must match otaman-deploy's `ce-bootstrap.sh` fresh-install scaffold
+(PROGRAM_OTAMAN_DIR contents, otaman-deploy commit a39a0a1) exactly, so
+a converted legacy layout and a fresh install produce the identical
+program-level shape -- ``.mcp.json`` and ``CLAUDE.md`` were added
+alongside the pre-existing ``platform.yaml``/``.agents``/``.claude``.
 """
 
 from __future__ import annotations
@@ -19,7 +26,7 @@ from otaman_cli.identity import find_project_root
 from otaman_cli.main import C, UI
 from otaman_cli.safety import confirm_destructive_operation
 
-_ARTIFACT_NAMES = ("platform.yaml", ".agents", ".claude")
+_ARTIFACT_NAMES = ("platform.yaml", ".agents", ".claude", ".mcp.json", "CLAUDE.md")
 _SCRIPT_NAMES = ("launch-agents.ps1", "launch-agents.sh", "LAUNCH-AGENTS.md")
 
 
