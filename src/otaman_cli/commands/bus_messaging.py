@@ -404,10 +404,32 @@ def cmd_ack(args: list[str]) -> int:
         UI.muted("     OR the frontmatter `id:` value from the top line.")
         return 1
 
-    if len(matches) > 5:
-        UI.warn(f"{len(matches)} messages match '{pattern}'.")
-        UI.muted("Be more specific, or use 'otaman ack --all' to ack all pending.")
+    # fswatch-agent bug report 20260814T213000: a partial stem matching
+    # several distinct messages used to ack ALL of them — including copies
+    # addressed to other agents (stray cross-agent sidecar files in acks/).
+    # First restrict candidates to files that are actually *this* agent's
+    # copy, then reject remaining ambiguity the same way `otaman read` does.
+    mine = [f for f in matches if _file_is_for_agent(f.stem, _read_frontmatter(f), agent)]
+
+    if not mine:
+        UI.error(f"{len(matches)} match(es) for '{pattern}', but none are addressed to {agent}:")
+        for m in matches[:5]:
+            UI.muted(f"  - {m.stem}")
+        if len(matches) > 5:
+            UI.muted(f"  ... and {len(matches) - 5} more")
+        UI.muted("  Acks are per-agent; each recipient acks its own copy.")
         return 1
+
+    if len(mine) > 1:
+        UI.error(f"Ambiguous stem '{pattern}'. Matches:")
+        for m in mine[:5]:
+            UI.muted(f"  - {m.stem}")
+        if len(mine) > 5:
+            UI.muted(f"  ... and {len(mine) - 5} more")
+        UI.muted("  Be more specific — paste the full stem from `otaman check`.")
+        return 1
+
+    matches = mine
 
     # Task 2.3 advisory: when resolving a message that expects a response,
     # warn if no outbound reply with reply-to: <this-id> exists.  Do not block.
@@ -452,6 +474,48 @@ def cmd_ack(args: list[str]) -> int:
     _status_hook_after_ack(root, agent, matches)
 
     return 0
+
+
+def _read_frontmatter(path: Path) -> dict:
+    """Parse a message file's YAML frontmatter; {} on any failure."""
+    try:
+        head = path.read_text(encoding="utf-8")[:2048]
+    except (OSError, UnicodeDecodeError):
+        return {}
+    m = re.match(r"^---\n(.+?)\n---", head, re.DOTALL)
+    if not m:
+        return {}
+    try:
+        import yaml
+
+        fm = yaml.safe_load(m.group(1))
+    except Exception:
+        return {}
+    return fm if isinstance(fm, dict) else {}
+
+
+def _file_is_for_agent(stem: str, fm: dict, agent: str) -> bool:
+    """Is this on-disk message file *agent*'s own copy?
+
+    The per-file recipient lives in the FILENAME, not the frontmatter: CC
+    fan-out copies keep the original ``to:`` in frontmatter and carry the
+    full ``cc:`` list, so frontmatter alone over-matches other recipients'
+    copies. Naming shapes in the live bus:
+
+      primary:            <ts>-<from>-to-<recipient>-<slug>
+      cc copy (current):  <ts>-<from>-to-<cc-recipient>-<slug>   + x-cc: true
+      cc copy (legacy):   <ts>-<from>-to-<orig-to>-cc-<cc-recipient>-<slug>
+      broadcast:          to: all in frontmatter
+    """
+    if f"-cc-{agent}-" in stem or stem.endswith(f"-cc-{agent}"):
+        return True  # legacy cc naming — my copy
+    if fm.get("x-cc"):
+        if "-cc-" in stem:
+            return False  # legacy cc naming — another recipient's copy
+        return f"-to-{agent}-" in stem or stem.endswith(f"-to-{agent}")
+    if f"-to-{agent}-" in stem or stem.endswith(f"-to-{agent}"):
+        return True
+    return fm.get("to") in ("all", agent)
 
 
 def _status_hook_after_ack(root: Path, agent: str, msg_files: list[Path]) -> None:
