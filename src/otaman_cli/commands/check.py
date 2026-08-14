@@ -92,13 +92,19 @@ def cmd_check(args: list[str]) -> int:
                 continue
 
             to = fm.get("to", "")
+            # notify-change-fanout: legacy multi-recipient messages carry a
+            # comma-joined `to:` list ("cli-agent, core-agent, ...") which an
+            # exact-equality check never matches — every listed recipient was
+            # blind to the message. Split on commas so those surface; new
+            # notify-change writes per-recipient copies anyway.
+            to_list = [t.strip() for t in str(to).split(",") if t.strip()]
             # bus-cc-routing task 2.2 — also pick up CC copies addressed to
             # someone else but with this agent in the `cc:` list (and the
             # `x-cc: true` marker indicating the bus_server wrote this copy
             # for a CC recipient).
             cc_field = fm.get("cc") or []
             is_cc_copy = bool(fm.get("x-cc")) and isinstance(cc_field, list) and (agent in cc_field)
-            if to != agent and to != "all" and not is_cc_copy:
+            if agent not in to_list and "all" not in to_list and not is_cc_copy:
                 continue
 
             # Per-agent status from ack files

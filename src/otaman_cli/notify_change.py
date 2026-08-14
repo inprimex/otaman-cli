@@ -166,6 +166,7 @@ def derive_recipients(specs_root: Path, change_name: str, platform_yaml: Path) -
 def _build_message(
     *,
     change_name: str,
+    recipient: str,
     recipients: list[str],
     commit_hash: str,
     commit_msg: str,
@@ -174,13 +175,21 @@ def _build_message(
     msg_id: str,
     specs_repo_name: str,
 ) -> str:
-    """Render the spec-change body — mirrors spec-change-hook.sh template."""
-    to_field = ", ".join(recipients)
+    """Render one recipient's spec-change copy.
+
+    notify-change-fanout (2026-08-14, spec-agent 20260814T220525): the old
+    single-file form put ALL recipients in one comma-joined ``to:`` field,
+    which `otaman check`'s exact-match recipient filter never matched — a
+    10-agent spec-change dispatch was invisible to every recipient.  Write
+    one copy per recipient instead (`cli-send-cc-fanout-parity` precedent);
+    each copy's ``to:`` names exactly one agent.  The full derived list
+    stays visible in the body for transparency.
+    """
     return (
         f"---\n"
         f"id: {msg_id}\n"
         f"from: {specs_repo_name}\n"
-        f"to: {to_field}\n"
+        f"to: {recipient}\n"
         f"priority: high\n"
         f"type: spec-change\n"
         f"timestamp: {timestamp_iso}\n"
@@ -192,6 +201,8 @@ def _build_message(
         f"Commit `{commit_hash}` by {commit_author}: {commit_msg}\n"
         f"\n"
         f"**Change**: {change_name}\n"
+        f"\n"
+        f"**All recipients**: {', '.join(recipients)}\n"
         f"\n"
         f"Recipients are derived from `tasks.md` `@otaman-<repo>` annotations.\n"
         f"Fallback: `spec-agent` when no tasks.md exists; `spec-agent, human` "
@@ -262,6 +273,7 @@ def notify_change(project_root: Path, change_name: str) -> tuple[int, dict[str, 
         "change_name": change_name,
         "recipients": [],
         "message_path": None,
+        "message_paths": [],
         "map_tasks_called": False,
         "map_tasks_path": None,
         "tasks_md_path": None,
@@ -288,17 +300,6 @@ def notify_change(project_root: Path, change_name: str) -> tuple[int, dict[str, 
     iso_ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     msg_id = f"{msg_ts}-{commit_hash}"
 
-    body = _build_message(
-        change_name=change_name,
-        recipients=recipients,
-        commit_hash=commit_hash,
-        commit_msg=commit_msg,
-        commit_author=commit_author,
-        timestamp_iso=iso_ts,
-        msg_id=msg_id,
-        specs_repo_name=specs_root.name,
-    )
-
     bus_active = _resolve_bus_active(project_root)
     try:
         bus_active.mkdir(parents=True, exist_ok=True)
@@ -306,13 +307,32 @@ def notify_change(project_root: Path, change_name: str) -> tuple[int, dict[str, 
     except OSError as exc:
         return 2, {**summary, "error": f"bus dir not writable: {exc}"}
 
-    msg_filename = f"{msg_ts}-{specs_root.name}-spec-change.md"
-    msg_path = bus_active / msg_filename
-    try:
-        msg_path.write_text(body, encoding="utf-8")
-    except OSError as exc:
-        return 2, {**summary, "error": f"failed to write message: {exc}"}
-    summary["message_path"] = str(msg_path)
+    # notify-change-fanout — one copy per recipient (see _build_message).
+    # The recipient goes into the filename's -to-<agent>- segment so both
+    # check's glob-based tooling and ack's filename-ownership filter treat
+    # these exactly like cmd_send primaries.
+    message_paths: list[str] = []
+    for recipient in recipients:
+        body = _build_message(
+            change_name=change_name,
+            recipient=recipient,
+            recipients=recipients,
+            commit_hash=commit_hash,
+            commit_msg=commit_msg,
+            commit_author=commit_author,
+            timestamp_iso=iso_ts,
+            msg_id=msg_id,
+            specs_repo_name=specs_root.name,
+        )
+        msg_filename = f"{msg_ts}-{specs_root.name}-to-{recipient}-spec-change.md"
+        msg_path = bus_active / msg_filename
+        try:
+            msg_path.write_text(body, encoding="utf-8")
+        except OSError as exc:
+            return 2, {**summary, "error": f"failed to write message: {exc}"}
+        message_paths.append(str(msg_path))
+    summary["message_path"] = message_paths[0] if message_paths else None
+    summary["message_paths"] = message_paths
 
     # map-tasks.py invocation (task 1.4) — graceful degradation when absent
     map_tasks = _find_map_tasks_py()
@@ -343,7 +363,8 @@ def notify_change(project_root: Path, change_name: str) -> tuple[int, dict[str, 
 
 def cmd_notify_change(args: list[str]) -> int:
     """`otaman notify-change <change-name>` CLI entry point (task 1.1)."""
-    from otaman_cli.main import UI, find_project_root
+    from otaman_cli.identity import find_project_root
+    from otaman_cli.main import UI
 
     if not args:
         UI.error("Usage: otaman notify-change <change-name>")
@@ -364,7 +385,11 @@ def cmd_notify_change(args: list[str]) -> int:
         return rc
 
     # Task 1.5 — summary
-    UI.ok(f"spec-change notification written: {Path(summary['message_path']).name}")
+    n_copies = len(summary.get("message_paths") or [])
+    UI.ok(
+        f"spec-change notification written: {Path(summary['message_path']).name}"
+        + (f" (+{n_copies - 1} per-recipient copies)" if n_copies > 1 else "")
+    )
     UI.kv("  Change", summary["change_name"])
     UI.kv("  Recipients", ", ".join(summary["recipients"]))
     if summary["tasks_md_path"]:

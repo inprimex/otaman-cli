@@ -515,7 +515,10 @@ def _file_is_for_agent(stem: str, fm: dict, agent: str) -> bool:
         return f"-to-{agent}-" in stem or stem.endswith(f"-to-{agent}")
     if f"-to-{agent}-" in stem or stem.endswith(f"-to-{agent}"):
         return True
-    return fm.get("to") in ("all", agent)
+    # Comma-tolerant frontmatter fallback: legacy notify-change files carry
+    # a multi-recipient "a, b, c" to: field (notify-change-fanout).
+    to_list = [t.strip() for t in str(fm.get("to", "")).split(",") if t.strip()]
+    return agent in to_list or "all" in to_list
 
 
 def _status_hook_after_ack(root: Path, agent: str, msg_files: list[Path]) -> None:

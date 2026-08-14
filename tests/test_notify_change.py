@@ -54,6 +54,25 @@ def _stage_change(specs: Path, change_name: str, tasks_md_body: str | None = Non
     return change_dir
 
 
+def _run_cli(project: Path, agent: str, *args: str) -> subprocess.CompletedProcess:
+    """Run the CLI as *agent* from *project*; propagates sys.path so the
+    subprocess resolves otaman_cli in sibling-checkout dev setups too."""
+    env = {
+        **os.environ,
+        "OTAMAN_AGENT": agent,
+        "PYTHONPATH": os.pathsep.join(p for p in sys.path if p),
+        "NO_COLOR": "1",
+    }
+    return subprocess.run(
+        [sys.executable, "-m", "otaman_cli.main", *args],
+        cwd=project,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
 # ---------------------------------------------------------------- task 1.2 — recipient derivation
 class TestDeriveRecipients:
     def test_no_tasks_md_returns_spec_agent_only(self, tmp_path: Path):
@@ -156,15 +175,72 @@ class TestNotifyChangeBusMessage:
         assert "priority: high" in body
         assert "Specs changed" in body
 
-    def test_recipient_list_joined_with_commas(self, tmp_path: Path):
+    def test_multi_recipient_fans_out_per_recipient_copies(self, tmp_path: Path):
+        """notify-change-fanout (spec-agent 20260814T220525): the old
+        single-file comma-joined `to:` was invisible to every recipient's
+        `otaman check`. One copy per recipient, single-agent `to:` each."""
         project, specs = _stage_workspace(tmp_path)
         _stage_change(specs, "ch1", "- [ ] @otaman-cli\n- [ ] @otaman-core\n")
         rc, summary = notify_change(project, "ch1")
         assert rc == 0
-        body = (
-            project / ".agents" / "bus" / "active" / Path(summary["message_path"]).name
-        ).read_text()
-        assert "to: cli-agent, core-agent" in body
+        bus = project / ".agents" / "bus" / "active"
+        msgs = sorted(bus.glob("*spec-change*.md"))
+        assert len(msgs) == 2
+        assert summary["message_paths"] == [str(m) for m in msgs] or set(
+            summary["message_paths"]
+        ) == {str(m) for m in msgs}
+        by_recipient = {}
+        for m in msgs:
+            body = m.read_text(encoding="utf-8")
+            assert "to: cli-agent, core-agent" not in body  # the old broken form
+            assert "**All recipients**: cli-agent, core-agent" in body
+            if "to: cli-agent\n" in body:
+                by_recipient["cli-agent"] = m
+            if "to: core-agent\n" in body:
+                by_recipient["core-agent"] = m
+        assert set(by_recipient) == {"cli-agent", "core-agent"}
+        # Recipient encoded in the filename -to-<agent>- segment (ack/check
+        # filename-ownership convention)
+        assert "-to-cli-agent-" in by_recipient["cli-agent"].name
+        assert "-to-core-agent-" in by_recipient["core-agent"].name
+
+    def test_fanout_copies_visible_in_check_for_each_recipient(self, tmp_path: Path):
+        project, specs = _stage_workspace(tmp_path)
+        _stage_change(specs, "ch1", "- [ ] @otaman-cli\n- [ ] @otaman-core\n")
+        rc, _ = notify_change(project, "ch1")
+        assert rc == 0
+        for agent in ("cli-agent", "core-agent"):
+            out = _run_cli(project, agent, "check").stdout
+            assert "Specs changed" in out, f"spec-change invisible to {agent}"
+
+    def test_legacy_comma_to_message_surfaces_in_check_and_acks(self, tmp_path: Path):
+        """Belt-and-braces: multi-recipient files already in the bus (written
+        by the old code) must surface for every listed recipient and be
+        ackable, instead of rotting."""
+        project, _specs = _stage_workspace(tmp_path)
+        stem = "20260814T213442-myorg-specs-spec-change"
+        (project / ".agents" / "bus" / "active" / f"{stem}.md").write_text(
+            "---\n"
+            f"id: {stem}\n"
+            "from: myorg-specs\n"
+            "to: cli-agent, core-agent, plugin-agent\n"
+            "priority: high\n"
+            "type: spec-change\n"
+            "timestamp: 2026-08-14T21:34:42Z\n"
+            "status: pending\n"
+            "---\n\n## Subject: Specs changed in myorg-specs\n",
+            encoding="utf-8",
+        )
+        for agent in ("cli-agent", "core-agent"):
+            out = _run_cli(project, agent, "check").stdout
+            assert stem in out, f"legacy multi-recipient message invisible to {agent}"
+        # Non-listed agent does not see it
+        assert stem not in _run_cli(project, "runner-agent", "check").stdout
+        # Each listed agent can ack its own sidecar
+        rc = _run_cli(project, "core-agent", "ack", stem)
+        assert rc.returncode == 0
+        ack = project / ".agents" / "bus" / "active" / "acks" / f"{stem}.core-agent.ack"
+        assert ack.is_file()
 
     def test_fallback_to_spec_agent_when_no_tasks_md(self, tmp_path: Path):
         project, specs = _stage_workspace(tmp_path)
@@ -251,20 +327,7 @@ class TestExitCodes:
 # ---------------------------------------------------------------- task 1.5 — CLI integration
 class TestCmdNotifyChange:
     def _run_cli(self, project: Path, *args: str) -> subprocess.CompletedProcess:
-        env = {
-            **os.environ,
-            "OTAMAN_AGENT": "cli-agent",
-            "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
-            "NO_COLOR": "1",
-        }
-        return subprocess.run(
-            [sys.executable, "-m", "otaman_cli.main", *args],
-            cwd=project,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        return _run_cli(project, "cli-agent", *args)
 
     def test_no_args_exits_2_with_usage(self, tmp_path: Path):
         project, _ = _stage_workspace(tmp_path)
@@ -281,10 +344,11 @@ class TestCmdNotifyChange:
         assert "spec-change notification written" in r.stdout
         assert "Recipients" in r.stdout
         assert "cli-agent" in r.stdout
-        # Bus message on disk
+        # Bus messages on disk — one per recipient (notify-change-fanout)
         bus = project / ".agents" / "bus" / "active"
         msgs = list(bus.glob("*spec-change*.md"))
-        assert len(msgs) == 1
+        assert len(msgs) == 2
+        assert "+1 per-recipient copies" in r.stdout
 
     def test_cli_missing_change_exits_1(self, tmp_path: Path):
         project, _ = _stage_workspace(tmp_path)
