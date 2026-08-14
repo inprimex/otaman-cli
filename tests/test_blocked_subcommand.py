@@ -38,10 +38,14 @@ def project(tmp_path: Path) -> Path:
 
 def _run(meta: Path, *args: str) -> subprocess.CompletedProcess:
     import os
+
     env = {**os.environ, "OTAMAN_AGENT": "cli-agent"}
     return subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "blocked", *args],
-        capture_output=True, text=True, cwd=str(meta), env=env,
+        capture_output=True,
+        text=True,
+        cwd=str(meta),
+        env=env,
     )
 
 

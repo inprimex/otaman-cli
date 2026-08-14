@@ -6,17 +6,14 @@ import argparse
 import json
 from pathlib import Path
 
-import pytest
-
 from otaman_cli.onboard.doctor import (
-    CheckResult,
-    cmd_doctor,
-    run_doctor,
     _check_audit_writable,
     _check_duplicate_emails,
     _check_each_user_valid,
     _check_state_dir_exists,
     _check_users_yaml_parseable,
+    cmd_doctor,
+    run_doctor,
 )
 from otaman_cli.onboard.state import User, save_users
 
@@ -43,9 +40,12 @@ class TestUsersYamlParseable:
         assert "does not exist" in result.detail
 
     def test_valid_file_is_ok(self, tmp_path):
-        save_users([
-            User(email="a@x.com", display_name="A", roles=["otaman:developer"]),
-        ], tmp_path)
+        save_users(
+            [
+                User(email="a@x.com", display_name="A", roles=["otaman:developer"]),
+            ],
+            tmp_path,
+        )
         result = _check_users_yaml_parseable(tmp_path)
         assert result.status == "OK"
         assert "1 user(s)" in result.detail
@@ -58,10 +58,13 @@ class TestUsersYamlParseable:
 
 class TestEachUserValid:
     def test_all_valid(self, tmp_path):
-        save_users([
-            User(email="a@x.com", display_name="A", roles=["otaman:developer"]),
-            User(email="b@x.com", display_name="B", roles=["otaman:viewer"]),
-        ], tmp_path)
+        save_users(
+            [
+                User(email="a@x.com", display_name="A", roles=["otaman:developer"]),
+                User(email="b@x.com", display_name="B", roles=["otaman:viewer"]),
+            ],
+            tmp_path,
+        )
         results = _check_each_user_valid(tmp_path)
         assert all(r.status == "OK" for r in results)
         assert len(results) == 2
@@ -69,10 +72,13 @@ class TestEachUserValid:
 
 class TestDuplicateEmails:
     def test_no_duplicates(self, tmp_path):
-        save_users([
-            User(email="a@x.com", display_name="A", roles=["otaman:developer"]),
-            User(email="b@x.com", display_name="B", roles=["otaman:viewer"]),
-        ], tmp_path)
+        save_users(
+            [
+                User(email="a@x.com", display_name="A", roles=["otaman:developer"]),
+                User(email="b@x.com", display_name="B", roles=["otaman:viewer"]),
+            ],
+            tmp_path,
+        )
         result = _check_duplicate_emails(tmp_path)
         assert result.status == "OK"
 
@@ -101,9 +107,12 @@ class TestAuditWritable:
 
 class TestRunDoctor:
     def test_clean_state(self, tmp_path):
-        save_users([
-            User(email="a@x.com", display_name="A", roles=["otaman:developer"]),
-        ], tmp_path)
+        save_users(
+            [
+                User(email="a@x.com", display_name="A", roles=["otaman:developer"]),
+            ],
+            tmp_path,
+        )
         (tmp_path / "audit").mkdir()
         results = run_doctor(tmp_path)
         statuses = [r.status for r in results]
@@ -119,9 +128,12 @@ class TestRunDoctor:
 
 class TestCmdDoctor:
     def test_clean_state_returns_0(self, tmp_path, capsys):
-        save_users([
-            User(email="a@x.com", display_name="A", roles=["otaman:developer"]),
-        ], tmp_path)
+        save_users(
+            [
+                User(email="a@x.com", display_name="A", roles=["otaman:developer"]),
+            ],
+            tmp_path,
+        )
         (tmp_path / "audit").mkdir()
         rc = cmd_doctor(_doctor_args(tmp_path))
         assert rc == 0

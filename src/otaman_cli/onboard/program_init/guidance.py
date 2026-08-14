@@ -8,17 +8,19 @@ Design: rule table — each entry has a callable predicate (lambda) and a
 next-step command.  Using callables instead of eval()-on-strings eliminates
 the security noise noted in the CTO review.
 """
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 
 @dataclass
 class GuidanceEntry:
     predicate: Callable[[dict[str, Any]], bool]  # receives answers dict
-    command: str            # shell command to run
-    description: str        # one-line human description
+    command: str  # shell command to run
+    description: str  # one-line human description
 
 
 def _has_process(name: str) -> Callable[[dict[str, Any]], bool]:

@@ -46,7 +46,7 @@ def _compile_glob(pattern: str) -> re.Pattern[str]:
     i = 0
     while i < len(pattern):
         c = pattern[i]
-        if c == "*" and pattern[i:i + 2] == "**":
+        if c == "*" and pattern[i : i + 2] == "**":
             out.append(".*")
             i += 2
         elif c == "*":
@@ -123,9 +123,7 @@ def _find_enclosing_repo(
     return best
 
 
-def resolve_owner_for_path(
-    target_path: Path, *, project_root: Path
-) -> OwnerResolution | None:
+def resolve_owner_for_path(target_path: Path, *, project_root: Path) -> OwnerResolution | None:
     """Public: resolve the owning agent for *target_path*.
 
     *project_root* — directory containing `platform.yaml`.  *target_path*
@@ -168,7 +166,7 @@ def resolve_owner_for_path(
 
     best_pat: str | None = None
     best_spec = -1
-    for pat, agent in owner_paths.items():
+    for pat, _agent in owner_paths.items():
         if not _glob_matches(rel, pat):
             continue
         specificity = len(pat)
@@ -199,7 +197,7 @@ def resolve_owner_for_path(
 class ValidationFinding:
     """One result row in the validator's report."""
 
-    severity: str         # "ok" | "warn" | "error"
+    severity: str  # "ok" | "warn" | "error"
     repo: str
     pattern: str
     agent: str
@@ -262,15 +260,24 @@ def validate_owner_paths(project_root: Path) -> list[ValidationFinding]:
         # Per-pattern checks
         for pat, agent in owner_paths.items():
             if declared_agents and agent not in declared_agents:
-                findings.append(ValidationFinding(
-                    severity="error",
-                    repo=repo_name, pattern=pat, agent=agent,
-                    note=f"{agent} is not declared in platform.yaml agents:",
-                ))
+                findings.append(
+                    ValidationFinding(
+                        severity="error",
+                        repo=repo_name,
+                        pattern=pat,
+                        agent=agent,
+                        note=f"{agent} is not declared in platform.yaml agents:",
+                    )
+                )
             else:
-                findings.append(ValidationFinding(
-                    severity="ok", repo=repo_name, pattern=pat, agent=agent,
-                ))
+                findings.append(
+                    ValidationFinding(
+                        severity="ok",
+                        repo=repo_name,
+                        pattern=pat,
+                        agent=agent,
+                    )
+                )
 
         # Overlap detection: for each pair of patterns, check whether
         # there's a path that matches both at equal specificity.  The
@@ -287,15 +294,19 @@ def validate_owner_paths(project_root: Path) -> list[ValidationFinding]:
                 # with safe stand-ins, then check whether p2 also matches.
                 sample = _example_path_for(p1)
                 if _glob_matches(sample, p1) and _glob_matches(sample, p2):
-                    findings.append(ValidationFinding(
-                        severity="warn",
-                        repo=repo_name, pattern=p1, agent=owner_paths[p1],
-                        note=(
-                            f'Overlap: "{sample}" matches both "{p1}" and "{p2}" '
-                            f"at equal specificity. Tiebreak: declared order — "
-                            f'"{p1}" wins.'
-                        ),
-                    ))
+                    findings.append(
+                        ValidationFinding(
+                            severity="warn",
+                            repo=repo_name,
+                            pattern=p1,
+                            agent=owner_paths[p1],
+                            note=(
+                                f'Overlap: "{sample}" matches both "{p1}" and "{p2}" '
+                                f"at equal specificity. Tiebreak: declared order — "
+                                f'"{p1}" wins.'
+                            ),
+                        )
+                    )
 
     return findings
 
@@ -306,7 +317,7 @@ def _example_path_for(pattern: str) -> str:
     i = 0
     while i < len(pattern):
         c = pattern[i]
-        if c == "*" and pattern[i:i + 2] == "**":
+        if c == "*" and pattern[i : i + 2] == "**":
             out.append("any/path/here")
             i += 2
         elif c == "*":

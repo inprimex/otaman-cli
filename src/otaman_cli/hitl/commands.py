@@ -12,12 +12,9 @@ so they work from any subdirectory of an otaman-managed project.
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
-from otaman_cli.identity import find_project_root
-from otaman_cli.main import UI, _resolve_bus_paths
 from otaman_cli.hitl.messages import (
     HumanDecisionPayload,
     RequestHumanReview,
@@ -26,6 +23,8 @@ from otaman_cli.hitl.messages import (
     list_pending,
     write_resolved_ack,
 )
+from otaman_cli.identity import find_project_root
+from otaman_cli.main import UI, _resolve_bus_paths
 
 
 def _bail(msg: str, code: int = 1) -> int:
@@ -78,8 +77,9 @@ def cmd_list(args: dict[str, Any]) -> int:
         print()
         print(_format_request_summary(req))
     print()
-    UI.muted(f"Use `otaman hitl next` to inspect the top item, or "
-             f"`otaman hitl take <stem>` to respond.")
+    UI.muted(
+        "Use `otaman hitl next` to inspect the top item, or `otaman hitl take <stem>` to respond."
+    )
     return 0
 
 
@@ -209,6 +209,7 @@ def cmd_take(args: dict[str, Any]) -> int:
     # anything; deliberately no --yes/scripted bypass, same as
     # confirm_human_decision.
     from otaman_cli.safety import require_interactive_tty
+
     if not require_interactive_tty(
         f"About to take HITL item {req.msg_stem} ({req.subject!r}) -- "
         f"this will produce a `human-decision` message asserting `from: human`."

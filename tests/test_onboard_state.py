@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from otaman_cli.onboard.state import (
@@ -20,21 +18,27 @@ from otaman_cli.onboard.state import (
 
 
 class TestValidateEmail:
-    @pytest.mark.parametrize("email", [
-        "alice@example.com",
-        "alice.bob@example.co.uk",
-        "alice+otaman@example.com",
-    ])
+    @pytest.mark.parametrize(
+        "email",
+        [
+            "alice@example.com",
+            "alice.bob@example.co.uk",
+            "alice+otaman@example.com",
+        ],
+    )
     def test_valid(self, email):
         validate_email(email)  # no raise
 
-    @pytest.mark.parametrize("email", [
-        "",
-        "alice",
-        "alice@",
-        "@example.com",
-        "alice example.com",
-    ])
+    @pytest.mark.parametrize(
+        "email",
+        [
+            "",
+            "alice",
+            "alice@",
+            "@example.com",
+            "alice example.com",
+        ],
+    )
     def test_invalid(self, email):
         with pytest.raises(StateError, match="not a valid email"):
             validate_email(email)
@@ -91,10 +95,12 @@ class TestUserDataclass:
             User.from_dict({"email": "alice@example.com"})
 
     def test_defaults_filled_when_optional_missing(self):
-        u = User.from_dict({
-            "email": "alice@example.com",
-            "roles": ["otaman:developer"],
-        })
+        u = User.from_dict(
+            {
+                "email": "alice@example.com",
+                "roles": ["otaman:developer"],
+            }
+        )
         assert u.display_name == "alice"  # email-local-part default
         assert u.unix_user is None
         assert u.unix_groups == []
@@ -191,9 +197,11 @@ class TestKnownRoles:
         assert "otaman:admin" in KNOWN_ROLES
 
     def test_all_four_roles(self):
-        assert KNOWN_ROLES == frozenset({
-            "otaman:admin",
-            "otaman:approver",
-            "otaman:developer",
-            "otaman:viewer",
-        })
+        assert KNOWN_ROLES == frozenset(
+            {
+                "otaman:admin",
+                "otaman:approver",
+                "otaman:developer",
+                "otaman:viewer",
+            }
+        )

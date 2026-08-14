@@ -10,16 +10,12 @@ Resolved 2026-05-21:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
 import yaml
-
-from otaman_cli.identity import find_project_root
-from otaman_cli.main import _resolve_bus_paths
-
 
 PRIORITY_RANK: dict[str, int] = {"urgent": 4, "high": 3, "normal": 2, "low": 1}
 
@@ -36,7 +32,7 @@ DecisionType = Literal[
 class RequestHumanReview:
     """One pending `request-human-review` message."""
 
-    msg_stem: str           # filename without .md
+    msg_stem: str  # filename without .md
     path: Path
     id: str
     from_agent: str
@@ -47,7 +43,7 @@ class RequestHumanReview:
     deadline: str | None
     timestamp: str
     subject: str
-    body: str               # full markdown body after the frontmatter
+    body: str  # full markdown body after the frontmatter
 
     @property
     def priority_rank(self) -> int:
@@ -74,7 +70,9 @@ def _extract_subject(body: str) -> str:
 
 
 def list_pending(
-    bus_active_dir: Path, *, human_id: str | None = None,
+    bus_active_dir: Path,
+    *,
+    human_id: str | None = None,
 ) -> list[RequestHumanReview]:
     """Return all pending `request-human-review` messages addressed to *human_id*.
 
@@ -107,31 +105,37 @@ def list_pending(
         if any(acks_dir.glob(f"{f.stem}.*.ack")) if acks_dir.is_dir() else False:
             continue
 
-        out.append(RequestHumanReview(
-            msg_stem=f.stem,
-            path=f,
-            id=str(fm.get("id") or f.stem),
-            from_agent=str(fm.get("from") or ""),
-            to_human=to_field,
-            priority=str(fm.get("priority") or "normal"),
-            decision_type=str(fm.get("decision-type") or ""),
-            session_id=str(fm.get("session-id") or ""),
-            deadline=fm.get("deadline"),
-            timestamp=str(fm.get("timestamp") or ""),
-            subject=_extract_subject(body),
-            body=body.strip(),
-        ))
+        out.append(
+            RequestHumanReview(
+                msg_stem=f.stem,
+                path=f,
+                id=str(fm.get("id") or f.stem),
+                from_agent=str(fm.get("from") or ""),
+                to_human=to_field,
+                priority=str(fm.get("priority") or "normal"),
+                decision_type=str(fm.get("decision-type") or ""),
+                session_id=str(fm.get("session-id") or ""),
+                deadline=fm.get("deadline"),
+                timestamp=str(fm.get("timestamp") or ""),
+                subject=_extract_subject(body),
+                body=body.strip(),
+            )
+        )
 
     # Sort: priority DESC, then deadline ASC (sooner = higher), then timestamp ASC
     def _sort_key(r: RequestHumanReview):
         deadline_key = r.deadline or "9999"
         return (-r.priority_rank, deadline_key, r.timestamp)
+
     out.sort(key=_sort_key)
     return out
 
 
 def find_by_stem(
-    bus_active_dir: Path, stem_or_id: str, *, human_id: str | None = None,
+    bus_active_dir: Path,
+    stem_or_id: str,
+    *,
+    human_id: str | None = None,
 ) -> RequestHumanReview | None:
     """Locate a single pending request by stem or by frontmatter id."""
     for req in list_pending(bus_active_dir, human_id=human_id):
@@ -197,7 +201,8 @@ class HumanDecisionPayload:
 
 
 def emit_human_decision(
-    payload: HumanDecisionPayload, bus_active_dir: Path,
+    payload: HumanDecisionPayload,
+    bus_active_dir: Path,
 ) -> Path:
     """Write the `human-decision` message file. Returns the absolute path."""
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
@@ -212,7 +217,10 @@ def emit_human_decision(
 
 
 def write_resolved_ack(
-    bus_active_dir: Path, msg_stem: str, *, by: str = "human",
+    bus_active_dir: Path,
+    msg_stem: str,
+    *,
+    by: str = "human",
 ) -> Path:
     """Mark a `request-human-review` resolved by writing the ack sentinel.
 

@@ -10,14 +10,14 @@ Public surface:
     is_agent_presence_enabled(root) — reads platform.yaml agent_presence (default True)
 """
 
-from otaman_cli.status.models import AgentStatus, State
 from otaman_cli.status.backend import (
-    StatusBackend,
     FileStatusBackend,
     NatsKvStatusBackend,
+    StatusBackend,
     get_backend,
     is_agent_presence_enabled,
 )
+from otaman_cli.status.models import AgentStatus, State
 
 __all__ = [
     "AgentStatus",

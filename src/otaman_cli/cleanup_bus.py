@@ -17,7 +17,7 @@ import json
 import re
 import shutil
 import sys
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -215,9 +215,7 @@ def cleanup(
     # Counts
     report["active_count"] = len(list(active_dir.glob("*.md")))
     report["archive_count"] = sum(
-        len(list(d.glob("*.md")))
-        for d in archive_dir.iterdir()
-        if d.is_dir()
+        len(list(d.glob("*.md"))) for d in archive_dir.iterdir() if d.is_dir()
     )
 
     return report
@@ -226,10 +224,14 @@ def cleanup(
 def main() -> int:
     if len(sys.argv) < 2:
         from otaman_core._resolve import find_maestro_root
+
         project_root = find_maestro_root()
         if not project_root:
-            print("Usage: cleanup-bus.py [project-root] [--dry-run] [--archive-days N] [--delete-days N]",
-                  file=sys.stderr)
+            print(
+                "Usage: cleanup-bus.py [project-root] [--dry-run] "
+                "[--archive-days N] [--delete-days N]",
+                file=sys.stderr,
+            )
             return 2
     else:
         project_root = Path(sys.argv[1]).resolve()

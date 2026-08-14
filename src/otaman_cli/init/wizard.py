@@ -7,8 +7,7 @@ short-circuits the prompts: returns the all-defaults LaunchSettings.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Iterable
+from collections.abc import Iterable
 
 from otaman_cli.init.schema import (
     AgentEntry,
@@ -17,7 +16,6 @@ from otaman_cli.init.schema import (
     SSHParams,
     TmuxLayoutConfig,
 )
-
 
 SPEC_AGENT = "spec-agent"
 
@@ -85,7 +83,9 @@ def _print_connection_help() -> None:
 def _print_agent_help(extras: list[str], *, meta_agent_name: str | None = None) -> None:
     print("  ◉ spec-agent   (mandatory — cannot be deselected)")
     if meta_agent_name and meta_agent_name != SPEC_AGENT:
-        print(f"  ◉ {meta_agent_name}   (mandatory orchestration meta-agent — cannot be deselected)")
+        print(
+            f"  ◉ {meta_agent_name}   (mandatory orchestration meta-agent — cannot be deselected)"
+        )
     if extras:
         print(f"  Additional agents from platform.yaml (default: disabled): {', '.join(extras)}")
         print("  Type comma-separated names to enable them, or blank to accept defaults.")

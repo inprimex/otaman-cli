@@ -22,6 +22,7 @@ Result contract::
         skipped: list[str]      # repos that already existed
         errors: list[str]       # error messages (empty == all ok)
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -56,7 +57,10 @@ def scaffold_companion_repos(
 
     # Attempt in-process call
     try:
-        from otaman_bridge.scaffold import scaffold_companion_repos as _bridge_scaffold  # type: ignore[import-not-found]
+        from otaman_bridge.scaffold import (
+            scaffold_companion_repos as _bridge_scaffold,  # type: ignore[import-not-found]
+        )
+
         return _bridge_scaffold(program_slug, repos, answers, dry_run=dry_run)
     except ImportError:
         pass  # bridge not installed yet
@@ -84,8 +88,14 @@ def compute_companion_repos(processes: list[str]) -> list[str]:
     """
     repos: list[str] = []
     _business_triggers = {
-        "outcomes", "solutions", "personas", "vocabulary",
-        "flows", "processes", "risks", "assumptions",
+        "outcomes",
+        "solutions",
+        "personas",
+        "vocabulary",
+        "flows",
+        "processes",
+        "risks",
+        "assumptions",
     }
     if _business_triggers.intersection(processes):
         repos.append("business")

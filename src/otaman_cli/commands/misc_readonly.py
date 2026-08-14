@@ -16,7 +16,7 @@ from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root
-from otaman_cli.main import C, UI, _normalize_ce_platform_yaml_for_validation, run_script
+from otaman_cli.main import UI, C, _normalize_ce_platform_yaml_for_validation, run_script
 
 
 def cmd_owner_paths(args: list[str]) -> int:
@@ -61,10 +61,7 @@ def cmd_owner_paths(args: list[str]) -> int:
             print(f"         {f.note}")
 
     print()
-    print(
-        f"  Summary: {n_ok + n_warn + n_error} patterns, "
-        f"{n_warn} warnings, {n_error} errors"
-    )
+    print(f"  Summary: {n_ok + n_warn + n_error} patterns, {n_warn} warnings, {n_error} errors")
     if n_error > 0:
         print("  Run `otaman owner-paths --validate` again after fixing platform.yaml")
         return 1
@@ -85,9 +82,9 @@ def cmd_review(args: list[str]) -> int:
             i += 1
 
     UI.info("Observer reviews are designed to run inside Claude Code sessions")
-    print(f"  where the observer agents have access to Read/Glob/Grep/Bash tools.")
+    print("  where the observer agents have access to Read/Glob/Grep/Bash tools.")
     print()
-    UI.action(f"Run in your Claude Code session:")
+    UI.action("Run in your Claude Code session:")
     UI.muted(f"/otaman:review --reviewer {reviewer}")
     if positional:
         UI.kv("Scope", " ".join(positional))
@@ -186,21 +183,33 @@ def cmd_discovery_phase(args: list[str]) -> int:
     if meta_path.exists():
         try:
             import yaml
+
             meta = yaml.safe_load(meta_path.read_text(encoding="utf-8"))
             UI.kv("Project", f"{meta.get('project_name', '?')} ({meta.get('project_code', '?')})")
-            UI.kv("Domain", meta.get('domain', '?'))
-            UI.kv("Phase", meta.get('current_phase', '?'))
+            UI.kv("Domain", meta.get("domain", "?"))
+            UI.kv("Phase", meta.get("current_phase", "?"))
         except Exception:
             pass
 
     # Check artifacts
     checks = [
-        ("Estimation", (presale_dir / "estimation").is_dir() and list((presale_dir / "estimation").glob("estimate-*.md"))),
+        (
+            "Estimation",
+            (presale_dir / "estimation").is_dir()
+            and list((presale_dir / "estimation").glob("estimate-*.md")),
+        ),
         ("Assumptions", (presale_dir / "assumptions.yaml").exists()),
         ("Risks", (presale_dir / "risks.yaml").exists()),
-        ("Architecture", (presale_dir / "architecture").is_dir() and list((presale_dir / "architecture").glob("*.md"))),
+        (
+            "Architecture",
+            (presale_dir / "architecture").is_dir()
+            and list((presale_dir / "architecture").glob("*.md")),
+        ),
         ("Knowledge audit", (presale_dir / "knowledge-audit.yaml").exists()),
-        ("Validated assumptions", (presale_dir / "discovery" / "validated-assumptions.yaml").exists()),
+        (
+            "Validated assumptions",
+            (presale_dir / "discovery" / "validated-assumptions.yaml").exists(),
+        ),
         ("Updated risks", (presale_dir / "discovery" / "updated-risks.yaml").exists()),
     ]
 
@@ -239,16 +248,27 @@ def cmd_handoff(args: list[str]) -> int:
         return 1
 
     UI.kv("Presale dir", str(presale_dir))
-    has_estimation = list((presale_dir / "estimation").glob("estimate-*.md")) if (presale_dir / "estimation").is_dir() else []
+    has_estimation = (
+        list((presale_dir / "estimation").glob("estimate-*.md"))
+        if (presale_dir / "estimation").is_dir()
+        else []
+    )
     has_platform = (presale_dir.parent / "platform.yaml").exists()
 
     UI.subheader("Handoff readiness:")
     est_icon = UI.badge("OK", C.GREEN) if has_estimation else UI.path("--")
-    ka_icon = UI.badge("OK", C.GREEN) if (presale_dir / 'knowledge-audit.yaml').exists() else UI.path("--")
+    ka_icon = (
+        UI.badge("OK", C.GREEN)
+        if (presale_dir / "knowledge-audit.yaml").exists()
+        else UI.path("--")
+    )
     py_icon = UI.badge("SKIP", C.YELLOW) if has_platform else UI.path("--")
     print(f"  [{est_icon}] Estimation document")
     print(f"  [{ka_icon}] Knowledge audit")
-    print(f"  [{py_icon}] platform.yaml {'(already exists)' if has_platform else '(will be generated)'}")
+    print(
+        f"  [{py_icon}] platform.yaml "
+        f"{'(already exists)' if has_platform else '(will be generated)'}"
+    )
 
     UI.subheader("To execute handoff:")
     UI.action(f"Use {C.GREEN}/otaman:handoff execute{C.RESET} in Claude Code")
@@ -261,20 +281,31 @@ def cmd_audit_knowledge(args: list[str]) -> int:
     UI.header("Otaman Knowledge Audit")
 
     # Check multiple locations for audit file
-    for candidate in [".otaman-presale/knowledge-audit.yaml", ".maestro-presale/knowledge-audit.yaml", ".agents/knowledge-audit.yaml"]:  # legacy: presale fallback
+    for candidate in [
+        ".otaman-presale/knowledge-audit.yaml",
+        ".maestro-presale/knowledge-audit.yaml",  # legacy: pre-rebrand presale dir
+        ".agents/knowledge-audit.yaml",
+    ]:  # legacy: presale fallback
         p = Path(candidate)
         if p.exists():
             try:
                 import yaml
+
                 audit = yaml.safe_load(p.read_text(encoding="utf-8"))
-                UI.kv("Audit date", audit.get('audit_date', '?'))
+                UI.kv("Audit date", audit.get("audit_date", "?"))
                 UI.kv("Overall readiness", f"{audit.get('overall_readiness', '?')}%")
                 print()
                 for item in audit.get("items", []):
                     conf = item.get("confidence", "?")
-                    icon = {"high": UI.badge("OK", C.GREEN), "medium": UI.badge("??", C.YELLOW),
-                            "low": UI.badge("!!", C.RED), "none": UI.badge("XX", C.RED)}.get(conf, "??")
-                    print(f"  [{icon}] {item.get('tech', '?'):30s} {conf:8s} {item.get('action', '')}")
+                    icon = {
+                        "high": UI.badge("OK", C.GREEN),
+                        "medium": UI.badge("??", C.YELLOW),
+                        "low": UI.badge("!!", C.RED),
+                        "none": UI.badge("XX", C.RED),
+                    }.get(conf, "??")
+                    print(
+                        f"  [{icon}] {item.get('tech', '?'):30s} {conf:8s} {item.get('action', '')}"
+                    )
             except Exception as e:
                 UI.error(f"Failed to read audit: {e}")
             return 0
@@ -294,11 +325,16 @@ def cmd_gate(args: list[str]) -> int:
     transition = args[0] if args else None
 
     # Determine current phase
-    for meta_loc in [".otaman-presale/project-meta.yaml", ".maestro-presale/project-meta.yaml", ".agents/project-meta.yaml"]:  # legacy: presale fallback
+    for meta_loc in [
+        ".otaman-presale/project-meta.yaml",
+        ".maestro-presale/project-meta.yaml",  # legacy: pre-rebrand presale dir
+        ".agents/project-meta.yaml",
+    ]:  # legacy: presale fallback
         p = Path(meta_loc) if not root else root / meta_loc
         if p.exists():
             try:
                 import yaml
+
                 meta = yaml.safe_load(p.read_text(encoding="utf-8"))
                 phase = meta.get("current_phase", "?")
                 UI.kv("Current phase", phase, C.BOLD)
@@ -326,12 +362,46 @@ def cmd_gate(args: list[str]) -> int:
     return 0
 
 
-register(CommandSpec(name="owner-paths", handler=cmd_owner_paths, help="Validate owner-paths globs in platform.yaml"))
-register(CommandSpec(name="review", handler=cmd_review, help="Trigger observer review (CTO / security / all)"))
-register(CommandSpec(name="validate", handler=cmd_validate, help="Validate platform.yaml against the schema"))
-register(CommandSpec(name="validate-messages", handler=cmd_validate_messages, help="Validate bus message files"))
-register(CommandSpec(name="compliance", handler=cmd_compliance, help="Generate compliance audit report (HIPAA / ISO / GDPR)"))
-register(CommandSpec(name="discovery", handler=cmd_discovery_phase, help="Show discovery phase status"))
-register(CommandSpec(name="handoff", handler=cmd_handoff, help="Show handoff readiness (presale → development)"))
-register(CommandSpec(name="audit-knowledge", handler=cmd_audit_knowledge, help="Show tech stack knowledge audit"))
+register(
+    CommandSpec(
+        name="owner-paths",
+        handler=cmd_owner_paths,
+        help="Validate owner-paths globs in platform.yaml",
+    )
+)
+register(
+    CommandSpec(
+        name="review", handler=cmd_review, help="Trigger observer review (CTO / security / all)"
+    )
+)
+register(
+    CommandSpec(
+        name="validate", handler=cmd_validate, help="Validate platform.yaml against the schema"
+    )
+)
+register(
+    CommandSpec(
+        name="validate-messages", handler=cmd_validate_messages, help="Validate bus message files"
+    )
+)
+register(
+    CommandSpec(
+        name="compliance",
+        handler=cmd_compliance,
+        help="Generate compliance audit report (HIPAA / ISO / GDPR)",
+    )
+)
+register(
+    CommandSpec(name="discovery", handler=cmd_discovery_phase, help="Show discovery phase status")
+)
+register(
+    CommandSpec(
+        name="handoff", handler=cmd_handoff, help="Show handoff readiness (presale → development)"
+    )
+)
+register(
+    CommandSpec(
+        name="audit-knowledge", handler=cmd_audit_knowledge, help="Show tech stack knowledge audit"
+    )
+)
 register(CommandSpec(name="gate", handler=cmd_gate, help="Check phase transition readiness"))

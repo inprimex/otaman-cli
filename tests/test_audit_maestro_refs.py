@@ -13,6 +13,7 @@ Windows-excluded, mirroring the CI workflow's own `if: runner.os !=
 resolves to the WSL launcher stub (no distribution installed), not Git
 Bash, so it fails immediately regardless of the script's content.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -27,7 +28,8 @@ AUDIT_SCRIPT = REPO_ROOT.parent / "otaman-core" / "scripts" / "audit-maestro-ref
 
 @pytest.mark.skipif(
     sys.platform == "win32",
-    reason="bash on Windows CI runners resolves to the WSL stub, not Git Bash (matches the real CI step's own Windows exclusion)",
+    reason="bash on Windows CI runners resolves to the WSL stub, not Git Bash "
+    "(matches the real CI step's own Windows exclusion)",
 )
 @pytest.mark.skipif(
     not AUDIT_SCRIPT.is_file(),
@@ -36,7 +38,10 @@ AUDIT_SCRIPT = REPO_ROOT.parent / "otaman-core" / "scripts" / "audit-maestro-ref
 def test_no_unannotated_maestro_references_in_src() -> None:
     result = subprocess.run(
         ["bash", str(AUDIT_SCRIPT), "src/"],
-        cwd=REPO_ROOT, capture_output=True, text=True, timeout=30,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert result.returncode == 0, (
         f"audit-maestro-refs.sh failed (this mirrors a real CI gate):\n"

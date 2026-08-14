@@ -22,10 +22,12 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-
 ConnectionMode = Literal["local", "ssh", "mesh"]
 TmuxLayout = Literal[
-    "tiled", "main-horizontal", "main-vertical", "even-horizontal",
+    "tiled",
+    "main-horizontal",
+    "main-vertical",
+    "even-horizontal",
 ]
 
 
@@ -57,9 +59,7 @@ class Connection(BaseModel):
     @model_validator(mode="after")
     def _ssh_required_when_mode_is_ssh(self) -> Connection:
         if self.mode == "ssh" and self.ssh is None:
-            raise ValueError(
-                "connection.mode='ssh' requires connection.ssh.{host,user} to be set"
-            )
+            raise ValueError("connection.mode='ssh' requires connection.ssh.{host,user} to be set")
         return self
 
 

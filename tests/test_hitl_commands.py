@@ -14,14 +14,13 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from otaman_cli.hitl.messages import (
-    HumanDecisionPayload,
     PRIORITY_RANK,
+    HumanDecisionPayload,
     emit_human_decision,
     find_by_stem,
     list_pending,
@@ -190,8 +189,11 @@ def test_human_decision_payload_render_includes_required_fields():
 
 def test_emit_human_decision_writes_file(bus: Path):
     p = HumanDecisionPayload(
-        in_reply_to="req-1", session_id="sess-abc",
-        to_agent="bridge-agent", decision="approve", decided_by="roman",
+        in_reply_to="req-1",
+        session_id="sess-abc",
+        to_agent="bridge-agent",
+        decision="approve",
+        decided_by="roman",
     )
     out = emit_human_decision(p, bus)
     assert out.is_file()
@@ -236,8 +238,10 @@ def test_cli_hitl_take_non_tty_refuses_and_writes_nothing(project: Path):
     active = project / ".agents" / "bus" / "active"
     stem = "20260603T100000-bridge-to-human-request-human-review-approve-it"
     _write_request(
-        active, stem=stem,
-        decision_type="approve-reject", session_id="sess-xyz",
+        active,
+        stem=stem,
+        decision_type="approve-reject",
+        session_id="sess-xyz",
         from_agent="bridge-agent",
     )
 
@@ -246,7 +250,10 @@ def test_cli_hitl_take_non_tty_refuses_and_writes_nothing(project: Path):
 
     rc = subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "hitl", "take", stem],
-        capture_output=True, text=True, cwd=str(project), env=env,
+        capture_output=True,
+        text=True,
+        cwd=str(project),
+        env=env,
         input=stdin_input,
     )
     assert rc.returncode != 0
@@ -265,7 +272,10 @@ def test_cli_hitl_list_shows_pending(project: Path):
     env = {**os.environ, "OTAMAN_AGENT": "human"}
     rc = subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "hitl", "list"],
-        capture_output=True, text=True, cwd=str(project), env=env,
+        capture_output=True,
+        text=True,
+        cwd=str(project),
+        env=env,
     )
     assert rc.returncode == 0, rc.stderr or rc.stdout
     assert "req-1" in rc.stdout
@@ -278,7 +288,11 @@ def test_cli_hitl_take_missing_id_errors(project: Path):
     env = {**os.environ, "OTAMAN_AGENT": "human"}
     rc = subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "hitl", "take", "no-such-stem"],
-        capture_output=True, text=True, cwd=str(project), env=env, input="\n\n\n\n",
+        capture_output=True,
+        text=True,
+        cwd=str(project),
+        env=env,
+        input="\n\n\n\n",
     )
     assert rc.returncode != 0
     assert "No pending request" in (rc.stdout + rc.stderr)

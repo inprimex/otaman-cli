@@ -31,14 +31,16 @@ def cmd_cleanup(args: list[str]) -> int:
 
     UI.header("Otaman Bus Cleanup")
 
-    result = run_script("cleanup-bus.py", str(root), *(["--dry-run"] if dry_run else []),
-                        capture=True)
+    result = run_script(
+        "cleanup-bus.py", str(root), *(["--dry-run"] if dry_run else []), capture=True
+    )
     if result.returncode != 0:
         UI.error(result.stderr or result.stdout)
         return result.returncode
 
     try:
         import json
+
         report = json.loads(result.stdout)
     except (json.JSONDecodeError, ImportError):
         print(result.stdout)
@@ -77,4 +79,6 @@ def cmd_cleanup(args: list[str]) -> int:
     return 0
 
 
-register(CommandSpec(name="cleanup", handler=cmd_cleanup, help="Archive old, fully-acked bus messages"))
+register(
+    CommandSpec(name="cleanup", handler=cmd_cleanup, help="Archive old, fully-acked bus messages")
+)

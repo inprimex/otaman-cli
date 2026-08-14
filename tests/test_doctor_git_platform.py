@@ -9,16 +9,13 @@ downgrade from failure to a warning.
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from otaman_core import git_host as gh
 
 # doctor + git_host now in package form
 from otaman_cli import doctor
-from otaman_core import git_host as gh
-
 
 # ---------------------------------------------------------------------------
 
@@ -36,11 +33,13 @@ def gitlab_repo(tmp_path):
 @pytest.fixture
 def with_gitlab_remote(monkeypatch):
     """Make _run return a fake `git remote -v` output pointing at gitlab.com."""
+
     def fake_run(cmd, timeout=10):
         if "remote" in cmd:
             return 0, "origin\tgit@gitlab.com:foo/bar.git (push)", ""
         # Default: CLI auth checks return non-zero (not authenticated).
         return 1, "", "not logged in"
+
     monkeypatch.setattr(doctor, "_run", fake_run)
 
 
@@ -54,25 +53,25 @@ class TestApiLiveHelper:
     def test_config_with_valid_token_returns_true(self, tmp_path, monkeypatch):
         monkeypatch.setenv("DOC_TEST_TOK", "glpat-x")
         (tmp_path / "platform.yaml").write_text(
-            "project: test\n"
-            "git_host:\n"
-            "  provider: gitlab\n"
-            "  token: DOC_TEST_TOK\n",
+            "project: test\ngit_host:\n  provider: gitlab\n  token: DOC_TEST_TOK\n",
             encoding="utf-8",
         )
         # Mock the validation network call.
-        with patch.object(gh, "_do_get", return_value=(
-            200, json.dumps({"username": "roman"}).encode("utf-8"), {},
-        )):
+        with patch.object(
+            gh,
+            "_do_get",
+            return_value=(
+                200,
+                json.dumps({"username": "roman"}).encode("utf-8"),
+                {},
+            ),
+        ):
             assert doctor._git_host_pat_is_live(tmp_path) is True
 
     def test_config_with_invalid_token_returns_false(self, tmp_path, monkeypatch):
         monkeypatch.setenv("DOC_TEST_TOK", "glpat-bad")
         (tmp_path / "platform.yaml").write_text(
-            "project: test\n"
-            "git_host:\n"
-            "  provider: gitlab\n"
-            "  token: DOC_TEST_TOK\n",
+            "project: test\ngit_host:\n  provider: gitlab\n  token: DOC_TEST_TOK\n",
             encoding="utf-8",
         )
         with patch.object(gh, "_do_get", return_value=(401, b"{}", {})):
@@ -90,7 +89,11 @@ class TestCliNotInstalled:
         assert issues[0]["severity"] == "high"
 
     def test_warn_when_pat_live(
-        self, gitlab_repo, tmp_path, with_gitlab_remote, monkeypatch,
+        self,
+        gitlab_repo,
+        tmp_path,
+        with_gitlab_remote,
+        monkeypatch,
     ):
         """With a live PAT, missing glab downgrades to warn."""
         monkeypatch.setenv("DOC_TOK", "x")
@@ -99,9 +102,15 @@ class TestCliNotInstalled:
             encoding="utf-8",
         )
         monkeypatch.setattr(doctor, "_which", lambda name: None)
-        with patch.object(gh, "_do_get", return_value=(
-            200, json.dumps({"username": "roman"}).encode("utf-8"), {},
-        )):
+        with patch.object(
+            gh,
+            "_do_get",
+            return_value=(
+                200,
+                json.dumps({"username": "roman"}).encode("utf-8"),
+                {},
+            ),
+        ):
             result = doctor.check_git_platform(gitlab_repo, tmp_path)
         assert result["status"] == "warn"
         issue = result["issues"][0]
@@ -123,7 +132,11 @@ class TestCliNotAuthenticated:
         assert issue["severity"] == "high"
 
     def test_warn_when_pat_live(
-        self, gitlab_repo, tmp_path, with_gitlab_remote, monkeypatch,
+        self,
+        gitlab_repo,
+        tmp_path,
+        with_gitlab_remote,
+        monkeypatch,
     ):
         """The exact Roman case: glab installed but not logged in,
         otaman PAT works — should show warn + an explanatory hint."""
@@ -133,9 +146,15 @@ class TestCliNotAuthenticated:
             encoding="utf-8",
         )
         monkeypatch.setattr(doctor, "_which", lambda name: "/usr/bin/" + name)
-        with patch.object(gh, "_do_get", return_value=(
-            200, json.dumps({"username": "roman"}).encode("utf-8"), {},
-        )):
+        with patch.object(
+            gh,
+            "_do_get",
+            return_value=(
+                200,
+                json.dumps({"username": "roman"}).encode("utf-8"),
+                {},
+            ),
+        ):
             result = doctor.check_git_platform(gitlab_repo, tmp_path)
         assert result["status"] == "warn"
         issue = result["issues"][0]
@@ -148,14 +167,19 @@ class TestCliNotAuthenticated:
 
 class TestCliHealthy:
     def test_all_ok_no_pat(
-        self, gitlab_repo, tmp_path, monkeypatch,
+        self,
+        gitlab_repo,
+        tmp_path,
+        monkeypatch,
     ):
         """CLI authenticated, no PAT — still OK, just on the glab path."""
+
         def fake_run(cmd, timeout=10):
             if "remote" in cmd:
                 return 0, "origin\tgit@gitlab.com:foo/bar.git (push)", ""
             # glab auth status succeeds.
             return 0, "logged in as roman", ""
+
         monkeypatch.setattr(doctor, "_run", fake_run)
         monkeypatch.setattr(doctor, "_which", lambda name: "/usr/bin/" + name)
         result = doctor.check_git_platform(gitlab_repo, tmp_path)

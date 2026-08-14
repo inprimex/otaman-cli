@@ -14,7 +14,7 @@ from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root
-from otaman_cli.main import C, UI, run_script
+from otaman_cli.main import UI, C, run_script
 
 try:
     import pwd as _pwd
@@ -78,46 +78,56 @@ def _check_org_harnesses(root: Path, org_name: str) -> tuple[int, list[dict]]:
 
     orgs = config.get("orgs") or {}
     if not isinstance(orgs, dict) or org_name not in orgs:
-        return 1, [{
-            "status": "error",
-            "error": f"org '{org_name}' not declared in platform.yaml `orgs:` block",
-        }]
+        return 1, [
+            {
+                "status": "error",
+                "error": f"org '{org_name}' not declared in platform.yaml `orgs:` block",
+            }
+        ]
     org_entry = orgs[org_name]
     if not isinstance(org_entry, dict):
         return 1, [{"status": "error", "error": f"orgs.{org_name} must be a mapping"}]
     system_user = org_entry.get("system_user")
     if not system_user or not isinstance(system_user, str):
-        return 1, [{
-            "status": "error",
-            "error": f"orgs.{org_name}.system_user is required (a Unix user name)",
-        }]
+        return 1, [
+            {
+                "status": "error",
+                "error": f"orgs.{org_name}.system_user is required (a Unix user name)",
+            }
+        ]
 
     # Resolve the org user's home directory via pwd (more precise than expanduser,
     # which returns the literal ~name when the user is missing).
     if _pwd is None:
-        return 1, [{
-            "status": "error",
-            "error": (
-                "otaman doctor --org requires a POSIX system "
-                "(the pwd module, used to resolve another user's home "
-                "directory, is unavailable on this platform)"
-            ),
-        }]
+        return 1, [
+            {
+                "status": "error",
+                "error": (
+                    "otaman doctor --org requires a POSIX system "
+                    "(the pwd module, used to resolve another user's home "
+                    "directory, is unavailable on this platform)"
+                ),
+            }
+        ]
     try:
         org_home = Path(_pwd.getpwnam(system_user).pw_dir)
     except KeyError:
-        return 1, [{
-            "status": "error",
-            "error": f"system user '{system_user}' does not exist on this host",
-        }]
+        return 1, [
+            {
+                "status": "error",
+                "error": f"system user '{system_user}' does not exist on this host",
+            }
+        ]
 
     runner = config.get("runner") or {}
     harnesses = runner.get("harnesses") if isinstance(runner, dict) else None
     if not isinstance(harnesses, list) or not harnesses:
-        return 1, [{
-            "status": "error",
-            "error": "no runner.harnesses declared in platform.yaml",
-        }]
+        return 1, [
+            {
+                "status": "error",
+                "error": "no runner.harnesses declared in platform.yaml",
+            }
+        ]
 
     results: list[dict] = []
     all_ok = True
@@ -197,10 +207,17 @@ def _print_org_harness_report(org_name: str, results: list[dict]) -> None:
             print(f"  {UI.badge('OK', C.GREEN)}  {hid}  {binary}{tail}")
         elif status == "missing":
             print(f"  {UI.badge('FAIL', C.RED)}  {hid}  {binary}  NOT FOUND")
-            print(f"        run: sudo bash ce-bootstrap.sh --org={org_name} --install-harness={hid}")
+            print(
+                f"        run: sudo bash ce-bootstrap.sh --org={org_name} --install-harness={hid}"
+            )
         elif status == "too_old":
-            print(f"  {UI.badge('FAIL', C.RED)}  {hid}  {binary}  {version} (min: {r.get('min_version')})")
-            print(f"        run: sudo bash ce-bootstrap.sh --org={org_name} --upgrade-harness={hid}")
+            print(
+                f"  {UI.badge('FAIL', C.RED)}  {hid}  {binary}  {version} "
+                f"(min: {r.get('min_version')})"
+            )
+            print(
+                f"        run: sudo bash ce-bootstrap.sh --org={org_name} --upgrade-harness={hid}"
+            )
         else:
             print(f"  {UI.badge('FAIL', C.RED)}  {hid}  {binary}  {status}: {r.get('error', '')}")
 
@@ -237,6 +254,7 @@ def cmd_doctor(args: list[str]) -> int:
         return 2
 
     import json
+
     try:
         report = json.loads(result.stdout)
     except (json.JSONDecodeError, ValueError):
@@ -281,12 +299,12 @@ def cmd_doctor(args: list[str]) -> int:
         detail_parts = []
         if check["check"] == "git_identity":
             if details.get("user_name"):
-                detail_parts.append(f'{details["user_name"]} <{details.get("user_email", "?")}>')
+                detail_parts.append(f"{details['user_name']} <{details.get('user_email', '?')}>")
         elif check["check"] == "git_platform":
             if details.get("provider"):
                 detail_parts.append(details["provider"])
                 if details.get("cli_installed"):
-                    detail_parts.append(f'{details["cli"]} CLI')
+                    detail_parts.append(f"{details['cli']} CLI")
                 if details.get("authenticated"):
                     detail_parts.append("authenticated")
                 if details.get("pr_enabled"):
@@ -294,7 +312,7 @@ def cmd_doctor(args: list[str]) -> int:
         elif check["check"] == "runtimes":
             for rt, info in details.items():
                 if isinstance(info, dict) and info.get("version"):
-                    detail_parts.append(f'{rt} {info["version"]}')
+                    detail_parts.append(f"{rt} {info['version']}")
         elif check["check"] == "claude_cli":
             if details.get("version"):
                 detail_parts.append(details["version"])
@@ -302,14 +320,14 @@ def cmd_doctor(args: list[str]) -> int:
             if details.get("skipped"):
                 detail_parts.append("not required")
             elif details.get("version"):
-                detail_parts.append(f'v{details["version"]}')
+                detail_parts.append(f"v{details['version']}")
                 if details.get("via_npx"):
                     detail_parts.append("via npx")
         elif check["check"] == "ssh_keys":
             if details.get("ssh_repos"):
-                detail_parts.append(f'{details["ssh_repos"]} SSH repos')
+                detail_parts.append(f"{details['ssh_repos']} SSH repos")
             if details.get("https_repos"):
-                detail_parts.append(f'{details["https_repos"]} HTTPS repos')
+                detail_parts.append(f"{details['https_repos']} HTTPS repos")
         elif check["check"] == "tmux":
             if details.get("version"):
                 detail_parts.append(details["version"])
@@ -336,6 +354,7 @@ def cmd_doctor(args: list[str]) -> int:
     UI.subheader("[pm-sync]")
     try:
         import yaml as _yaml
+
         _pm_platform_yaml = root / "platform.yaml"
         if _pm_platform_yaml.is_file():
             _pm_config = _yaml.safe_load(_pm_platform_yaml.read_text(encoding="utf-8")) or {}
@@ -343,7 +362,10 @@ def cmd_doctor(args: list[str]) -> int:
             _pm_config = {}
         _pm_sync = _pm_config.get("pm-sync")
         if not _pm_sync:
-            UI.warn("[pm-sync] PM sync not configured — run `otaman pm configure <provider> --url <url>`")
+            UI.warn(
+                "[pm-sync] PM sync not configured — "
+                "run `otaman pm configure <provider> --url <url>`"
+            )
         else:
             # Check required fields
             _pm_provider = _pm_sync.get("provider") or ""
@@ -372,11 +394,17 @@ def cmd_doctor(args: list[str]) -> int:
             if _pm_webhook_target:
                 try:
                     import urllib.request as _urllib_req
+
                     _pm_req = _urllib_req.Request(_pm_webhook_target, method="HEAD")
                     _pm_resp = _urllib_req.urlopen(_pm_req, timeout=3)
-                    UI.ok(f"[pm-sync] webhook-target reachable ({_pm_resp.status}): {_pm_webhook_target}")
+                    UI.ok(
+                        f"[pm-sync] webhook-target reachable ({_pm_resp.status}): "
+                        f"{_pm_webhook_target}"
+                    )
                 except Exception as _pm_exc:
-                    UI.warn(f"[pm-sync] webhook-target unreachable ({_pm_webhook_target}): {_pm_exc}")
+                    UI.warn(
+                        f"[pm-sync] webhook-target unreachable ({_pm_webhook_target}): {_pm_exc}"
+                    )
             else:
                 UI.warn(
                     "[pm-sync] webhooks not configured — run with `--no-webhooks` flag or "
@@ -407,8 +435,10 @@ def cmd_doctor(args: list[str]) -> int:
     return base_rc
 
 
-register(CommandSpec(
-    name="doctor",
-    handler=cmd_doctor,
-    help="Check environment readiness (git, runtimes, CLI, tmux, MCP)",
-))
+register(
+    CommandSpec(
+        name="doctor",
+        handler=cmd_doctor,
+        help="Check environment readiness (git, runtimes, CLI, tmux, MCP)",
+    )
+)

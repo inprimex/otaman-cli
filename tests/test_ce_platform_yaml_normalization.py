@@ -9,6 +9,7 @@ normalizing in-memory before schema validation:
   - Hints emitted; on-disk file never rewritten
   - CE-shaped files NOT rejected outright
 """
+
 from __future__ import annotations
 
 import os
@@ -16,7 +17,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 import yaml
 
 from otaman_cli.main import _normalize_ce_platform_yaml_for_validation
@@ -29,21 +29,27 @@ class TestNormalizationHelper:
 
     def test_canonical_yaml_returns_unchanged(self, tmp_path: Path):
         """A canonical platform.yaml (all required fields) → no normalization."""
-        src = self._write_yaml(tmp_path / "platform.yaml", {
-            "project": "canon",
-            "version": "1.0",
-            "repos": [{"name": "r1", "path": "./r1", "owner": "ops-agent"}],
-        })
+        src = self._write_yaml(
+            tmp_path / "platform.yaml",
+            {
+                "project": "canon",
+                "version": "1.0",
+                "repos": [{"name": "r1", "path": "./r1", "owner": "ops-agent"}],
+            },
+        )
         norm, hints = _normalize_ce_platform_yaml_for_validation(src)
         assert norm == src, "no normalization → return source path"
         assert hints == []
 
     def test_agent_aliased_to_owner(self, tmp_path: Path):
-        src = self._write_yaml(tmp_path / "platform.yaml", {
-            "project": "x",
-            "version": "1.0",
-            "repos": [{"name": "r1", "path": "./r1", "agent": "ops-agent"}],
-        })
+        src = self._write_yaml(
+            tmp_path / "platform.yaml",
+            {
+                "project": "x",
+                "version": "1.0",
+                "repos": [{"name": "r1", "path": "./r1", "agent": "ops-agent"}],
+            },
+        )
         original_text = src.read_text()
         norm, hints = _normalize_ce_platform_yaml_for_validation(src)
         assert norm != src
@@ -60,10 +66,13 @@ class TestNormalizationHelper:
     def test_project_inferred_from_parent_dir(self, tmp_path: Path):
         org_dir = tmp_path / "myorg"
         org_dir.mkdir()
-        src = self._write_yaml(org_dir / "platform.yaml", {
-            "version": "1.0",
-            "repos": [{"name": "r1", "path": "./r1", "owner": "ops-agent"}],
-        })
+        src = self._write_yaml(
+            org_dir / "platform.yaml",
+            {
+                "version": "1.0",
+                "repos": [{"name": "r1", "path": "./r1", "owner": "ops-agent"}],
+            },
+        )
         norm, hints = _normalize_ce_platform_yaml_for_validation(src)
         normalized = yaml.safe_load(norm.read_text())
         assert normalized["project"] == "myorg"
@@ -73,10 +82,13 @@ class TestNormalizationHelper:
     def test_project_sanitized_when_parent_has_invalid_chars(self, tmp_path: Path):
         org_dir = tmp_path / "My Org_Name"
         org_dir.mkdir()
-        src = self._write_yaml(org_dir / "platform.yaml", {
-            "version": "1.0",
-            "repos": [{"name": "r1", "path": "./r1", "owner": "ops-agent"}],
-        })
+        src = self._write_yaml(
+            org_dir / "platform.yaml",
+            {
+                "version": "1.0",
+                "repos": [{"name": "r1", "path": "./r1", "owner": "ops-agent"}],
+            },
+        )
         norm, hints = _normalize_ce_platform_yaml_for_validation(src)
         normalized = yaml.safe_load(norm.read_text())
         # 'My Org_Name' → 'my-org-name' (lowercase, non-[a-z0-9-] → '-')
@@ -84,10 +96,13 @@ class TestNormalizationHelper:
         norm.unlink()
 
     def test_version_defaulted_to_1_0(self, tmp_path: Path):
-        src = self._write_yaml(tmp_path / "platform.yaml", {
-            "project": "x",
-            "repos": [{"name": "r1", "path": "./r1", "owner": "ops-agent"}],
-        })
+        src = self._write_yaml(
+            tmp_path / "platform.yaml",
+            {
+                "project": "x",
+                "repos": [{"name": "r1", "path": "./r1", "owner": "ops-agent"}],
+            },
+        )
         norm, hints = _normalize_ce_platform_yaml_for_validation(src)
         normalized = yaml.safe_load(norm.read_text())
         assert normalized["version"] == "1.0"
@@ -97,12 +112,15 @@ class TestNormalizationHelper:
     def test_all_three_normalizations_combined(self, tmp_path: Path):
         org_dir = tmp_path / "myorg"
         org_dir.mkdir()
-        src = self._write_yaml(org_dir / "platform.yaml", {
-            "repos": [
-                {"name": "r1", "path": "./r1", "agent": "ops-agent"},
-                {"name": "r2", "path": "./r2", "agent": "dev-agent"},
-            ],
-        })
+        src = self._write_yaml(
+            org_dir / "platform.yaml",
+            {
+                "repos": [
+                    {"name": "r1", "path": "./r1", "agent": "ops-agent"},
+                    {"name": "r2", "path": "./r2", "agent": "dev-agent"},
+                ],
+            },
+        )
         norm, hints = _normalize_ce_platform_yaml_for_validation(src)
         normalized = yaml.safe_load(norm.read_text())
         assert normalized["project"] == "myorg"
@@ -113,9 +131,12 @@ class TestNormalizationHelper:
         norm.unlink()
 
     def test_source_file_never_modified(self, tmp_path: Path):
-        src = self._write_yaml(tmp_path / "platform.yaml", {
-            "repos": [{"name": "r1", "path": "./r1", "agent": "ops-agent"}],
-        })
+        src = self._write_yaml(
+            tmp_path / "platform.yaml",
+            {
+                "repos": [{"name": "r1", "path": "./r1", "agent": "ops-agent"}],
+            },
+        )
         original = src.read_text()
         _norm, _hints = _normalize_ce_platform_yaml_for_validation(src)
         assert src.read_text() == original, "source file must not be rewritten"
@@ -131,13 +152,16 @@ class TestNormalizationHelper:
         `runner:` and `terminal:` are first-class root keys.  The normalizer
         no longer strips them; they pass through to the validator natively.
         """
-        src = self._write_yaml(tmp_path / "platform.yaml", {
-            "project": "x",
-            "version": "1.0",
-            "runner": {"harnesses": [{"id": "claude-code", "binary": "claude"}]},
-            "terminal": {"local_auth": True},
-            "repos": [{"name": "r1", "path": "./r1", "owner": "ops-agent"}],
-        })
+        src = self._write_yaml(
+            tmp_path / "platform.yaml",
+            {
+                "project": "x",
+                "version": "1.0",
+                "runner": {"harnesses": [{"id": "claude-code", "binary": "claude"}]},
+                "terminal": {"local_auth": True},
+                "repos": [{"name": "r1", "path": "./r1", "owner": "ops-agent"}],
+            },
+        )
         norm, hints = _normalize_ce_platform_yaml_for_validation(src)
         # Nothing to normalize → source path returned unchanged
         assert norm == src
@@ -149,12 +173,15 @@ class TestNormalizationHelper:
         `runner:` is now first-class — the normalizer reads it as a marker
         but does NOT strip it from the validation copy.
         """
-        src = self._write_yaml(tmp_path / "platform.yaml", {
-            "project": "x",
-            "version": "1.0",
-            "runner": {"harnesses": []},
-            "repos": [],
-        })
+        src = self._write_yaml(
+            tmp_path / "platform.yaml",
+            {
+                "project": "x",
+                "version": "1.0",
+                "runner": {"harnesses": []},
+                "repos": [],
+            },
+        )
         norm, hints = _normalize_ce_platform_yaml_for_validation(src)
         normalized = yaml.safe_load(norm.read_text())
         # Placeholder repo injected
@@ -170,11 +197,14 @@ class TestNormalizationHelper:
     def test_empty_repos_without_ce_markers_not_padded(self, tmp_path: Path):
         """Empty repos[] WITHOUT CE-runtime keys should still fail validation
         (no synthetic injection — that's a CE-specific accommodation)."""
-        src = self._write_yaml(tmp_path / "platform.yaml", {
-            "project": "x",
-            "version": "1.0",
-            "repos": [],
-        })
+        src = self._write_yaml(
+            tmp_path / "platform.yaml",
+            {
+                "project": "x",
+                "version": "1.0",
+                "repos": [],
+            },
+        )
         norm, hints = _normalize_ce_platform_yaml_for_validation(src)
         # No changes were made (no CE markers); no placeholder injection
         assert norm == src, "non-CE empty repos should not get placeholder"
@@ -182,11 +212,14 @@ class TestNormalizationHelper:
 
     def test_missing_repos_with_ce_markers_padded(self, tmp_path: Path):
         """`repos:` entirely absent + CE markers → also gets placeholder."""
-        src = self._write_yaml(tmp_path / "platform.yaml", {
-            "project": "x",
-            "version": "1.0",
-            "terminal": {"local_auth": True},
-        })
+        src = self._write_yaml(
+            tmp_path / "platform.yaml",
+            {
+                "project": "x",
+                "version": "1.0",
+                "terminal": {"local_auth": True},
+            },
+        )
         norm, hints = _normalize_ce_platform_yaml_for_validation(src)
         normalized = yaml.safe_load(norm.read_text())
         assert len(normalized["repos"]) == 1
@@ -195,16 +228,23 @@ class TestNormalizationHelper:
         norm.unlink()
 
     def test_existing_owner_takes_precedence_over_agent(self, tmp_path: Path):
-        """If both agent: and owner: are set, owner is canonical; agent stripped from validation copy."""
-        src = self._write_yaml(tmp_path / "platform.yaml", {
-            "project": "x",
-            "version": "1.0",
-            "repos": [{
-                "name": "r1", "path": "./r1",
-                "agent": "ignored-agent",
-                "owner": "real-owner",
-            }],
-        })
+        """If both agent: and owner: are set, owner is canonical;
+        agent stripped from validation copy."""
+        src = self._write_yaml(
+            tmp_path / "platform.yaml",
+            {
+                "project": "x",
+                "version": "1.0",
+                "repos": [
+                    {
+                        "name": "r1",
+                        "path": "./r1",
+                        "agent": "ignored-agent",
+                        "owner": "real-owner",
+                    }
+                ],
+            },
+        )
         norm, hints = _normalize_ce_platform_yaml_for_validation(src)
         # A tmp file is written because we strip `agent:` (schema rejects unknown),
         # but `owner:` is preserved unchanged and no aliasing hint fires.
@@ -212,8 +252,9 @@ class TestNormalizationHelper:
         normalized = yaml.safe_load(norm.read_text())
         assert normalized["repos"][0]["owner"] == "real-owner"
         assert "agent" not in normalized["repos"][0]
-        assert not any("aliased" in h for h in hints), \
+        assert not any("aliased" in h for h in hints), (
             "no aliasing hint when owner was already canonical"
+        )
         norm.unlink()
 
 
@@ -228,7 +269,11 @@ class TestValidateCommand:
         }
         return subprocess.run(
             [sys.executable, "-m", "otaman_cli.main", *args],
-            cwd=root, env=env, capture_output=True, text=True, timeout=30,
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
 
     def test_ce_shaped_yaml_passes_validation(self, tmp_path: Path):
@@ -248,7 +293,8 @@ class TestValidateCommand:
 
     def test_canonical_yaml_passes_with_no_hints(self, tmp_path: Path):
         (tmp_path / "platform.yaml").write_text(
-            "project: canon\nversion: '1.0'\nrepos:\n  - {name: r1, path: ./r1, owner: ops-agent}\n",
+            "project: canon\nversion: '1.0'\nrepos:\n"
+            "  - {name: r1, path: ./r1, owner: ops-agent}\n",
             encoding="utf-8",
         )
         r = self._run_cli(tmp_path, "validate")
@@ -303,8 +349,7 @@ class TestValidateCommand:
         )
         r = self._run_cli(org_dir, "validate")
         assert r.returncode == 0, (
-            f"fresh CE org scaffold must pass validation.  "
-            f"stdout={r.stdout!r}  stderr={r.stderr!r}"
+            f"fresh CE org scaffold must pass validation.  stdout={r.stdout!r}  stderr={r.stderr!r}"
         )
         # Only the empty-repos placeholder hint should fire (runner:/terminal:
         # are first-class in the schema since 2026-06-10).

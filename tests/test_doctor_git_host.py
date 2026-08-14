@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from otaman_core import git_host as gh
 
 # doctor + git_host now in package form
 from otaman_cli import doctor
-from otaman_core import git_host as gh
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -50,7 +47,8 @@ class TestNoConfig:
 
     def test_no_git_host_block_is_ok(self, tmp_path):
         (tmp_path / "platform.yaml").write_text(
-            "project: test\nrepos: []\n", encoding="utf-8",
+            "project: test\nrepos: []\n",
+            encoding="utf-8",
         )
         result = doctor.check_git_host(tmp_path)
         assert result["status"] == "ok"
@@ -59,10 +57,15 @@ class TestNoConfig:
 
 class TestConfigured:
     def test_valid_token_reports_ok(self, configured_root):
-        with patch.object(gh, "_do_get", return_value=(
-            200, json.dumps({"login": "octocat"}).encode("utf-8"),
-            {"X-OAuth-Scopes": "repo"},
-        )):
+        with patch.object(
+            gh,
+            "_do_get",
+            return_value=(
+                200,
+                json.dumps({"login": "octocat"}).encode("utf-8"),
+                {"X-OAuth-Scopes": "repo"},
+            ),
+        ):
             result = doctor.check_git_host(configured_root)
         assert result["status"] == "ok"
         assert result["details"]["configured"] is True
@@ -82,10 +85,7 @@ class TestConfigured:
     def test_missing_env_var_is_warn(self, tmp_path, monkeypatch):
         monkeypatch.delenv("MAESTRO_GH_MISSING_VAR", raising=False)
         (tmp_path / "platform.yaml").write_text(
-            "project: test\n"
-            "git_host:\n"
-            "  provider: github\n"
-            "  token: MAESTRO_GH_MISSING_VAR\n",
+            "project: test\ngit_host:\n  provider: github\n  token: MAESTRO_GH_MISSING_VAR\n",
             encoding="utf-8",
         )
         result = doctor.check_git_host(tmp_path)
@@ -97,8 +97,7 @@ class TestRemotesSummary:
     def test_lists_remotes_even_without_config(self, tmp_path):
         # A repo with a parseable origin.
         (tmp_path / "platform.yaml").write_text(
-            "project: test\nrepos:\n"
-            "  - name: r1\n    path: ../r1\n",
+            "project: test\nrepos:\n  - name: r1\n    path: ../r1\n",
             encoding="utf-8",
         )
         # Don't actually init a git repo; detect_remote_for_repo returns None.

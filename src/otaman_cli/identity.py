@@ -86,7 +86,7 @@ def _read_otaman_agent_field(cwd: Path) -> str | None:
             for line in text.splitlines():
                 stripped = line.strip()
                 if stripped.startswith("agent:"):
-                    value = stripped[len("agent:"):].strip()
+                    value = stripped[len("agent:") :].strip()
                     if value:
                         return value
             # No agent: field in this .otaman file — keep walking up
@@ -211,7 +211,7 @@ def resolve_agent_identity(
         except OSError:
             text = ""
         # Skip deprecation-marker lines written during the transition
-        lines = [l for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
+        lines = [ln for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("#")]
         if lines:
             name = lines[0].strip()
             if name:
@@ -224,7 +224,8 @@ def resolve_agent_identity(
                     )
                 else:
                     print(
-                        f"[otaman] DEPRECATED: identity resolved from .agents/current-agent ('{name}'). "
+                        f"[otaman] DEPRECATED: identity resolved from "
+                        f".agents/current-agent ('{name}'). "
                         "Run 'otaman init --update' to migrate to per-repo .otaman agent: fields, "
                         "or set OTAMAN_AGENT in your launch config.",
                         file=sys.stderr,

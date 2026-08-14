@@ -5,7 +5,8 @@ Dispatch table:
     list              — enumerate outcomes
     show <id>         — full detail for one outcome
     history <id>      — render transitions[] as table
-    promote <id>      — Drafting→Backlog / Backlog→Approved / Approved→In-Progress / In-Progress→Done
+    promote <id>      — Drafting→Backlog / Backlog→Approved /
+                        Approved→In-Progress / In-Progress→Done
     demote <id>       — reverse direction
     request-estimate <id> — flag estimate-requested, emit outcome-estimate-requested
     accept-cost <id> --solution SOL — set cost-accepted=true + chosen-solution + emit
@@ -15,7 +16,6 @@ Dispatch table:
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +87,7 @@ def _ctx(root: Path):
         platform = load_program_extensions(root / "platform.yaml")
     except Exception:
         from otaman_cli.registries.platform_ext import ProgramExtensions
+
         platform = ProgramExtensions()
     roles = resolve_roles(actor, platform)
     return actor, roles, platform
@@ -346,7 +347,7 @@ def _mutate_status(args: dict[str, Any], op: str, action: str, target: str | Non
     msg = bus_messages.build_outcome_status_changed(outcome, from_value, to_value, actor, action)
     _emit_bus(root, msg)
     UI.ok(f"Outcome {outcome['id']}: {from_value} → {to_value}")
-    UI.muted(f"Bus signal: outcome-status-changed")
+    UI.muted("Bus signal: outcome-status-changed")
     return 0
 
 
@@ -486,7 +487,10 @@ def cmd_reject_cost(args: dict[str, Any]) -> int:
     _emit_bus(
         root,
         bus_messages.build_outcome_cost_rejected(
-            outcome, actor, note=args.get("reason"), rejected_solution=rejected_solution,
+            outcome,
+            actor,
+            note=args.get("reason"),
+            rejected_solution=rejected_solution,
         ),
     )
     UI.ok(f"Rejected cost: {outcome['id']}")

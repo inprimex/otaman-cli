@@ -192,7 +192,10 @@ def _print_payload_or_error(action: str, status: int, payload: dict, *, json_out
     if status == 404:
         if not json_out:
             print(f"Watchdog not configured: {payload.get('error', '404')}")
-            print("  Hint: rebuild the runner with watchdog enabled, or check `runner.watchdog.enabled` in platform.yaml.")
+            print(
+                "  Hint: rebuild the runner with watchdog enabled, "
+                "or check `runner.watchdog.enabled` in platform.yaml."
+            )
         return 2
     if status == 503:
         if not json_out:

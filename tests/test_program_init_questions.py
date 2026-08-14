@@ -1,9 +1,6 @@
 """Tests for questions.py — YAML loader + condition evaluation (tasks.md 2.1)."""
-from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
+from __future__ import annotations
 
 import pytest
 import yaml
@@ -18,14 +15,15 @@ from otaman_cli.onboard.program_init.questions import (
     run_questions,
 )
 
-
 # ── helpers ────────────────────────────────────────────────────────────────
+
 
 def _make_yaml(questions: list[dict]) -> str:
     return yaml.safe_dump({"questions": questions})
 
 
 # ── load_questions ─────────────────────────────────────────────────────────
+
 
 class TestLoadQuestions:
     def test_loads_list(self, tmp_path):
@@ -48,6 +46,7 @@ class TestLoadQuestions:
 
 
 # ── _eval_condition ────────────────────────────────────────────────────────
+
 
 class TestEvalCondition:
     def test_none_returns_true(self):
@@ -86,18 +85,21 @@ class TestEvalCondition:
     def test_set_intersection_condition(self):
         # set() intersection pattern used in questions.yaml scales conditions
         ctx = {"answers": {"processes": ["outcomes", "risks"]}, "edition": "ce", "mode": 1}
-        assert _eval_condition(
-            "bool(set(answers.get('processes',[])) & {'risks','outcomes'})", ctx
-        ) is True
+        assert (
+            _eval_condition("bool(set(answers.get('processes',[])) & {'risks','outcomes'})", ctx)
+            is True
+        )
 
     def test_set_intersection_false(self):
         ctx = {"answers": {"processes": ["vocabulary"]}, "edition": "ce", "mode": 1}
-        assert _eval_condition(
-            "bool(set(answers.get('processes',[])) & {'risks','outcomes'})", ctx
-        ) is False
+        assert (
+            _eval_condition("bool(set(answers.get('processes',[])) & {'risks','outcomes'})", ctx)
+            is False
+        )
 
 
 # ── edition / mode gates ───────────────────────────────────────────────────
+
 
 class TestGates:
     def test_ce_question_not_gated_for_ce(self):
@@ -127,6 +129,7 @@ class TestGates:
 
 # ── ask_question (with mocked input) ──────────────────────────────────────
 
+
 class TestAskQuestion:
     def _text_q(self, **kw) -> dict:
         return {"id": "name", "type": "text", "label": "Name", **kw}
@@ -150,6 +153,7 @@ class TestAskQuestion:
         monkeypatch.setattr("builtins.input", lambda _: "my-program")
         # Patch questionary unavailable so we use the fallback
         import otaman_cli.onboard.program_init.questions as qmod
+
         orig = qmod._Q_AVAILABLE
         qmod._Q_AVAILABLE = False
         try:
@@ -162,6 +166,7 @@ class TestAskQuestion:
     def test_confirm_question(self, monkeypatch):
         monkeypatch.setattr("builtins.input", lambda _: "y")
         import otaman_cli.onboard.program_init.questions as qmod
+
         orig = qmod._Q_AVAILABLE
         qmod._Q_AVAILABLE = False
         try:
@@ -173,12 +178,15 @@ class TestAskQuestion:
     def test_checkbox_question(self, monkeypatch):
         monkeypatch.setattr("builtins.input", lambda _: "1,2")
         import otaman_cli.onboard.program_init.questions as qmod
+
         orig = qmod._Q_AVAILABLE
         qmod._Q_AVAILABLE = False
         try:
             q = {
-                "id": "procs", "type": "checkbox",
-                "label": "Pick", "options": ["outcomes", "risks", "strategy"],
+                "id": "procs",
+                "type": "checkbox",
+                "label": "Pick",
+                "options": ["outcomes", "risks", "strategy"],
                 "default": [],
             }
             result = ask_question(q, {})
@@ -190,16 +198,19 @@ class TestAskQuestion:
 
 # ── run_questions (full flow) ──────────────────────────────────────────────
 
+
 class TestRunQuestions:
     def _input_seq(self, monkeypatch, responses: list[str]) -> None:
         """Patch input() to return items from *responses* in sequence."""
         import otaman_cli.onboard.program_init.questions as qmod
+
         qmod._Q_AVAILABLE = False
         it = iter(responses)
         monkeypatch.setattr("builtins.input", lambda _: next(it, ""))
 
     def test_prefill_skips_answered(self, monkeypatch):
         import otaman_cli.onboard.program_init.questions as qmod
+
         qmod._Q_AVAILABLE = False
         questions = [
             {"id": "a", "step": "s1", "type": "text", "label": "A"},
@@ -212,6 +223,7 @@ class TestRunQuestions:
 
     def test_skip_completed_step(self, monkeypatch):
         import otaman_cli.onboard.program_init.questions as qmod
+
         qmod._Q_AVAILABLE = False
         questions = [
             {"id": "a", "step": "s1", "type": "text", "label": "A"},
@@ -219,9 +231,11 @@ class TestRunQuestions:
         ]
         # s1 is already done → should not call input for 'a'
         call_count = {"n": 0}
+
         def _input(prompt):
             call_count["n"] += 1
             return "answer-b"
+
         monkeypatch.setattr("builtins.input", _input)
         answers = run_questions(
             questions,
@@ -234,20 +248,24 @@ class TestRunQuestions:
 
     def test_on_step_complete_called(self, monkeypatch):
         import otaman_cli.onboard.program_init.questions as qmod
+
         qmod._Q_AVAILABLE = False
         questions = [
             {"id": "x", "step": "step_x", "type": "text", "label": "X"},
         ]
         monkeypatch.setattr("builtins.input", lambda _: "val")
         fired = {}
+
         def cb(step_id, step_answers):
             fired[step_id] = step_answers
+
         run_questions(questions, on_step_complete=cb)
         assert "step_x" in fired
         assert fired["step_x"]["x"] == "val"
 
     def test_ee_questions_skipped_in_ce(self, monkeypatch):
         import otaman_cli.onboard.program_init.questions as qmod
+
         qmod._Q_AVAILABLE = False
         questions = [
             {"id": "a", "step": "s1", "type": "text", "label": "A"},
@@ -260,6 +278,7 @@ class TestRunQuestions:
 
 
 # ── skill profile recommendation ──────────────────────────────────────────
+
 
 class TestRecommendSkillProfile:
     def test_healthcare_domain(self):
@@ -278,7 +297,9 @@ class TestRecommendSkillProfile:
         assert _recommend_skill_profile({"processes": ["strategy"]}) == "tech-startup-cofounder"
 
     def test_software_dev_only(self):
-        result = _recommend_skill_profile({"domains": ["software-development"], "roles": ["engineer"]})
+        result = _recommend_skill_profile(
+            {"domains": ["software-development"], "roles": ["engineer"]}
+        )
         assert result == "software-development-default"
 
     def test_empty_answers(self):
@@ -292,6 +313,7 @@ class TestRecommendSkillProfile:
     def test_computed_default_applied_to_select(self, monkeypatch):
         """dynamic default_from should change the default presented to the user."""
         import otaman_cli.onboard.program_init.questions as qmod
+
         qmod._Q_AVAILABLE = False
 
         # User just presses enter (blank = takes default)

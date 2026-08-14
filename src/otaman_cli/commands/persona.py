@@ -35,6 +35,7 @@ def cmd_persona(args: list[str]) -> int:
         UI.warn(f"Unrecognised arguments ignored: {rest}")
 
     from otaman_cli.registries import cli_persona
+
     return cli_persona.dispatch(action, parsed)
 
 

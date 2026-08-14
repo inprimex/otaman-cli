@@ -7,7 +7,6 @@ subcommand that explains the resolution chain.
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import subprocess
 import sys
@@ -15,7 +14,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 
 # models_report is now an importable package module
 from otaman_cli import models_report as _models_report_module
@@ -49,7 +47,11 @@ def _run_cli(*args: str, cwd: Path):
     env["PYTHONPATH"] = os.pathsep.join([cli_src, core_src, env.get("PYTHONPATH", "")])
     return subprocess.run(
         [sys.executable, "-m", "otaman_cli.models_report", *args],
-        capture_output=True, text=True, timeout=10, cwd=cwd, env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        cwd=cwd,
+        env=env,
     )
 
 
@@ -85,7 +87,11 @@ class TestLegacyBackcompat:
 class TestSetDefault:
     def test_writes_default_model_and_effort(self, maestro_folder):
         result = _run_cli(
-            "set-default", "--model", "sonnet", "--effort", "medium",
+            "set-default",
+            "--model",
+            "sonnet",
+            "--effort",
+            "medium",
             cwd=maestro_folder,
         )
         assert result.returncode == 0
@@ -101,14 +107,20 @@ class TestSetDefault:
 
     def test_rejects_invalid_model(self, maestro_folder):
         result = _run_cli(
-            "set-default", "--model", "octopus", cwd=maestro_folder,
+            "set-default",
+            "--model",
+            "octopus",
+            cwd=maestro_folder,
         )
         assert result.returncode == 2
         assert "invalid model" in result.stderr
 
     def test_rejects_invalid_effort(self, maestro_folder):
         result = _run_cli(
-            "set-default", "--effort", "maximal", cwd=maestro_folder,
+            "set-default",
+            "--effort",
+            "maximal",
+            cwd=maestro_folder,
         )
         assert result.returncode == 2
         assert "invalid effort" in result.stderr
@@ -119,8 +131,7 @@ class TestSetDefault:
         assert models["default"] == "sonnet"
 
     def test_unset_default_clears(self, maestro_folder):
-        _run_cli("set-default", "--model", "sonnet", "--effort", "low",
-                 cwd=maestro_folder)
+        _run_cli("set-default", "--model", "sonnet", "--effort", "low", cwd=maestro_folder)
         _run_cli("unset-default", cwd=maestro_folder)
         models = _read_models(maestro_folder)
         assert "default" not in models
@@ -134,7 +145,12 @@ class TestSetDefault:
 class TestSetRepo:
     def test_writes_per_repo_entry(self, maestro_folder):
         _run_cli(
-            "set-repo", "train", "--model", "opus", "--effort", "high",
+            "set-repo",
+            "train",
+            "--model",
+            "opus",
+            "--effort",
+            "high",
             cwd=maestro_folder,
         )
         models = _read_models(maestro_folder)
@@ -177,15 +193,17 @@ class TestSetRepo:
 class TestSetAgent:
     def test_writes_per_agent_entry(self, maestro_folder):
         _run_cli(
-            "set-agent", "train-agent", "--model", "opus",
+            "set-agent",
+            "train-agent",
+            "--model",
+            "opus",
             cwd=maestro_folder,
         )
         models = _read_models(maestro_folder)
         assert models["by_agent"]["train-agent"]["model"] == "opus"
 
     def test_unset_removes_entry(self, maestro_folder):
-        _run_cli("set-agent", "train-agent", "--model", "opus",
-                 cwd=maestro_folder)
+        _run_cli("set-agent", "train-agent", "--model", "opus", cwd=maestro_folder)
         _run_cli("unset-agent", "train-agent", cwd=maestro_folder)
         models = _read_models(maestro_folder)
         assert "by_agent" not in models  # pruned
@@ -226,8 +244,7 @@ class TestPreservesSurroundingContent:
             "  default_effort: max\n",
             encoding="utf-8",
         )
-        _run_cli("set-default", "--model", "haiku", "--effort", "low",
-                 cwd=maestro_folder)
+        _run_cli("set-default", "--model", "haiku", "--effort", "low", cwd=maestro_folder)
         models = _read_models(maestro_folder)
         assert models == {"default": "haiku", "default_effort": "low"}
         # The text should no longer contain the old opus default
@@ -242,8 +259,7 @@ class TestPreservesSurroundingContent:
 
 class TestShow:
     def test_shows_default_chain(self, maestro_folder):
-        _run_cli("set-default", "--model", "sonnet", "--effort", "medium",
-                 cwd=maestro_folder)
+        _run_cli("set-default", "--model", "sonnet", "--effort", "medium", cwd=maestro_folder)
         result = _run_cli("show", cwd=maestro_folder)
         assert result.returncode == 0
         assert "project default" in result.stdout
@@ -252,8 +268,7 @@ class TestShow:
 
     def test_shows_per_repo_resolution(self, maestro_folder):
         _run_cli("set-default", "--model", "sonnet", cwd=maestro_folder)
-        _run_cli("set-repo", "train", "--model", "opus", "--effort", "high",
-                 cwd=maestro_folder)
+        _run_cli("set-repo", "train", "--model", "opus", "--effort", "high", cwd=maestro_folder)
         result = _run_cli("show", "--repo", "train", cwd=maestro_folder)
         assert result.returncode == 0
         # Marker "->" points at the rule that fired
@@ -271,22 +286,27 @@ class TestTargetFlag:
 
     def test_launch_settings_flag_writes_there(self, maestro_folder):
         (maestro_folder / "launch-settings.yaml").write_text(
-            "accounts: {}\n", encoding="utf-8",
+            "accounts: {}\n",
+            encoding="utf-8",
         )
         result = _run_cli(
-            "set-default", "--model", "sonnet", "--launch-settings",
+            "set-default",
+            "--model",
+            "sonnet",
+            "--launch-settings",
             cwd=maestro_folder,
         )
         assert result.returncode == 0
         # Written to launch-settings.yaml
-        ls = yaml.safe_load(
-            (maestro_folder / "launch-settings.yaml").read_text(encoding="utf-8")
-        ) or {}
+        ls = (
+            yaml.safe_load((maestro_folder / "launch-settings.yaml").read_text(encoding="utf-8"))
+            or {}
+        )
         assert ls.get("models", {}).get("default") == "sonnet"
         # platform.yaml stays untouched (no models: block)
-        platform = yaml.safe_load(
-            (maestro_folder / "platform.yaml").read_text(encoding="utf-8")
-        ) or {}
+        platform = (
+            yaml.safe_load((maestro_folder / "platform.yaml").read_text(encoding="utf-8")) or {}
+        )
         assert "models" not in platform
 
     def test_platform_flag_forces_platform_yaml(self, maestro_folder):
@@ -297,13 +317,16 @@ class TestTargetFlag:
             encoding="utf-8",
         )
         result = _run_cli(
-            "set-default", "--model", "sonnet", "--platform",
+            "set-default",
+            "--model",
+            "sonnet",
+            "--platform",
             cwd=maestro_folder,
         )
         assert result.returncode == 0
-        platform = yaml.safe_load(
-            (maestro_folder / "platform.yaml").read_text(encoding="utf-8")
-        ) or {}
+        platform = (
+            yaml.safe_load((maestro_folder / "platform.yaml").read_text(encoding="utf-8")) or {}
+        )
         assert platform["models"]["default"] == "sonnet"
 
     def test_auto_prefers_launch_settings_when_launcher_like(self, maestro_folder):
@@ -316,29 +339,34 @@ class TestTargetFlag:
             encoding="utf-8",
         )
         _run_cli(
-            "set-repo", "train", "--model", "opus",
+            "set-repo",
+            "train",
+            "--model",
+            "opus",
             cwd=maestro_folder,
         )
-        ls = yaml.safe_load(
-            (maestro_folder / "launch-settings.yaml").read_text(encoding="utf-8")
-        ) or {}
+        ls = (
+            yaml.safe_load((maestro_folder / "launch-settings.yaml").read_text(encoding="utf-8"))
+            or {}
+        )
         assert ls["models"]["by_repo"]["train"]["model"] == "opus"
         # platform.yaml untouched
-        platform = yaml.safe_load(
-            (maestro_folder / "platform.yaml").read_text(encoding="utf-8")
-        ) or {}
+        platform = (
+            yaml.safe_load((maestro_folder / "platform.yaml").read_text(encoding="utf-8")) or {}
+        )
         assert "models" not in platform
 
     def test_auto_falls_to_platform_without_launcher_signals(self, maestro_folder):
         """launch-settings.yaml without connections:/accounts: → auto
         uses platform.yaml (legacy behavior)."""
         (maestro_folder / "launch-settings.yaml").write_text(
-            "# empty/non-launcher file\n", encoding="utf-8",
+            "# empty/non-launcher file\n",
+            encoding="utf-8",
         )
         _run_cli("set-default", "--model", "sonnet", cwd=maestro_folder)
-        platform = yaml.safe_load(
-            (maestro_folder / "platform.yaml").read_text(encoding="utf-8")
-        ) or {}
+        platform = (
+            yaml.safe_load((maestro_folder / "platform.yaml").read_text(encoding="utf-8")) or {}
+        )
         assert platform["models"]["default"] == "sonnet"
 
     def test_launch_settings_read_by_resolver(self, maestro_folder):
@@ -348,11 +376,18 @@ class TestTargetFlag:
             encoding="utf-8",
         )
         _run_cli(
-            "set-default", "--model", "sonnet", "--launch-settings",
+            "set-default",
+            "--model",
+            "sonnet",
+            "--launch-settings",
             cwd=maestro_folder,
         )
         _run_cli(
-            "set-repo", "train", "--model", "opus", "--launch-settings",
+            "set-repo",
+            "train",
+            "--model",
+            "opus",
+            "--launch-settings",
             cwd=maestro_folder,
         )
         # maestro models show reads from both sources via resolver
@@ -367,7 +402,9 @@ class TestErrors:
         orphan = tmp_path / "orphan"
         orphan.mkdir()
         result = _run_cli(
-            "set-default", "--model", "sonnet",
+            "set-default",
+            "--model",
+            "sonnet",
             cwd=orphan,
         )
         assert result.returncode == 2
@@ -375,7 +412,10 @@ class TestErrors:
 
     def test_set_repo_without_repo_arg(self, maestro_folder):
         result = _run_cli(
-            "set-repo", "--model", "sonnet", cwd=maestro_folder,
+            "set-repo",
+            "--model",
+            "sonnet",
+            cwd=maestro_folder,
         )
         # argparse catches missing positional
         assert result.returncode != 0

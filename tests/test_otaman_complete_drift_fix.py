@@ -6,17 +6,14 @@
       branch cases)
 1.5 — Integration: `otaman complete` as cli-agent writes bus message but NOT tasks.md
 """
+
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import MagicMock
 
 from otaman_cli.commands.complete import _is_spec_agent, cmd_complete
 
@@ -50,7 +47,8 @@ def _stage_project(
         (tmp_path / ".agents" / "current-agent").write_text(agent, encoding="utf-8")
     if otaman_marker_agent is not None:
         (tmp_path / ".otaman").write_text(
-            f"otaman_root: .\nagent: {otaman_marker_agent}\n", encoding="utf-8",
+            f"otaman_root: .\nagent: {otaman_marker_agent}\n",
+            encoding="utf-8",
         )
     (tmp_path / "platform.yaml").write_text(
         "project: tst\nversion: '1.0'\nrepos: []\n",
@@ -95,7 +93,9 @@ class TestIsSpecAgentIdentityResolution:
     see git history for the original #93 regression test this replaced."""
 
     def test_otaman_agent_env_alone_does_not_grant_the_write(
-        self, tmp_path: Path, monkeypatch,
+        self,
+        tmp_path: Path,
+        monkeypatch,
     ):
         """OTAMAN_AGENT=spec-agent with no `.otaman` marker must NOT drive
         the tasks.md tick — closes exactly the env-var spoofing vector
@@ -105,10 +105,13 @@ class TestIsSpecAgentIdentityResolution:
         monkeypatch.setenv("OTAMAN_AGENT", "spec-agent")
 
         from otaman_cli.commands import complete as _m
+
         calls: list[tuple] = []
+
         def _stub_run_script(name, *args, **kw):
             calls.append((name, args))
             return MagicMock(returncode=0, stdout="{}", stderr="")
+
         monkeypatch.setattr(_m, "run_script", _stub_run_script)
 
         rc = cmd_complete(["test-change", "--tasks", "1.1"])
@@ -119,7 +122,9 @@ class TestIsSpecAgentIdentityResolution:
         )
 
     def test_otaman_marker_grants_the_write_even_without_current_agent_file(
-        self, tmp_path: Path, monkeypatch,
+        self,
+        tmp_path: Path,
+        monkeypatch,
     ):
         """A `.otaman agent: spec-agent` marker is sufficient on its own —
         no `.agents/current-agent` file needed."""
@@ -128,15 +133,18 @@ class TestIsSpecAgentIdentityResolution:
         monkeypatch.delenv("OTAMAN_AGENT", raising=False)
 
         from otaman_cli.commands import complete as _m
+
         calls: list[tuple] = []
         stub_result = MagicMock(
             returncode=0,
             stdout='{"updated": 1, "already_done": 0, "not_found": [], "tasks_file": "x"}',
             stderr="",
         )
+
         def _stub_run_script(name, *args, **kw):
             calls.append((name, args))
             return stub_result
+
         monkeypatch.setattr(_m, "run_script", _stub_run_script)
 
         rc = cmd_complete(["test-change", "--tasks", "1.1"])
@@ -159,10 +167,19 @@ class TestCmdCompleteBranching:
         }
         return subprocess.run(
             [
-                sys.executable, "-m", "otaman_cli.main",
-                "complete", change, "--tasks", "1.1,1.2",
+                sys.executable,
+                "-m",
+                "otaman_cli.main",
+                "complete",
+                change,
+                "--tasks",
+                "1.1,1.2",
             ],
-            cwd=root, env=env, capture_output=True, text=True, timeout=30,
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
 
     # 1.4 (d) — spec-agent path: actualize-tasks.py runs
@@ -181,11 +198,18 @@ class TestCmdCompleteBranching:
 
         # Capture the run_script invocation
         from otaman_cli.commands import complete as _m
+
         calls: list[tuple] = []
-        stub_result = MagicMock(returncode=0, stdout='{"updated": 2, "already_done": 0, "not_found": [], "tasks_file": "x"}', stderr="")
+        stub_result = MagicMock(
+            returncode=0,
+            stdout='{"updated": 2, "already_done": 0, "not_found": [], "tasks_file": "x"}',
+            stderr="",
+        )
+
         def _stub_run_script(name, *args, **kw):
             calls.append((name, args))
             return stub_result
+
         monkeypatch.setattr(_m, "run_script", _stub_run_script)
 
         rc = cmd_complete(["test-change", "--tasks", "1.1,1.2"])
@@ -202,10 +226,13 @@ class TestCmdCompleteBranching:
         monkeypatch.delenv("OTAMAN_AGENT", raising=False)
 
         from otaman_cli.commands import complete as _m
+
         calls: list[tuple] = []
+
         def _stub_run_script(name, *args, **kw):
             calls.append((name, args))
             return MagicMock(returncode=0, stdout="{}", stderr="")
+
         monkeypatch.setattr(_m, "run_script", _stub_run_script)
 
         rc = cmd_complete(["test-change", "--tasks", "1.1,1.2"])
@@ -228,8 +255,10 @@ class TestCmdCompleteBranching:
             _stage_project(tmp_path, agent=agent)
             monkeypatch.chdir(tmp_path)
             from otaman_cli.commands import complete as _m
+
             monkeypatch.setattr(
-                _m, "run_script",
+                _m,
+                "run_script",
                 lambda *a, **kw: MagicMock(returncode=0, stdout='{"updated": 0}', stderr=""),
             )
             rc = cmd_complete(["test-change", "--tasks", "1.1"])
@@ -270,16 +299,30 @@ class TestCmdCompleteBranching:
             "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
             "NO_COLOR": "1",
         }
-        r = subprocess.run([
-            sys.executable, "-m", "otaman_cli.main",
-            "complete", "x", "--tasks", "1.1",
-        ], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30)
+        r = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "otaman_cli.main",
+                "complete",
+                "x",
+                "--tasks",
+                "1.1",
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         assert r.returncode == 0, (r.stdout, r.stderr)
 
         # Find the produced task-complete message
         msgs = list(active.glob("*task-complete*.md"))
         assert len(msgs) >= 1
-        complete_msg = next(m for m in msgs if m.read_text(encoding="utf-8").count("type: task-complete"))
+        complete_msg = next(
+            m for m in msgs if m.read_text(encoding="utf-8").count("type: task-complete")
+        )
         body = complete_msg.read_text(encoding="utf-8")
         assert "to: spec-agent" in body, (
             f"non-spec-agent run MUST target spec-agent; got:\n{body[:400]}"
@@ -293,7 +336,9 @@ class TestCmdCompleteBranching:
         """End-to-end: `otaman complete` as cli-agent → bus file written, no tasks.md mutation."""
         _stage_project(tmp_path, agent="cli-agent")
         # Stage a stub specs sibling with a tasks.md to PROVE it isn't touched
-        specs_dir = tmp_path.parent / f"{tmp_path.name}-specs" / "openspec" / "changes" / "test-change"
+        specs_dir = (
+            tmp_path.parent / f"{tmp_path.name}-specs" / "openspec" / "changes" / "test-change"
+        )
         specs_dir.mkdir(parents=True)
         tasks_md = specs_dir / "tasks.md"
         original = "# tasks\n- [ ] 1.1 something\n- [ ] 1.2 another\n"
@@ -317,7 +362,9 @@ class TestCmdCompleteBranching:
         # The body explicitly notes the pending sweep
         assert "spec-agent" in body and "tick" in body.lower()
 
-    def test_integration_spec_agent_writes_pending_tick_line_when_actualize_skipped(self, tmp_path: Path):
+    def test_integration_spec_agent_writes_pending_tick_line_when_actualize_skipped(
+        self, tmp_path: Path
+    ):
         """spec-agent run with no real actualize-tasks.py succeeds AND emits the
         normal `**Updated**: N task(s) in tasks.md` body line (NOT the pending-tick line).
         """

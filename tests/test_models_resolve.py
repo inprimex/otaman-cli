@@ -2,13 +2,8 @@
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-from pathlib import Path
-
 import pytest
 import yaml
-
 
 # _models_resolve is now an importable package module
 from otaman_cli import _models_resolve as mr
@@ -51,10 +46,13 @@ class TestEmpty:
 
 class TestProjectDefault:
     def test_default_applied(self, maestro_folder):
-        _write_platform(maestro_folder, models={
-            "default": "sonnet",
-            "default_effort": "medium",
-        })
+        _write_platform(
+            maestro_folder,
+            models={
+                "default": "sonnet",
+                "default_effort": "medium",
+            },
+        )
         result = mr.resolve_tier(maestro_folder)
         assert result.model == "sonnet"
         assert result.effort == "medium"
@@ -70,10 +68,13 @@ class TestProjectDefault:
     def test_inherit_treated_as_unset(self, maestro_folder):
         """`inherit` in platform.yaml is a no-op — lets user say 'don't
         override at this layer, fall through'."""
-        _write_platform(maestro_folder, models={
-            "default": "inherit",
-            "default_effort": "inherit",
-        })
+        _write_platform(
+            maestro_folder,
+            models={
+                "default": "inherit",
+                "default_effort": "inherit",
+            },
+        )
         result = mr.resolve_tier(maestro_folder)
         assert result.is_empty()
 
@@ -84,33 +85,42 @@ class TestProjectDefault:
 
 class TestByRepo:
     def test_by_repo_wins_over_default(self, maestro_folder):
-        _write_platform(maestro_folder, models={
-            "default": "sonnet",
-            "by_repo": {
-                "train": {"model": "opus", "effort": "high"},
+        _write_platform(
+            maestro_folder,
+            models={
+                "default": "sonnet",
+                "by_repo": {
+                    "train": {"model": "opus", "effort": "high"},
+                },
             },
-        })
+        )
         result = mr.resolve_tier(maestro_folder, repo="train")
         assert result.model == "opus"
         assert result.effort == "high"
         assert result.model_source == "by_repo"
 
     def test_unmatched_repo_falls_to_default(self, maestro_folder):
-        _write_platform(maestro_folder, models={
-            "default": "sonnet",
-            "by_repo": {"train": {"model": "opus"}},
-        })
+        _write_platform(
+            maestro_folder,
+            models={
+                "default": "sonnet",
+                "by_repo": {"train": {"model": "opus"}},
+            },
+        )
         result = mr.resolve_tier(maestro_folder, repo="other")
         assert result.model == "sonnet"
         assert result.model_source == "default"
 
     def test_by_repo_partial_fills_from_default(self, maestro_folder):
         """Per-repo sets only model; effort falls through to default."""
-        _write_platform(maestro_folder, models={
-            "default": "sonnet",
-            "default_effort": "medium",
-            "by_repo": {"train": {"model": "opus"}},  # no effort
-        })
+        _write_platform(
+            maestro_folder,
+            models={
+                "default": "sonnet",
+                "default_effort": "medium",
+                "by_repo": {"train": {"model": "opus"}},  # no effort
+            },
+        )
         result = mr.resolve_tier(maestro_folder, repo="train")
         assert result.model == "opus"
         assert result.model_source == "by_repo"
@@ -124,9 +134,12 @@ class TestByRepo:
 
 class TestByAgent:
     def test_explicit_agent(self, maestro_folder):
-        _write_platform(maestro_folder, models={
-            "by_agent": {"train-agent": {"model": "opus"}},
-        })
+        _write_platform(
+            maestro_folder,
+            models={
+                "by_agent": {"train-agent": {"model": "opus"}},
+            },
+        )
         result = mr.resolve_tier(maestro_folder, agent="train-agent")
         assert result.model == "opus"
         assert result.model_source == "by_agent"
@@ -163,10 +176,12 @@ class TestByAgent:
     def test_explicit_agent_overrides_repo_owner_lookup(self, maestro_folder):
         _write_platform(
             maestro_folder,
-            models={"by_agent": {
-                "train-agent": {"model": "opus"},
-                "other-agent": {"model": "haiku"},
-            }},
+            models={
+                "by_agent": {
+                    "train-agent": {"model": "opus"},
+                    "other-agent": {"model": "haiku"},
+                }
+            },
             repos=[
                 {"name": "train", "path": "../train", "owner": "train-agent"},
             ],
@@ -174,7 +189,9 @@ class TestByAgent:
         # repo=train would look up train-agent. But we pass agent=other-agent
         # explicitly; that should win the lookup step.
         result = mr.resolve_tier(
-            maestro_folder, repo="train", agent="other-agent",
+            maestro_folder,
+            repo="train",
+            agent="other-agent",
         )
         assert result.model == "haiku"
 
@@ -185,12 +202,17 @@ class TestByAgent:
 
 class TestCliOverride:
     def test_cli_wins_over_all(self, maestro_folder):
-        _write_platform(maestro_folder, models={
-            "default": "sonnet",
-            "by_repo": {"train": {"model": "opus"}},
-        })
+        _write_platform(
+            maestro_folder,
+            models={
+                "default": "sonnet",
+                "by_repo": {"train": {"model": "opus"}},
+            },
+        )
         result = mr.resolve_tier(
-            maestro_folder, repo="train", cli_model="haiku",
+            maestro_folder,
+            repo="train",
+            cli_model="haiku",
         )
         assert result.model == "haiku"
         assert result.model_source == "cli"
@@ -203,10 +225,13 @@ class TestCliOverride:
         assert result.model_source == "default"
 
     def test_effort_cli_independent_of_model(self, maestro_folder):
-        _write_platform(maestro_folder, models={
-            "default": "sonnet",
-            "default_effort": "low",
-        })
+        _write_platform(
+            maestro_folder,
+            models={
+                "default": "sonnet",
+                "default_effort": "low",
+            },
+        )
         result = mr.resolve_tier(maestro_folder, cli_effort="xhigh")
         assert result.model == "sonnet"
         assert result.model_source == "default"
@@ -251,8 +276,9 @@ class TestMergeFromTwoFiles:
 
     def test_launch_settings_overrides_platform_default(self, maestro_folder):
         (maestro_folder / "platform.yaml").write_text(
-            yaml.dump({"project": "t", "version": "1.0", "repos": [],
-                       "models": {"default": "sonnet"}}),
+            yaml.dump(
+                {"project": "t", "version": "1.0", "repos": [], "models": {"default": "sonnet"}}
+            ),
             encoding="utf-8",
         )
         (maestro_folder / "launch-settings.yaml").write_text(
@@ -260,17 +286,23 @@ class TestMergeFromTwoFiles:
             encoding="utf-8",
         )
         result = mr.resolve_tier(maestro_folder)
-        assert result.model == "haiku"   # launch-settings wins
+        assert result.model == "haiku"  # launch-settings wins
 
     def test_platform_fills_in_what_launch_settings_omits(self, maestro_folder):
         """platform.yaml: default=sonnet + by_repo. launch-settings.yaml:
         only default=haiku. by_repo survives from platform.yaml."""
         (maestro_folder / "platform.yaml").write_text(
-            yaml.dump({"project": "t", "version": "1.0", "repos": [],
-                       "models": {
-                           "default": "sonnet",
-                           "by_repo": {"train": {"model": "opus"}},
-                       }}),
+            yaml.dump(
+                {
+                    "project": "t",
+                    "version": "1.0",
+                    "repos": [],
+                    "models": {
+                        "default": "sonnet",
+                        "by_repo": {"train": {"model": "opus"}},
+                    },
+                }
+            ),
             encoding="utf-8",
         )
         (maestro_folder / "launch-settings.yaml").write_text(
@@ -285,17 +317,36 @@ class TestMergeFromTwoFiles:
     def test_deep_merge_by_repo(self, maestro_folder):
         """Same repo in both files: launch-settings keys overlay."""
         (maestro_folder / "platform.yaml").write_text(
-            yaml.dump({"project": "t", "version": "1.0", "repos": [],
-                       "models": {"by_repo": {"train": {
-                           "model": "sonnet", "effort": "medium",
-                       }}}}),
+            yaml.dump(
+                {
+                    "project": "t",
+                    "version": "1.0",
+                    "repos": [],
+                    "models": {
+                        "by_repo": {
+                            "train": {
+                                "model": "sonnet",
+                                "effort": "medium",
+                            }
+                        }
+                    },
+                }
+            ),
             encoding="utf-8",
         )
         (maestro_folder / "launch-settings.yaml").write_text(
-            yaml.dump({"models": {"by_repo": {"train": {
-                "model": "opus",    # overrides platform's sonnet
-                                    # effort not specified → inherits 'medium'
-            }}}}),
+            yaml.dump(
+                {
+                    "models": {
+                        "by_repo": {
+                            "train": {
+                                "model": "opus",  # overrides platform's sonnet
+                                # effort not specified → inherits 'medium'
+                            }
+                        }
+                    }
+                }
+            ),
             encoding="utf-8",
         )
         result = mr.resolve_tier(maestro_folder, repo="train")
@@ -318,12 +369,17 @@ class TestMergeFromTwoFiles:
         """launch-settings.yaml ONLY (no platform.yaml) — launcher-folder
         case where user might not have a local platform.yaml."""
         (maestro_folder / "launch-settings.yaml").write_text(
-            yaml.dump({
-                "accounts": {"personal": {"config_dir": "~/.claude-personal"}},
-                "models": {"default": "haiku", "by_repo": {
-                    "train": {"model": "opus"},
-                }},
-            }),
+            yaml.dump(
+                {
+                    "accounts": {"personal": {"config_dir": "~/.claude-personal"}},
+                    "models": {
+                        "default": "haiku",
+                        "by_repo": {
+                            "train": {"model": "opus"},
+                        },
+                    },
+                }
+            ),
             encoding="utf-8",
         )
         assert mr.resolve_tier(maestro_folder).model == "haiku"
@@ -332,10 +388,13 @@ class TestMergeFromTwoFiles:
 
 class TestExplain:
     def test_shows_which_rule_fired(self, maestro_folder):
-        _write_platform(maestro_folder, models={
-            "default": "sonnet",
-            "by_repo": {"train": {"model": "opus", "effort": "high"}},
-        })
+        _write_platform(
+            maestro_folder,
+            models={
+                "default": "sonnet",
+                "by_repo": {"train": {"model": "opus", "effort": "high"}},
+            },
+        )
         lines = mr.explain_chain(maestro_folder, repo="train")
         joined = "\n".join(lines)
         # Marker "->" on the rule that won

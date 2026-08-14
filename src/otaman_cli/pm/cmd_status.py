@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 try:
-    from otaman_core.pm_sync import load_pm_sync_config, PmSyncConfig
+    from otaman_core.pm_sync import PmSyncConfig, load_pm_sync_config
 except ImportError:
     load_pm_sync_config = None  # type: ignore[assignment]
     PmSyncConfig = None  # type: ignore[assignment]
@@ -31,6 +31,7 @@ def cmd_pm_status(args: list[str]) -> int:
     # Read pm-sync block directly (don't require otaman-core for status display)
     try:
         import yaml
+
         text = platform_yaml_path.read_text(encoding="utf-8")
         doc: dict[str, Any] = yaml.safe_load(text) or {}
     except Exception as exc:
@@ -49,11 +50,12 @@ def cmd_pm_status(args: list[str]) -> int:
     provider = pm_sync.get("provider", "")
     if provider == "easy8":
         try:
-            from otaman_adapters.easy8 import Easy8Adapter  # type: ignore[import]
             import os
-            api_key = (
-                os.environ.get(f"OTAMAN_PM_{provider.upper()}_API_KEY")
-                or os.environ.get("OTAMAN_PM_ADMIN_KEY")
+
+            from otaman_adapters.easy8 import Easy8Adapter  # type: ignore[import]
+
+            api_key = os.environ.get(f"OTAMAN_PM_{provider.upper()}_API_KEY") or os.environ.get(
+                "OTAMAN_PM_ADMIN_KEY"
             )
             base_url = pm_sync.get("base-url") or pm_sync.get("base_url") or ""
             if api_key and base_url:
@@ -72,6 +74,7 @@ def cmd_pm_status(args: list[str]) -> int:
         if adapter is not None:
             try:
                 from otaman_core.pm_sync import PmIssueFilters  # type: ignore[import]
+
                 issues = adapter.list_issues(PmIssueFilters(project_id=proj_id, status="open"))  # type: ignore[attr-defined]
                 open_count = str(len(issues))
             except Exception:

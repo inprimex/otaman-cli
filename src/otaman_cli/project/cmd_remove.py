@@ -63,7 +63,8 @@ def cmd_project_remove(name: str, *, delete_remote: bool = False) -> int:
     save_platform_yaml(root, data)
     UI.ok(f"Removed {name} from platform.yaml (local dir intact)")
     rc, out = git_commit_platform_yaml(
-        root, f"chore(platform): remove repo {name}",
+        root,
+        f"chore(platform): remove repo {name}",
     )
     if rc != 0:
         UI.warn(f"git commit failed (file written): {out.strip()[:120]}")

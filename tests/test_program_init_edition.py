@@ -1,10 +1,6 @@
 """Tests for edition.py — CE/EE detection."""
+
 from __future__ import annotations
-
-import os
-from pathlib import Path
-
-import pytest
 
 from otaman_cli.onboard.program_init.edition import (
     EDITION_CE,

@@ -13,6 +13,7 @@ Design rules:
       conformance layer is bridge-agent's task 5.1; we emit a correct but
       minimal set here for the spike).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -21,6 +22,7 @@ from typing import Any
 # ruamel.yaml may not be installed in the test environment yet; guard import
 try:
     from ruamel.yaml import YAML as _YAML
+
     _RUAMEL_AVAILABLE = True
 except ImportError:
     _RUAMEL_AVAILABLE = False
@@ -40,6 +42,7 @@ def _make_ruamel() -> Any:
 
 
 # --------------------------------------------------------------------------- builders
+
 
 def _build_platform_yaml(answers: dict[str, Any]) -> dict[str, Any]:
     """Convert the answers dict into a conforming platform.yaml structure.
@@ -120,20 +123,26 @@ def _build_platform_yaml(answers: dict[str, Any]) -> dict[str, Any]:
     if primary_repo == ".":
         doc["repos"] = [{"name": program_name, "path": ".", "owner": "main-agent"}]
     else:
-        doc["repos"] = [{"name": f"{program_name}-specs", "path": primary_repo, "owner": "spec-agent"}]
+        doc["repos"] = [
+            {"name": f"{program_name}-specs", "path": primary_repo, "owner": "spec-agent"}
+        ]
 
     if companion_business:
-        doc["repos"].append({
-            "name": f"{program_name}-business",
-            "path": f"~/{program_name}/{program_name}-business",
-            "owner": "cpo-agent",
-        })
+        doc["repos"].append(
+            {
+                "name": f"{program_name}-business",
+                "path": f"~/{program_name}/{program_name}-business",
+                "owner": "cpo-agent",
+            }
+        )
     if companion_strategy:
-        doc["repos"].append({
-            "name": f"{program_name}-strategy",
-            "path": f"~/{program_name}/{program_name}-strategy",
-            "owner": "cofounder-agent",
-        })
+        doc["repos"].append(
+            {
+                "name": f"{program_name}-strategy",
+                "path": f"~/{program_name}/{program_name}-strategy",
+                "owner": "cofounder-agent",
+            }
+        )
 
     if mode >= 2:
         doc["git_platform"] = git_platform
@@ -182,14 +191,15 @@ def _build_platform_yaml(answers: dict[str, Any]) -> dict[str, Any]:
     # only when a cpo-agent repo is configured.
     routing_rules = [{"when": {"to": "human"}, "cc": ["spec-agent"]}]
     has_cpo = any(
-        isinstance(r, dict) and r.get("owner") == "cpo-agent"
-        for r in doc.get("repos") or []
+        isinstance(r, dict) and r.get("owner") == "cpo-agent" for r in doc.get("repos") or []
     )
     if has_cpo:
-        routing_rules.append({
-            "when": {"to": "human", "priority": ["high", "urgent"]},
-            "cc": ["cpo-agent"],
-        })
+        routing_rules.append(
+            {
+                "when": {"to": "human", "priority": ["high", "urgent"]},
+                "cc": ["cpo-agent"],
+            }
+        )
     doc["bus"] = {"routing_rules": routing_rules}
 
     # git-flow-branch-config task 2.2 — scaffold a default standards.git
@@ -205,6 +215,7 @@ def _build_platform_yaml(answers: dict[str, Any]) -> dict[str, Any]:
 
 # --------------------------------------------------------------------------- public API
 
+
 def write_platform_yaml(answers: dict[str, Any], output_path: Path) -> Path:
     """CREATE mode — write a fresh platform.yaml at *output_path*.
 
@@ -212,6 +223,7 @@ def write_platform_yaml(answers: dict[str, Any], output_path: Path) -> Path:
     """
     yaml = _make_ruamel()
     import io
+
     from ruamel.yaml.comments import CommentedMap  # type: ignore[import-untyped]
 
     data = _build_platform_yaml(answers)

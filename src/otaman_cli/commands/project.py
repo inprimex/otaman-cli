@@ -32,7 +32,7 @@ def cmd_project(args: list[str]) -> int:
             i = rest.index(flag)
             if i + 1 < len(rest):
                 value = rest[i + 1]
-                del rest[i:i + 2]
+                del rest[i : i + 2]
                 return value
         return None
 
@@ -57,31 +57,44 @@ def cmd_project(args: list[str]) -> int:
 
     if action == "assign":
         from otaman_cli.project.cmd_assign import cmd_project_assign
+
         return cmd_project_assign(primary, owner=owner, name=name_flag)
     if action == "list":
         from otaman_cli.project.cmd_list import cmd_project_list
+
         return cmd_project_list(status=status_flag or "active")
     if action == "show":
         from otaman_cli.project.cmd_show import cmd_project_show
+
         return cmd_project_show(primary)
     if action == "update":
         from otaman_cli.project.cmd_update import cmd_project_update
+
         return cmd_project_update(
-            primary, owner=owner, path=path_flag,
-            url=url_flag, description=description_flag,
+            primary,
+            owner=owner,
+            path=path_flag,
+            url=url_flag,
+            description=description_flag,
         )
     if action == "disable":
         from otaman_cli.project.cmd_status import cmd_project_disable
+
         return cmd_project_disable(primary)
     if action == "enable":
         from otaman_cli.project.cmd_status import cmd_project_enable
+
         return cmd_project_enable(primary)
     if action == "remove":
         from otaman_cli.project.cmd_remove import cmd_project_remove
+
         return cmd_project_remove(primary, delete_remote=delete_remote)
     if action == "add":
         UI.error("`otaman project add` is not yet implemented in this phase.")
-        UI.muted("Depends on otaman-core 1.x (GitHostAdapter.create_repo). Use `otaman project assign` for existing local repos.")
+        UI.muted(
+            "Depends on otaman-core 1.x (GitHostAdapter.create_repo). "
+            "Use `otaman project assign` for existing local repos."
+        )
         return 2
 
     UI.error(f"Unknown project action: {action}")
@@ -89,4 +102,10 @@ def cmd_project(args: list[str]) -> int:
     return 2
 
 
-register(CommandSpec(name="project", handler=cmd_project, help="Repo registry: assign / list / show / update / disable / enable / remove"))
+register(
+    CommandSpec(
+        name="project",
+        handler=cmd_project,
+        help="Repo registry: assign / list / show / update / disable / enable / remove",
+    )
+)

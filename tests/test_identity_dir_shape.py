@@ -13,10 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from otaman_cli.identity import _read_otaman_agent_field
-
 
 # ---------------------------------------------------------------------------
 # (a) File-shape without agent: — walk continues (existing behavior preserved)
@@ -129,12 +126,16 @@ def _make_dir_shape_project(tmp_path: Path, agent_name: str = "human") -> Path:
 
 def test_init_update_writes_dir_shape_agent_file(tmp_path: Path) -> None:
     """--update must create .otaman/agent for dir-shape meta target."""
-    import subprocess, sys
+    import subprocess
+    import sys
+
     meta = _make_dir_shape_project(tmp_path)
 
     result = subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "init", "--update"],
-        capture_output=True, text=True, cwd=str(meta),
+        capture_output=True,
+        text=True,
+        cwd=str(meta),
     )
 
     agent_file = meta / ".otaman" / "agent"
@@ -144,14 +145,18 @@ def test_init_update_writes_dir_shape_agent_file(tmp_path: Path) -> None:
 
 def test_init_update_dir_shape_leaves_siblings_untouched(tmp_path: Path) -> None:
     """Existing runtime files inside .otaman/ must not be modified."""
-    import subprocess, sys
+    import subprocess
+    import sys
+
     meta = _make_dir_shape_project(tmp_path)
     activity_file = meta / ".otaman" / "last-user-activity"
     original_content = activity_file.read_text(encoding="utf-8")
 
     subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "init", "--update"],
-        capture_output=True, text=True, cwd=str(meta),
+        capture_output=True,
+        text=True,
+        cwd=str(meta),
     )
 
     assert activity_file.read_text(encoding="utf-8") == original_content
@@ -159,13 +164,17 @@ def test_init_update_dir_shape_leaves_siblings_untouched(tmp_path: Path) -> None
 
 def test_init_update_dir_shape_idempotent(tmp_path: Path) -> None:
     """Running --update twice on dir-shape meta produces same result, no error."""
-    import subprocess, sys
+    import subprocess
+    import sys
+
     meta = _make_dir_shape_project(tmp_path)
 
     for _ in range(2):
         r = subprocess.run(
             [sys.executable, "-m", "otaman_cli.main", "init", "--update"],
-            capture_output=True, text=True, cwd=str(meta),
+            capture_output=True,
+            text=True,
+            cwd=str(meta),
         )
         assert r.returncode == 0
 
@@ -196,7 +205,9 @@ def test_ensure_settings_default_mode_writes_field(tmp_path: Path) -> None:
     from otaman_cli.commands.init import _ensure_settings_default_mode
 
     meta, settings_path = _make_settings_project(tmp_path)
-    settings_path.write_text(json.dumps({"permissions": {"allow": ["Bash(git:*)"]}}), encoding="utf-8")
+    settings_path.write_text(
+        json.dumps({"permissions": {"allow": ["Bash(git:*)"]}}), encoding="utf-8"
+    )
 
     config = {"repos": [{"path": "../svc", "owner": "svc-agent"}]}
     _ensure_settings_default_mode(meta, config)

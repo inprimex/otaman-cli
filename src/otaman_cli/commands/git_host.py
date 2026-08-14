@@ -45,8 +45,10 @@ def cmd_git_host(args: list[str]) -> int:
         UI.kv("Host", info.host)
         UI.kv("Slug", info.slug)
         if info.is_self_hosted:
-            UI.muted("(self-hosted — host alone doesn't identify provider; "
-                     "set `git_host.provider` explicitly)")
+            UI.muted(
+                "(self-hosted — host alone doesn't identify provider; "
+                "set `git_host.provider` explicitly)"
+            )
         return 0 if info.provider != "unknown" else 2
 
     if sub == "list":
@@ -65,8 +67,9 @@ def cmd_git_host(args: list[str]) -> int:
             )
             UI.kv("  Token source chain", sources or "(empty)")
         else:
-            UI.muted("No `git_host:` block in platform.yaml (run "
-                     "`otaman git-host add` to wire one).")
+            UI.muted(
+                "No `git_host:` block in platform.yaml (run `otaman git-host add` to wire one)."
+            )
         UI.info("Detected origin remotes:")
         remotes = gh.detect_remotes_for_maestro(root)
         if not remotes:
@@ -90,8 +93,7 @@ def cmd_git_host(args: list[str]) -> int:
             return 1
         result = gh.resolve_and_validate(cfg, maestro_root=root)
         if result.ok:
-            UI.ok(f"{cfg.provider} token valid "
-                  f"(authenticated as {result.identity or '?'})")
+            UI.ok(f"{cfg.provider} token valid (authenticated as {result.identity or '?'})")
             if result.scopes:
                 UI.kv("  Scopes", ", ".join(result.scopes))
             return 0
@@ -117,7 +119,10 @@ def _git_host_current_branch(repo_dir: Path) -> str | None:
     try:
         result = subprocess.run(
             ["git", "-C", str(repo_dir), "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, timeout=5, check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -138,9 +143,13 @@ def _git_host_resolve_repo(gh, root: Path, repo_arg: str | None):
     Returns (repo_dir, RemoteInfo) or raises UserError via UI.error.
     """
     import yaml
+
     platform_yaml = root / "platform.yaml"
-    data = yaml.safe_load(platform_yaml.read_text(encoding="utf-8")) or {} \
-        if platform_yaml.is_file() else {}
+    data = (
+        yaml.safe_load(platform_yaml.read_text(encoding="utf-8")) or {}
+        if platform_yaml.is_file()
+        else {}
+    )
     repos = [r for r in (data.get("repos") or []) if isinstance(r, dict)]
 
     cwd = Path.cwd().resolve()
@@ -189,6 +198,7 @@ def _git_host_pr_target_branch(root: Path) -> int:
          error)
     """
     import yaml
+
     platform_yaml = root / "platform.yaml"
     data: dict = {}
     if platform_yaml.is_file():
@@ -220,8 +230,7 @@ def _git_host_pr_target_branch(root: Path) -> int:
         return 0
 
     UI.muted(
-        "No branch preference declared "
-        "(standards.git.environments / development_branch absent)"
+        "No branch preference declared (standards.git.environments / development_branch absent)"
     )
     return 0
 
@@ -275,8 +284,8 @@ def _git_host_pr(gh, args: list[str]) -> int:
     repo_dir, info = _git_host_resolve_repo(gh, root, repo_arg)
     if info is None or info.provider == "unknown":
         UI.error(
-            f"Can't determine repo slug. "
-            f"Pass --repo <name> or run inside a managed repo with a parseable origin."
+            "Can't determine repo slug. "
+            "Pass --repo <name> or run inside a managed repo with a parseable origin."
         )
         return 1
 
@@ -296,8 +305,10 @@ def _git_host_pr(gh, args: list[str]) -> int:
             UI.info(f"Open PRs in {slug}:")
             for pr in prs:
                 draft = " [DRAFT]" if pr.draft else ""
-                UI.kv(f"  #{pr.number}",
-                      f"{pr.title}{draft}  by {pr.author}  ({pr.head_ref} → {pr.base_ref})")
+                UI.kv(
+                    f"  #{pr.number}",
+                    f"{pr.title}{draft}  by {pr.author}  ({pr.head_ref} → {pr.base_ref})",
+                )
             return 0
 
         if action == "get":
@@ -336,8 +347,10 @@ def _git_host_pr(gh, args: list[str]) -> int:
 
         if action == "comment":
             if not positional:
-                UI.error("Missing PR number: otaman git-host pr comment <number> "
-                         "[--body TEXT | via stdin]")
+                UI.error(
+                    "Missing PR number: otaman git-host pr comment <number> "
+                    "[--body TEXT | via stdin]"
+                )
                 return 1
             try:
                 number = int(positional[0])
@@ -438,10 +451,7 @@ def _git_host_post_review(gh, args: list[str]) -> int:
     # Resolve repo + PR.
     repo_dir, info = _git_host_resolve_repo(gh, root, repo_arg)
     if info is None or info.provider == "unknown":
-        UI.error(
-            "Can't determine repo slug. "
-            "Pass --repo <name> or run inside a managed repo."
-        )
+        UI.error("Can't determine repo slug. Pass --repo <name> or run inside a managed repo.")
         return 1
 
     try:
@@ -468,7 +478,8 @@ def _git_host_post_review(gh, args: list[str]) -> int:
 
     # legacy: wrap with plugin attribution; repo still named maestro-plugin on GitHub
     wrapped = (
-        f"> _Posted by [otaman-plugin](https://github.com/inprimex/maestro-plugin) "  # legacy: GitHub repo not yet renamed
+        "> _Posted by "
+        "[otaman-plugin](https://github.com/inprimex/maestro-plugin) "  # legacy: repo not renamed
         f"from `{review_path.name}`_\n\n"
         f"{body.rstrip()}\n"
     )
@@ -498,8 +509,7 @@ def _git_host_add_interactive(gh, args: list[str]) -> int:
     detected = next((info for _name, info in remotes if info is not None), None)
 
     if detected and detected.provider != "unknown":
-        UI.ok(f"Detected {detected.provider} at {detected.host} "
-              f"(from {detected.slug})")
+        UI.ok(f"Detected {detected.provider} at {detected.host} (from {detected.slug})")
         provider = detected.provider
         host = detected.host
     else:
@@ -521,30 +531,32 @@ def _git_host_add_interactive(gh, args: list[str]) -> int:
     UI.info("")
     UI.info("To finish setup:")
     UI.info("")
-    UI.action(f"1. Generate a PAT on {host} with the scopes you need "
-              f"(read-only is enough for Phase 1).")
+    UI.action(
+        f"1. Generate a PAT on {host} with the scopes you need (read-only is enough for Phase 1)."
+    )
     UI.info("")
-    UI.action(f"2. Add the token to .otaman/secrets.env "
-              f"(gitignored, mode 0600):")
+    UI.action("2. Add the token to .otaman/secrets.env (gitignored, mode 0600):")
     UI.muted(f"   echo '{env_name}=<paste-token-here>' >> .otaman/secrets.env")
-    UI.muted(f"   chmod 600 .otaman/secrets.env")
+    UI.muted("   chmod 600 .otaman/secrets.env")
     UI.info("")
-    UI.action(f"3. Add this block to platform.yaml:")
+    UI.action("3. Add this block to platform.yaml:")
     UI.muted("")
-    UI.muted(f"   git_host:")
+    UI.muted("   git_host:")
     UI.muted(f"     provider: {provider}")
     UI.muted(f"     host: {host}")
-    UI.muted(f"     token:")
-    UI.muted(f"       sources:")
+    UI.muted("     token:")
+    UI.muted("       sources:")
     UI.muted(f"         - {{ type: env,    name: {env_name} }}")
     UI.muted(f"         - {{ type: dotenv, name: {env_name} }}")
     UI.muted("")
-    UI.action(f"4. Verify: `otaman git-host check`")
+    UI.action("4. Verify: `otaman git-host check`")
     return 0
 
 
-register(CommandSpec(
-    name="git-host",
-    handler=cmd_git_host,
-    help="Git host PAT + PR/MR API: detect, list, check, add, pr, post-review",
-))
+register(
+    CommandSpec(
+        name="git-host",
+        handler=cmd_git_host,
+        help="Git host PAT + PR/MR API: detect, list, check, add, pr, post-review",
+    )
+)

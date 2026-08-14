@@ -6,6 +6,7 @@ phrase, no --yes/scripted bypass). Previously this type had no dedicated
 producer at all -- the only path was the general `otaman send`, which let
 any caller claim `from: human` unconditionally.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -26,7 +27,8 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _broadcast_files(project: Path) -> list[Path]:
     return [
-        f for f in (project / ".agents" / "bus" / "active").glob("*.md")
+        f
+        for f in (project / ".agents" / "bus" / "active").glob("*.md")
         if "emergency-halt" in f.name
     ]
 
@@ -44,15 +46,19 @@ class TestEmergencyHalt:
         assert _broadcast_files(project) == []
 
     def test_tty_wrong_phrase_refuses(self, project: Path):
-        with mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=True), \
-             mock.patch("builtins.input", return_value="yes"):
+        with (
+            mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=True),
+            mock.patch("builtins.input", return_value="yes"),
+        ):
             rc = cmd_emergency_halt(["--reason", "runaway agent"])
         assert rc != 0
         assert _broadcast_files(project) == []
 
     def test_tty_correct_phrase_broadcasts(self, project: Path):
-        with mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=True), \
-             mock.patch("builtins.input", return_value="CONFIRM"):
+        with (
+            mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=True),
+            mock.patch("builtins.input", return_value="CONFIRM"),
+        ):
             rc = cmd_emergency_halt(["--reason", "runaway agent writing garbage"])
         assert rc == 0
         files = _broadcast_files(project)

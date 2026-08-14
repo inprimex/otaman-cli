@@ -12,7 +12,6 @@ Covers:
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 
@@ -20,7 +19,6 @@ import pytest
 import yaml as _pyyaml
 
 from otaman_cli.onboard.post_scan import (
-    PostScanGaps,
     analyze_draft,
     run,
     scaffold_openspec,
@@ -108,11 +106,13 @@ def test_scaffold_specs_creates_files_and_git_repo(tmp_path: Path):
     assert "spec-agent" in (target / "CLAUDE.md").read_text(encoding="utf-8")
     assert (target / ".git").is_dir()
     log = subprocess.run(
-        ["git", "log", "--oneline"], cwd=str(target),
-        capture_output=True, text=True,
+        ["git", "log", "--oneline"],
+        cwd=str(target),
+        capture_output=True,
+        text=True,
     )
     assert log.returncode == 0
-    lines = [l for l in log.stdout.splitlines() if l.strip()]
+    lines = [line for line in log.stdout.splitlines() if line.strip()]
     assert len(lines) == 1
     assert "scaffold: initialize myprog-specs" in lines[0]
 
@@ -161,8 +161,10 @@ def test_update_draft_adds_specs_repo_and_launcher(tmp_path: Path):
     update_draft(
         draft,
         add_specs_repo={
-            "name": "myprog-specs", "path": "../myprog-specs",
-            "owner": "spec-agent", "description": "specs",
+            "name": "myprog-specs",
+            "path": "../myprog-specs",
+            "owner": "spec-agent",
+            "description": "specs",
         },
         add_launcher=True,
     )
@@ -186,13 +188,21 @@ def test_update_draft_flips_specs_format_to_openspec(tmp_path: Path):
 
 def test_update_draft_does_not_duplicate_specs_repo(tmp_path: Path):
     draft = tmp_path / "platform.yaml.draft"
-    _write_draft(draft, repos=[
-        {"name": "myprog-specs", "path": "../myprog-specs", "owner": "spec-agent"},
-    ])
-    update_draft(draft, add_specs_repo={
-        "name": "myprog-specs", "path": "../myprog-specs",
-        "owner": "spec-agent", "description": "x",
-    })
+    _write_draft(
+        draft,
+        repos=[
+            {"name": "myprog-specs", "path": "../myprog-specs", "owner": "spec-agent"},
+        ],
+    )
+    update_draft(
+        draft,
+        add_specs_repo={
+            "name": "myprog-specs",
+            "path": "../myprog-specs",
+            "owner": "spec-agent",
+            "description": "x",
+        },
+    )
     doc = _pyyaml.safe_load(draft.read_text(encoding="utf-8"))
     spec_entries = [r for r in doc["repos"] if r["name"] == "myprog-specs"]
     assert len(spec_entries) == 1
@@ -209,8 +219,11 @@ def test_run_non_tty_adds_launcher_but_skips_scaffolding(tmp_path: Path):
     draft = otaman_dir / "platform.yaml.draft"
     _write_draft(draft)
     result = run(
-        draft_path=draft, scan_root=scan_root, otaman_dir=otaman_dir,
-        program_slug="myprog", interactive=False,
+        draft_path=draft,
+        scan_root=scan_root,
+        otaman_dir=otaman_dir,
+        program_slug="myprog",
+        interactive=False,
     )
     # No prompts, no scaffolding
     assert result.specs_repo_created is None
@@ -231,8 +244,11 @@ def test_run_lifts_unrecognised_specs_dir_without_prompting(tmp_path: Path):
     draft = otaman_dir / "platform.yaml.draft"
     _write_draft(draft)
     result = run(
-        draft_path=draft, scan_root=scan_root, otaman_dir=otaman_dir,
-        program_slug="myprog", interactive=False,
+        draft_path=draft,
+        scan_root=scan_root,
+        otaman_dir=otaman_dir,
+        program_slug="myprog",
+        interactive=False,
     )
     assert result.specs_repo_lifted == scan_root / "myprog-specs"
     doc = _pyyaml.safe_load(draft.read_text(encoding="utf-8"))
@@ -256,8 +272,11 @@ def test_run_noop_when_draft_already_complete(tmp_path: Path):
     )
     before = draft.read_text(encoding="utf-8")
     result = run(
-        draft_path=draft, scan_root=scan_root, otaman_dir=otaman_dir,
-        program_slug="myprog", interactive=False,
+        draft_path=draft,
+        scan_root=scan_root,
+        otaman_dir=otaman_dir,
+        program_slug="myprog",
+        interactive=False,
     )
     after = draft.read_text(encoding="utf-8")
     assert before == after  # no mutations
@@ -284,8 +303,11 @@ def test_run_interactive_scaffolds_specs_and_openspec(tmp_path: Path, monkeypatc
     monkeypatch.setattr("builtins.input", lambda _: next(answers))
 
     result = run(
-        draft_path=draft, scan_root=scan_root, otaman_dir=otaman_dir,
-        program_slug="myprog", interactive=True,
+        draft_path=draft,
+        scan_root=scan_root,
+        otaman_dir=otaman_dir,
+        program_slug="myprog",
+        interactive=True,
     )
     assert result.specs_repo_created == scan_root / "myprog-specs"
     assert (scan_root / "myprog-specs" / "CLAUDE.md").is_file()
@@ -308,8 +330,11 @@ def test_run_interactive_user_declines_specs(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr("builtins.input", lambda _: "n")
     result = run(
-        draft_path=draft, scan_root=scan_root, otaman_dir=otaman_dir,
-        program_slug="myprog", interactive=True,
+        draft_path=draft,
+        scan_root=scan_root,
+        otaman_dir=otaman_dir,
+        program_slug="myprog",
+        interactive=True,
     )
     assert result.specs_repo_created is None
     assert any("declined" in s for s in result.skipped)

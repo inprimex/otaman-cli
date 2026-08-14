@@ -1,10 +1,8 @@
-"""Unit tests for registry helpers: roles, transitions, bus_messages, loader.
-"""
+"""Unit tests for registry helpers: roles, transitions, bus_messages, loader."""
 
 from __future__ import annotations
 
 import io
-from pathlib import Path
 
 import pytest
 
@@ -24,7 +22,6 @@ from otaman_cli.registries.roles import (
     resolve_roles,
 )
 
-
 # ---------------------------------------------------------------------------
 # transitions
 
@@ -40,7 +37,11 @@ def test_make_transition_minimal():
 
 def test_make_transition_with_from_and_note():
     t = transitions.make_transition(
-        actor="x", action="promote", from_="Drafting", to="Backlog", note="ready",
+        actor="x",
+        action="promote",
+        from_="Drafting",
+        to="Backlog",
+        note="ready",
     )
     assert t["from"] == "Drafting"
     assert t["to"] == "Backlog"
@@ -75,9 +76,11 @@ def test_resolve_operating_actor_falls_back_to_human(monkeypatch, tmp_path):
 
 
 def test_resolve_roles_returns_multiple():
-    platform = ProgramExtensions.model_validate({
-        "role-assignments": {"cpo": "roman", "ceo": "roman", "cto": "cto-agent"},
-    })
+    platform = ProgramExtensions.model_validate(
+        {
+            "role-assignments": {"cpo": "roman", "ceo": "roman", "cto": "cto-agent"},
+        }
+    )
     assert sorted(resolve_roles("roman", platform)) == ["ceo", "cpo"]
     assert resolve_roles("cto-agent", platform) == ["cto"]
     assert resolve_roles("nobody", platform) == []
@@ -199,8 +202,7 @@ def test_build_outcome_estimate_requested_shape():
         "id": "JTBD-1-a",
         "priority": "P1",
         "impact": "M",
-        "statement": {"as-a": "x", "i-want-to": "y",
-                       "incremental-outcome": "z", "so-i-can": "w"},
+        "statement": {"as-a": "x", "i-want-to": "y", "incremental-outcome": "z", "so-i-can": "w"},
     }
     msg = bus_messages.build_outcome_estimate_requested(o, "cpo-agent")
     assert msg["type"] == "outcome-estimate-requested"
@@ -221,7 +223,9 @@ def test_build_outcome_cost_accepted_shape():
 
 def test_build_outcome_status_changed_shape():
     o = {"id": "JTBD-1-a"}
-    msg = bus_messages.build_outcome_status_changed(o, "Drafting", "Backlog", "cpo-agent", "promote")
+    msg = bus_messages.build_outcome_status_changed(
+        o, "Drafting", "Backlog", "cpo-agent", "promote"
+    )
     assert msg["to"] == "all"
     assert msg["payload"]["from"] == "Drafting"
     assert msg["payload"]["to"] == "Backlog"
@@ -229,7 +233,11 @@ def test_build_outcome_status_changed_shape():
 
 def test_emit_writes_message_file(tmp_path):
     msg = bus_messages.build_outcome_status_changed(
-        {"id": "JTBD-1-a"}, "Drafting", "Backlog", "cpo-agent", "promote",
+        {"id": "JTBD-1-a"},
+        "Drafting",
+        "Backlog",
+        "cpo-agent",
+        "promote",
     )
     path = bus_messages.emit(msg, tmp_path)
     assert path.is_file()

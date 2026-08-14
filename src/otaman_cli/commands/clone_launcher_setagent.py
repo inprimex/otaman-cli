@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.main import C, UI, run_script
+from otaman_cli.main import UI, C, run_script
 
 
 def cmd_clone(args: list[str]) -> int:
@@ -23,7 +23,10 @@ def cmd_clone(args: list[str]) -> int:
     positional: list[str] = []
     i = 0
     while i < len(args):
-        if args[i] in ("--maestro-dir", "--otaman-dir", "--target") and i + 1 < len(args):  # legacy: backward-compat arg
+        if (
+            args[i] in ("--maestro-dir", "--otaman-dir", "--target")  # legacy: backward-compat
+            and i + 1 < len(args)
+        ):
             target = args[i + 1]
             i += 2
         else:
@@ -54,6 +57,7 @@ def cmd_clone(args: list[str]) -> int:
     result = run_script("clone-project.py", *script_args, capture=True, stream_stderr=True)
 
     import json
+
     try:
         report = json.loads(result.stdout)
     except (json.JSONDecodeError, ValueError):
@@ -79,7 +83,7 @@ def cmd_clone(args: list[str]) -> int:
     if failed:
         UI.subheader(f"Failed ({len(failed)}):")
         for f_ in failed:
-            UI.error(f'{f_["name"]}: {f_.get("error", "unknown")}')
+            UI.error(f"{f_['name']}: {f_.get('error', 'unknown')}")
 
     # Doctor summary
     doctor = report.get("doctor", {})
@@ -89,7 +93,10 @@ def cmd_clone(args: list[str]) -> int:
         if f_ == 0:
             UI.ok(f"Environment: {p} checks passed, {w} warnings")
         else:
-            UI.warn(f"Environment: {p} passed, {w} warnings, {f_} failed — run otaman doctor for details")
+            UI.warn(
+                f"Environment: {p} passed, {w} warnings, {f_} failed "
+                f"— run otaman doctor for details"
+            )
 
     maestro_dir = report.get("maestro_dir", "")
     print()
@@ -206,7 +213,8 @@ def cmd_set_agent(args: list[str]) -> int:
         "\n"
         "To override identity in the current shell:\n"
         f"  export OTAMAN_AGENT={name}             # direct\n"
-        f"  otaman-agent {name}                    # shell function (install via `otaman init --shell`)\n"
+        f"  otaman-agent {name}                    "
+        "# shell function (install via `otaman init --shell`)\n"
         f"  OTAMAN_AGENT={name} otaman <cmd>       # one-shot\n"
         "\n"
         "To make identity automatic, run from inside a repo whose .otaman has 'agent: <name>'.\n"
@@ -216,6 +224,22 @@ def cmd_set_agent(args: list[str]) -> int:
     return 1
 
 
-register(CommandSpec(name="clone", handler=cmd_clone, help="Clone all repos from otaman config (git URL, SSH, local)"))
-register(CommandSpec(name="launcher", handler=cmd_launcher, help="Launcher management: scaffold, list, add, remove, register"))
-register(CommandSpec(name="set-agent", handler=cmd_set_agent, help="DEPRECATED: no-op, prints migration guidance"))
+register(
+    CommandSpec(
+        name="clone",
+        handler=cmd_clone,
+        help="Clone all repos from otaman config (git URL, SSH, local)",
+    )
+)
+register(
+    CommandSpec(
+        name="launcher",
+        handler=cmd_launcher,
+        help="Launcher management: scaffold, list, add, remove, register",
+    )
+)
+register(
+    CommandSpec(
+        name="set-agent", handler=cmd_set_agent, help="DEPRECATED: no-op, prints migration guidance"
+    )
+)

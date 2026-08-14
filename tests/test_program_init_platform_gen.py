@@ -1,7 +1,6 @@
 """Tests for platform_gen.py — platform.yaml generation + round-trip (tasks.md 5.2)."""
-from __future__ import annotations
 
-from pathlib import Path
+from __future__ import annotations
 
 import pytest
 
@@ -13,7 +12,6 @@ from otaman_cli.onboard.program_init.platform_gen import (
     update_platform_yaml,
     write_platform_yaml,
 )
-
 
 _BASE_ANSWERS = {
     "program_name": "acme-platform",
@@ -153,7 +151,7 @@ class TestUpdatePlatformYaml:
     def test_idempotent(self, tmp_path):
         platform = tmp_path / "platform.yaml"
         write_platform_yaml(_BASE_ANSWERS, platform)
-        content_after_first = platform.read_text()
+        platform.read_text()
         update_platform_yaml(_BASE_ANSWERS, platform)
         content_after_second = platform.read_text()
         # Core fields should be unchanged

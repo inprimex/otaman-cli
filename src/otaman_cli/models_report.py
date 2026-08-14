@@ -14,8 +14,8 @@ Usage:
 
 from __future__ import annotations
 
-import re
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -71,7 +71,13 @@ def parse_frontmatter(path: Path) -> dict:
         if not m:
             continue
         key, val = m.group(1), m.group(2).strip()
-        if val.startswith(("#", "-", "[", "{", "\"", "'")) and key not in ("name", "description", "model", "effort", "color"):
+        if val.startswith(("#", "-", "[", "{", '"', "'")) and key not in (
+            "name",
+            "description",
+            "model",
+            "effort",
+            "color",
+        ):
             continue
         # Only capture scalar fields we care about
         if key in ("name", "description", "model", "effort", "color"):
@@ -161,7 +167,8 @@ def print_diff(commands: list[dict], agents: list[dict], overrides: dict) -> Non
         nonlocal any_diff
         header_printed = False
         for e in entries:
-            # Match by "/otaman:name" (preferred) or "/maestro:name" (legacy: old prefix) or bare name
+            # Match by "/otaman:name" (preferred)
+            # or "/maestro:name" (legacy: old prefix) or bare name
             key_full = f"/otaman:{e['name']}" if label == "Commands" else e["name"]
             override = overrides_map.get(key_full) or overrides_map.get(e["name"])
             if not override:
@@ -277,13 +284,13 @@ def _looks_like_launcher(launch_settings: Path) -> bool:
     """True if launch-settings.yaml contains launcher-specific keys."""
     try:
         import yaml  # type: ignore
+
         data = yaml.safe_load(launch_settings.read_text(encoding="utf-8")) or {}
     except Exception:  # noqa: BLE001
         return False
     return bool(
         isinstance(data, dict)
-        and (data.get("connections") or data.get("accounts")
-             or data.get("active_connection"))
+        and (data.get("connections") or data.get("accounts") or data.get("active_connection"))
     )
 
 
@@ -301,6 +308,7 @@ def _write_models_block(cfg_path: Path, data: dict, models: dict) -> None:
     exist yet, creates it containing just the models: block.
     """
     import yaml  # type: ignore
+
     if not cfg_path.exists():
         cfg_path.parent.mkdir(parents=True, exist_ok=True)
         if models:
@@ -358,9 +366,10 @@ def _update_platform_models(mutator, target: str = "auto") -> int:
     """
     cfg_path, data = _load_config_dict(target)
     if cfg_path is None:
-        print("ERROR: no platform.yaml or launch-settings.yaml found in "
-              "current directory or parents",
-              file=sys.stderr)
+        print(
+            "ERROR: no platform.yaml or launch-settings.yaml found in current directory or parents",
+            file=sys.stderr,
+        )
         return 2
     # If the file doesn't exist yet (e.g. creating launch-settings.yaml fresh),
     # start from an empty data dict.
@@ -368,8 +377,10 @@ def _update_platform_models(mutator, target: str = "auto") -> int:
         data = {}
     models = data.get("models") or {}
     if not isinstance(models, dict):
-        print(f"ERROR: {cfg_path.name} 'models:' is not a mapping (got "
-              f"{type(models).__name__})", file=sys.stderr)
+        print(
+            f"ERROR: {cfg_path.name} 'models:' is not a mapping (got {type(models).__name__})",
+            file=sys.stderr,
+        )
         return 2
     mutator(models)
     # Prune empty nested dicts so the file stays clean
@@ -423,7 +434,8 @@ def cmd_show(args) -> int:
 def cmd_set_default(args) -> int:
     err = _validate_tier(args.model or "", args.effort)
     if err:
-        print(f"ERROR: {err}", file=sys.stderr); return 2
+        print(f"ERROR: {err}", file=sys.stderr)
+        return 2
 
     def mutate(models: dict) -> None:
         if args.model:
@@ -434,8 +446,10 @@ def cmd_set_default(args) -> int:
     rc = _update_platform_models(mutate, target=getattr(args, "target", "auto"))
     if rc == 0:
         fields = []
-        if args.model: fields.append(f"default={args.model.lower()}")
-        if args.effort: fields.append(f"default_effort={args.effort.lower()}")
+        if args.model:
+            fields.append(f"default={args.model.lower()}")
+        if args.effort:
+            fields.append(f"default_effort={args.effort.lower()}")
         print(f"Set project defaults: {', '.join(fields) or '(no fields given)'}")
     return rc
 
@@ -443,7 +457,8 @@ def cmd_set_default(args) -> int:
 def cmd_set_repo(args) -> int:
     err = _validate_tier(args.model or "", args.effort)
     if err:
-        print(f"ERROR: {err}", file=sys.stderr); return 2
+        print(f"ERROR: {err}", file=sys.stderr)
+        return 2
 
     def mutate(models: dict) -> None:
         by_repo = models.setdefault("by_repo", {})
@@ -457,15 +472,18 @@ def cmd_set_repo(args) -> int:
 
     rc = _update_platform_models(mutate, target=getattr(args, "target", "auto"))
     if rc == 0:
-        print(f"Set models.by_repo.{args.repo}: "
-              f"model={args.model or '-'}, effort={args.effort or '-'}")
+        print(
+            f"Set models.by_repo.{args.repo}: "
+            f"model={args.model or '-'}, effort={args.effort or '-'}"
+        )
     return rc
 
 
 def cmd_set_agent(args) -> int:
     err = _validate_tier(args.model or "", args.effort)
     if err:
-        print(f"ERROR: {err}", file=sys.stderr); return 2
+        print(f"ERROR: {err}", file=sys.stderr)
+        return 2
 
     def mutate(models: dict) -> None:
         by_agent = models.setdefault("by_agent", {})
@@ -479,8 +497,10 @@ def cmd_set_agent(args) -> int:
 
     rc = _update_platform_models(mutate, target=getattr(args, "target", "auto"))
     if rc == 0:
-        print(f"Set models.by_agent.{args.agent}: "
-              f"model={args.model or '-'}, effort={args.effort or '-'}")
+        print(
+            f"Set models.by_agent.{args.agent}: "
+            f"model={args.model or '-'}, effort={args.effort or '-'}"
+        )
     return rc
 
 
@@ -488,6 +508,7 @@ def cmd_unset_default(args) -> int:  # noqa: ARG001
     def mutate(models: dict) -> None:
         models.pop("default", None)
         models.pop("default_effort", None)
+
     rc = _update_platform_models(mutate, target=getattr(args, "target", "auto"))
     if rc == 0:
         print("Cleared project defaults.")
@@ -498,6 +519,7 @@ def cmd_unset_repo(args) -> int:
     def mutate(models: dict) -> None:
         by_repo = models.get("by_repo") or {}
         by_repo.pop(args.repo, None)
+
     rc = _update_platform_models(mutate, target=getattr(args, "target", "auto"))
     if rc == 0:
         print(f"Cleared models.by_repo.{args.repo}")
@@ -508,6 +530,7 @@ def cmd_unset_agent(args) -> int:
     def mutate(models: dict) -> None:
         by_agent = models.get("by_agent") or {}
         by_agent.pop(args.agent, None)
+
     rc = _update_platform_models(mutate, target=getattr(args, "target", "auto"))
     if rc == 0:
         print(f"Cleared models.by_agent.{args.agent}")
@@ -522,6 +545,7 @@ def main(argv: list[str]) -> int:
 
     # New subcommand form.
     import argparse
+
     parser = argparse.ArgumentParser(
         prog="otaman models",
         description="Inspect and configure session model/effort tiers",
@@ -560,17 +584,20 @@ def main(argv: list[str]) -> int:
     def _add_target_flags(p):
         g = p.add_mutually_exclusive_group()
         g.add_argument(
-            "--launch-settings", dest="target", action="store_const",
+            "--launch-settings",
+            dest="target",
+            action="store_const",
             const="launch-settings",
             help="Write to launch-settings.yaml (launcher-local, "
-                 "useful when the launcher folder is separate from the "
-                 "otaman folder)",
+            "useful when the launcher folder is separate from the "
+            "otaman folder)",
         )
         g.add_argument(
-            "--platform", dest="target", action="store_const",
+            "--platform",
+            dest="target",
+            action="store_const",
             const="platform",
-            help="Write to platform.yaml (project-wide; default when in "
-                 "an otaman folder)",
+            help="Write to platform.yaml (project-wide; default when in an otaman folder)",
         )
         p.set_defaults(target="auto")
 
@@ -604,20 +631,23 @@ def main(argv: list[str]) -> int:
     p_setagent.set_defaults(func=cmd_set_agent)
 
     p_undef = subs.add_parser(
-        "unset-default", help="Clear models.default + default_effort",
+        "unset-default",
+        help="Clear models.default + default_effort",
     )
     _add_target_flags(p_undef)
     p_undef.set_defaults(func=cmd_unset_default)
 
     p_unrepo = subs.add_parser(
-        "unset-repo", help="Remove a per-repo override",
+        "unset-repo",
+        help="Remove a per-repo override",
     )
     p_unrepo.add_argument("repo")
     _add_target_flags(p_unrepo)
     p_unrepo.set_defaults(func=cmd_unset_repo)
 
     p_unagent = subs.add_parser(
-        "unset-agent", help="Remove a per-agent override",
+        "unset-agent",
+        help="Remove a per-agent override",
     )
     p_unagent.add_argument("agent")
     _add_target_flags(p_unagent)

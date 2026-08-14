@@ -17,13 +17,14 @@ Checkpoint format::
 The ``answers`` block is the cumulative answers dict that can be fed
 directly back into the flow.
 """
+
 from __future__ import annotations
 
-import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import yaml
 
 _STATE_DIR_BASE = Path.home() / ".otaman"
 _CHECKPOINT_FILENAME = ".init-state.yaml"
@@ -75,7 +76,7 @@ class Checkpoint:
     # ------------------------------------------------------------------ class
 
     @classmethod
-    def load(cls, program_slug: str) -> "Checkpoint | None":
+    def load(cls, program_slug: str) -> Checkpoint | None:
         """Return a Checkpoint if one exists for *program_slug*, else None."""
         path = _checkpoint_path(program_slug)
         if not path.is_file():
@@ -91,5 +92,5 @@ class Checkpoint:
             return None  # corrupt checkpoint — treat as missing
 
     @classmethod
-    def new(cls, program_slug: str) -> "Checkpoint":
+    def new(cls, program_slug: str) -> Checkpoint:
         return cls(program=program_slug)

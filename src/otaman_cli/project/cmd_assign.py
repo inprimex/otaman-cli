@@ -31,7 +31,9 @@ def _detect_origin_url(repo_path: Path) -> str | None:
     """Read `git remote get-url origin`. Returns None on no remote / error."""
     r = subprocess.run(
         ["git", "remote", "get-url", "origin"],
-        cwd=str(repo_path), capture_output=True, text=True,
+        cwd=str(repo_path),
+        capture_output=True,
+        text=True,
     )
     if r.returncode != 0:
         return None
@@ -90,6 +92,7 @@ def cmd_project_assign(
     # Build the entry — path stored relative to root when feasible
     try:
         import os
+
         rel_path = os.path.relpath(repo_path, root).replace("\\", "/")
         path_field = rel_path if rel_path.startswith("..") else f"./{rel_path}"
     except ValueError:
@@ -120,7 +123,9 @@ def cmd_project_assign(
     # this step, downstream identity resolution from inside the assigned
     # repo would fall back to the deprecated current-agent file.
     import os as _os
+
     from otaman_cli.commands.init import _cmd_init_update
+
     prev_cwd = _os.getcwd()
     try:
         _os.chdir(root)
@@ -135,7 +140,8 @@ def cmd_project_assign(
 
     # Commit (best-effort; surface error but don't roll back the file write)
     rc, out = git_commit_platform_yaml(
-        root, f"feat(platform): assign repo {repo_name} (owner: {owner})",
+        root,
+        f"feat(platform): assign repo {repo_name} (owner: {owner})",
     )
     if rc != 0:
         UI.warn(f"git commit failed (file written): {out.strip()[:120]}")

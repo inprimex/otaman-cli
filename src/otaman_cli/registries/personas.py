@@ -14,7 +14,6 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
 _ID_RE = re.compile(r"^persona-[a-z0-9-]+$")
 
 

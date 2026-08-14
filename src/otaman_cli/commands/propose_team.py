@@ -14,7 +14,7 @@ from pathlib import Path
 from otaman_cli import main as _main
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, resolve_agent_identity
-from otaman_cli.main import C, UI, _resolve_bus_paths
+from otaman_cli.main import UI, C, _resolve_bus_paths
 
 
 def _parse_desc(args: list[str]) -> tuple[str, list[str]]:
@@ -38,7 +38,7 @@ def cmd_propose(args: list[str]) -> int:
 
     if not args:
         UI.error("Title required")
-        UI.muted("Usage: otaman propose \"add user pagination\" [-d \"Detailed description\"]")
+        UI.muted('Usage: otaman propose "add user pagination" [-d "Detailed description"]')
         return 1
 
     root = find_project_root()
@@ -51,6 +51,7 @@ def cmd_propose(args: list[str]) -> int:
     title = " ".join(args)
 
     from datetime import datetime, timezone
+
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     now_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
 
@@ -160,5 +161,13 @@ def cmd_team(args: list[str]) -> int:
     return 0
 
 
-register(CommandSpec(name="propose", handler=cmd_propose, help="Propose a spec change (pending human approval)"))
-register(CommandSpec(name="team", handler=cmd_team, help="Orchestrate a cross-repo feature (decompose + assign)"))
+register(
+    CommandSpec(
+        name="propose", handler=cmd_propose, help="Propose a spec change (pending human approval)"
+    )
+)
+register(
+    CommandSpec(
+        name="team", handler=cmd_team, help="Orchestrate a cross-repo feature (decompose + assign)"
+    )
+)

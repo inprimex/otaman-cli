@@ -28,7 +28,6 @@ import json
 import re
 import subprocess
 import sys
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -83,7 +82,9 @@ def audit_ownership(project_root: Path, config: dict[str, Any]) -> dict[str, Any
             repo_info["has_claude_md"] = claude_md.exists()
             if claude_md.exists():
                 content = claude_md.read_text(encoding="utf-8")
-                repo_info["has_maestro_rules"] = "<!-- maestro:begin -->" in content  # legacy: marker string
+                repo_info["has_maestro_rules"] = (
+                    "<!-- maestro:begin -->" in content  # legacy: marker string
+                )
             else:
                 repo_info["has_maestro_rules"] = False
 
@@ -183,13 +184,15 @@ def audit_decisions(project_root: Path) -> dict[str, Any]:
                     title = stripped[3:].strip()
                     break
 
-            result["decisions"].append({
-                "id": fm.get("id", ""),
-                "date": str(fm.get("date", "")),
-                "author": fm.get("author", ""),
-                "status": status,
-                "title": title,
-            })
+            result["decisions"].append(
+                {
+                    "id": fm.get("id", ""),
+                    "date": str(fm.get("date", "")),
+                    "author": fm.get("author", ""),
+                    "status": status,
+                    "title": title,
+                }
+            )
         except (OSError, yaml.YAMLError):
             continue
 
@@ -226,13 +229,15 @@ def audit_reviews(project_root: Path) -> dict[str, Any]:
                     result["by_reviewer"][reviewer] = {"pending": 0, "done": 0}
                 result["by_reviewer"][reviewer][status_key] += 1
 
-                result["recent_reviews"].append({
-                    "reviewer": reviewer,
-                    "scope": fm.get("scope", ""),
-                    "status": fm.get("status", ""),
-                    "date": str(fm.get("date", "")),
-                    "phase": status_key,
-                })
+                result["recent_reviews"].append(
+                    {
+                        "reviewer": reviewer,
+                        "scope": fm.get("scope", ""),
+                        "status": fm.get("status", ""),
+                        "date": str(fm.get("date", "")),
+                        "phase": status_key,
+                    }
+                )
             except (OSError, yaml.YAMLError):
                 continue
 
@@ -276,17 +281,18 @@ def format_markdown(report: dict[str, Any]) -> str:
     """Format the report as markdown."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = [
-        f"# Otaman Compliance Audit Report",
-        f"",
+        "# Otaman Compliance Audit Report",
+        "",
         f"**Project**: {report['project']}",
         f"**Generated**: {now}",
-        f"",
-        f"---",
-        f"",
-        f"## 1. Ownership Enforcement",
-        f"",
-        f"Ownership file: {'Present' if report['ownership']['ownership_file_exists'] else 'MISSING'}",
-        f"",
+        "",
+        "---",
+        "",
+        "## 1. Ownership Enforcement",
+        "",
+        "Ownership file: "
+        f"{'Present' if report['ownership']['ownership_file_exists'] else 'MISSING'}",
+        "",
     ]
 
     if report["ownership"]["repos"]:
@@ -299,33 +305,39 @@ def format_markdown(report: dict[str, Any]) -> str:
             lines.append(f"| {r['name']} | {r['owner']} | {exists} | {claude} | {rules} |")
         lines.append("")
 
-    lines.extend([
-        f"## 2. Communication Audit Trail",
-        f"",
-        f"- Total messages: {report['communication']['total_messages']}",
-        f"- Pending: {report['communication']['by_status'].get('pending', 0)}",
-        f"- Read: {report['communication']['by_status'].get('read', 0)}",
-        f"- Resolved: {report['communication']['by_status'].get('resolved', 0)}",
-    ])
+    lines.extend(
+        [
+            "## 2. Communication Audit Trail",
+            "",
+            f"- Total messages: {report['communication']['total_messages']}",
+            f"- Pending: {report['communication']['by_status'].get('pending', 0)}",
+            f"- Read: {report['communication']['by_status'].get('read', 0)}",
+            f"- Resolved: {report['communication']['by_status'].get('resolved', 0)}",
+        ]
+    )
     if report["communication"]["oldest_pending"]:
         lines.append(f"- Oldest pending: {report['communication']['oldest_pending']}")
     lines.append("")
 
-    lines.extend([
-        f"## 3. Architecture Decision Records",
-        f"",
-        f"- Total ADRs: {report['decisions']['total']}",
-    ])
+    lines.extend(
+        [
+            "## 3. Architecture Decision Records",
+            "",
+            f"- Total ADRs: {report['decisions']['total']}",
+        ]
+    )
     for status, count in report["decisions"]["by_status"].items():
         lines.append(f"- {status}: {count}")
     lines.append("")
 
-    lines.extend([
-        f"## 4. Review Coverage",
-        f"",
-        f"- Pending reviews: {report['reviews']['pending']}",
-        f"- Completed reviews: {report['reviews']['done']}",
-    ])
+    lines.extend(
+        [
+            "## 4. Review Coverage",
+            "",
+            f"- Pending reviews: {report['reviews']['pending']}",
+            f"- Completed reviews: {report['reviews']['done']}",
+        ]
+    )
     if report["reviews"]["by_reviewer"]:
         lines.append("")
         lines.append("| Reviewer | Pending | Done |")
@@ -334,16 +346,20 @@ def format_markdown(report: dict[str, Any]) -> str:
             lines.append(f"| {reviewer} | {counts['pending']} | {counts['done']} |")
     lines.append("")
 
-    lines.extend([
-        f"## 5. Git History Integrity",
-        f"",
-    ])
+    lines.extend(
+        [
+            "## 5. Git History Integrity",
+            "",
+        ]
+    )
     if report["git_integrity"]:
         lines.append("| Repo | Owner | Commits | Status |")
         lines.append("|------|-------|---------|--------|")
         for r in report["git_integrity"]:
             commits = r.get("total_commits", "—")
-            lines.append(f"| {r['name']} | {r.get('owner', '')} | {commits} | {r.get('status', 'unknown')} |")
+            lines.append(
+                f"| {r['name']} | {r.get('owner', '')} | {commits} | {r.get('status', 'unknown')} |"
+            )
     lines.append("")
 
     return "\n".join(lines)
@@ -361,6 +377,7 @@ def main() -> int:
         project_root = Path(args[0]).resolve()
     else:
         from otaman_core._resolve import find_maestro_root
+
         project_root = find_maestro_root() or Path.cwd().resolve()
 
     agents_dir = project_root / ".agents"

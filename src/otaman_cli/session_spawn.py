@@ -182,7 +182,9 @@ def post_spawn(*, host, port, token, body, scheme="http", opener=None, timeout=3
     url = f"{scheme}://{host}:{port}/spawn"
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
-        url, data=data, method="POST",
+        url,
+        data=data,
+        method="POST",
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}",
@@ -216,15 +218,20 @@ def main(argv=None) -> int:
     ap.add_argument("--account", help="CLAUDE_CONFIG_DIR profile name")
     ap.add_argument("--worktree", help="Worktree path; default = use repo directly")
     ap.add_argument("--initial-prompt", help="First message to seed the session")
-    ap.add_argument("--env", action="append", default=[],
-                    help="OTAMAN_USER_KEY=value (repeatable) -- passed to spawned process. "
-                         "Key must be prefixed OTAMAN_USER_ (F091): the runner rejects any "
-                         "other key with 400, including attempts to set PATH/LD_PRELOAD/"
-                         "BASH_ENV/NODE_OPTIONS or override a runner-computed var.")
+    ap.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        help="OTAMAN_USER_KEY=value (repeatable) -- passed to spawned process. "
+        "Key must be prefixed OTAMAN_USER_ (F091): the runner rejects any "
+        "other key with 400, including attempts to set PATH/LD_PRELOAD/"
+        "BASH_ENV/NODE_OPTIONS or override a runner-computed var.",
+    )
     ap.add_argument("--token-cache", type=Path, default=DEFAULT_TOKEN_CACHE)
     ap.add_argument("--runner-endpoint", type=Path, default=DEFAULT_RUNNER_ENDPOINT)
-    ap.add_argument("--output-json", action="store_true",
-                    help="Print response as JSON instead of human text")
+    ap.add_argument(
+        "--output-json", action="store_true", help="Print response as JSON instead of human text"
+    )
     args = ap.parse_args(argv)
 
     # Auth: read token, extract sub
@@ -262,7 +269,11 @@ def main(argv=None) -> int:
 
     body = build_spawn_body(args, user_id)
     status, resp = post_spawn(
-        host=host, port=port, token=runner_token, body=body, scheme=scheme,
+        host=host,
+        port=port,
+        token=runner_token,
+        body=body,
+        scheme=scheme,
     )
 
     if status != 200:
@@ -279,8 +290,9 @@ def main(argv=None) -> int:
         attach = resp.get("attach") or {}
         print(f"spawned: session_id={session_id} user={user_id}")
         if attach:
-            print(f"attach: backend={attach.get('backend')} "
-                  f"session_name={attach.get('session_name')}")
+            print(
+                f"attach: backend={attach.get('backend')} session_name={attach.get('session_name')}"
+            )
     return 0
 
 

@@ -22,14 +22,17 @@ from otaman_cli.identity import find_project_root, resolve_agent_identity
 from otaman_cli.main import UI, _read_platform_specs_path, _resolve_bus_paths, run_script
 
 
-def _read_spec_owner(root: "Path", change_name: str) -> "str | None":
+def _read_spec_owner(root: Path, change_name: str) -> str | None:
     """Return spec_owner from <change>/.openspec.yaml, or None if absent/unresolvable."""
     try:
         import yaml as _yaml
+
         specs_rel = _read_platform_specs_path(root)
         if not specs_rel:
             return None
-        openspec_yaml = (root / specs_rel / "openspec" / "changes" / change_name / ".openspec.yaml").resolve()
+        openspec_yaml = (
+            root / specs_rel / "openspec" / "changes" / change_name / ".openspec.yaml"
+        ).resolve()
         if not openspec_yaml.is_file():
             return None
         with open(openspec_yaml, encoding="utf-8") as f:
@@ -40,7 +43,7 @@ def _read_spec_owner(root: "Path", change_name: str) -> "str | None":
         return None
 
 
-def _find_task_assignment_sender(active_dir: "Path", change_name: str, root: "Path") -> str:
+def _find_task_assignment_sender(active_dir: Path, change_name: str, root: Path) -> str:
     """Locate the agent who sent the task-assignment for *change_name*.
 
     Scans bus active/ for messages with type: task-assignment whose
@@ -63,6 +66,7 @@ def _find_task_assignment_sender(active_dir: "Path", change_name: str, root: "Pa
         except OSError:
             continue
         import re as _re
+
         fm_match = _re.match(r"^---\n(.+?)\n---", text, _re.DOTALL)
         if not fm_match:
             continue
@@ -133,7 +137,7 @@ def cmd_complete(args: list[str]) -> int:
 
     if not args:
         UI.error("Change name required")
-        UI.muted("Usage: otaman complete <change-name> --tasks \"2.1,3.1-3.5\"")
+        UI.muted('Usage: otaman complete <change-name> --tasks "2.1,3.1-3.5"')
         UI.muted("       otaman complete <change-name> --all")
         return 1
 
@@ -147,8 +151,8 @@ def cmd_complete(args: list[str]) -> int:
     if not tasks_spec and not mark_all:
         UI.error("Specify --tasks or --all")
         UI.muted("Examples:")
-        UI.muted(f"  otaman complete {change_name} --tasks \"2.1, 2.3\"")
-        UI.muted(f"  otaman complete {change_name} --tasks \"3.1-3.5\"")
+        UI.muted(f'  otaman complete {change_name} --tasks "2.1, 2.3"')
+        UI.muted(f'  otaman complete {change_name} --tasks "3.1-3.5"')
         UI.muted(f"  otaman complete {change_name} --all")
         return 1
 
@@ -190,6 +194,7 @@ def cmd_complete(args: list[str]) -> int:
 
         try:
             import json as _json
+
             report = _json.loads(result.stdout)
         except Exception:
             print(result.stdout)
@@ -212,12 +217,16 @@ def cmd_complete(args: list[str]) -> int:
         # Non-spec-agent: skip the tasks.md write entirely.  The bus
         # message below is the canonical signal; spec-agent's sweep
         # (Part B of this change) applies the tick on next session start.
-        UI.muted(f"(skipping tasks.md write — enforcement identity is {enforcement_agent!r}, not spec-agent)")
+        UI.muted(
+            f"(skipping tasks.md write — enforcement identity is "
+            f"{enforcement_agent!r}, not spec-agent)"
+        )
 
     # Step 2: Create task-complete bus message
     # D1: locate originating task-assignment to route reply to assigner only
     # D2: fall back to 'human' if no task-assignment found (not 'all')
     from datetime import datetime, timezone
+
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     now_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
 
@@ -254,7 +263,9 @@ def cmd_complete(args: list[str]) -> int:
     if is_spec:
         updated_line = f"**Updated**: {updated} task(s) in tasks.md"
     else:
-        updated_line = "**Pending tick**: spec-agent will apply tasks.md ticks on next session sweep"
+        updated_line = (
+            "**Pending tick**: spec-agent will apply tasks.md ticks on next session sweep"
+        )
 
     content = f"""---
 id: {msg_id}
@@ -337,7 +348,10 @@ def _status_hook_after_complete(root: Path, agent: str, change_name: str) -> Non
     """
     try:
         from otaman_cli.status import (
-            AgentStatus, State, get_backend, is_agent_presence_enabled,
+            AgentStatus,
+            State,
+            get_backend,
+            is_agent_presence_enabled,
         )
     except Exception:
         return
@@ -380,23 +394,32 @@ def _status_hook_after_complete(root: Path, agent: str, change_name: str) -> Non
     backend = get_backend(root)
     existing = backend.read(agent)
     from datetime import datetime, timezone
+
     now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
     if has_unchecked:
         # working with task=null (per spec); preserve since if already working
         since = existing.since if (existing and existing.state == State.WORKING) else now_iso
         new_status = AgentStatus(
-            agent=agent, state=State.WORKING,
-            task=None, change=change_name,
-            since=since, updated_at=now_iso,
+            agent=agent,
+            state=State.WORKING,
+            task=None,
+            change=change_name,
+            since=since,
+            updated_at=now_iso,
         )
     else:
         # idle clears everything
         since = existing.since if (existing and existing.state == State.IDLE) else now_iso
         new_status = AgentStatus(
-            agent=agent, state=State.IDLE,
-            task=None, change=None, outcome=None, blocked_by=None,
-            since=since, updated_at=now_iso,
+            agent=agent,
+            state=State.IDLE,
+            task=None,
+            change=None,
+            outcome=None,
+            blocked_by=None,
+            since=since,
+            updated_at=now_iso,
         )
 
     try:
@@ -415,6 +438,7 @@ def _find_tasks_md_for_change(root: Path, change_name: str) -> Path | None:
       4. Direct path: ../otaman-specs/openspec/changes/<change>/tasks.md
     """
     import yaml as _yaml
+
     candidates: list[Path] = []
     pyaml = root / "platform.yaml"
     if pyaml.is_file():
@@ -435,17 +459,25 @@ def _find_tasks_md_for_change(root: Path, change_name: str) -> Path | None:
                     abs_p = (root / str(p)).resolve()
                     candidates.append(abs_p / "openspec" / "changes" / change_name / "tasks.md")
     # Fallback: well-known sibling `otaman-specs`
-    candidates.append((root.parent / "otaman-specs" / "openspec" / "changes" / change_name / "tasks.md").resolve())
+    candidates.append(
+        (root.parent / "otaman-specs" / "openspec" / "changes" / change_name / "tasks.md").resolve()
+    )
     # Project-specs sibling
-    candidates.append((root.parent / f"{root.name}-specs" / "openspec" / "changes" / change_name / "tasks.md").resolve())
+    candidates.append(
+        (
+            root.parent / f"{root.name}-specs" / "openspec" / "changes" / change_name / "tasks.md"
+        ).resolve()
+    )
     for c in candidates:
         if c.is_file():
             return c
     return None
 
 
-register(CommandSpec(
-    name="complete",
-    handler=cmd_complete,
-    help="Report task completion, update tasks.md",
-))
+register(
+    CommandSpec(
+        name="complete",
+        handler=cmd_complete,
+        help="Report task completion, update tasks.md",
+    )
+)

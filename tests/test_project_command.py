@@ -25,7 +25,6 @@ from otaman_cli.project._platform import (
     update_repo,
 )
 
-
 # ---------------------------------------------------------------------------
 # _platform.py helpers
 
@@ -68,13 +67,13 @@ def test_update_repo_changes_fields_only():
     e = data["repos"][0]
     assert e["owner"] == "new"
     assert e["url"] == "https://x"
-    assert e["path"] == "./a"   # untouched
+    assert e["path"] == "./a"  # untouched
 
 
 def test_update_repo_immune_to_name_rename():
     data = {"repos": [{"name": "a"}]}
     update_repo(data, "a", {"name": "b", "owner": "x"})
-    assert data["repos"][0]["name"] == "a"   # name is immutable per helper contract
+    assert data["repos"][0]["name"] == "a"  # name is immutable per helper contract
     assert data["repos"][0]["owner"] == "x"
 
 
@@ -117,12 +116,15 @@ def project(tmp_path: Path) -> Path:
     meta = parent / "meta"
     meta.mkdir()
     (meta / ".agents").mkdir()
-    save_platform_yaml(meta, {
-        "project": "testprog",
-        "repos": [
-            {"name": "existing-svc", "path": "../existing-svc", "owner": "backend-agent"},
-        ],
-    })
+    save_platform_yaml(
+        meta,
+        {
+            "project": "testprog",
+            "repos": [
+                {"name": "existing-svc", "path": "../existing-svc", "owner": "backend-agent"},
+            ],
+        },
+    )
     # Plant the existing repo on disk so find_project_root walks up correctly
     existing = parent / "existing-svc"
     existing.mkdir()
@@ -130,12 +132,16 @@ def project(tmp_path: Path) -> Path:
     # Init the meta as a git repo so commit operations don't fail
     subprocess.run(["git", "init", "-q"], cwd=str(meta), check=True)
     subprocess.run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
-         "add", "platform.yaml"], cwd=str(meta), check=True, capture_output=True,
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "add", "platform.yaml"],
+        cwd=str(meta),
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
-         "commit", "-q", "-m", "init"], cwd=str(meta), check=True, capture_output=True,
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"],
+        cwd=str(meta),
+        check=True,
+        capture_output=True,
     )
     return meta
 
@@ -144,7 +150,10 @@ def _run(meta: Path, *cli_args: str) -> subprocess.CompletedProcess:
     env = {**os.environ, "OTAMAN_AGENT": "cli-agent"}
     return subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", *cli_args],
-        capture_output=True, text=True, cwd=str(meta), env=env,
+        capture_output=True,
+        text=True,
+        cwd=str(meta),
+        env=env,
         # Force a real closed pipe rather than inheriting the runner's
         # stdin: on Windows CI it isn't reliably a non-TTY handle the way
         # it is on Linux/macOS, so sys.stdin.isatty() can take the TTY
@@ -163,8 +172,12 @@ def _make_local_git_repo(parent: Path, name: str, with_remote: str | None = None
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=str(repo), check=True)
     if with_remote:
-        subprocess.run(["git", "remote", "add", "origin", with_remote],
-                       cwd=str(repo), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin", with_remote],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+        )
     return repo
 
 
@@ -172,7 +185,8 @@ def test_assign_existing_git_repo_with_origin(project: Path):
     """Origin URL is stored under the schema-accepted `remote:` field
     (not `url:`, which was the spec's term but doesn't validate)."""
     new_repo = _make_local_git_repo(
-        project.parent, "new-svc",
+        project.parent,
+        "new-svc",
         with_remote="https://github.com/org/new-svc.git",
     )
     rc = _run(project, "project", "assign", str(new_repo), "--owner", "ops-agent")
@@ -188,14 +202,15 @@ def test_assign_existing_git_repo_with_origin(project: Path):
 
 def test_assign_runs_otaman_init_and_writes_dot_otaman_marker(project: Path):
     """Spec scenario 10.5: AND `otaman init` runs in `../my-service`.
-    
+
     The post-assign `_cmd_init_update()` call must write the per-repo
     `.otaman` marker with `agent: <owner>` so identity resolution from
     inside the assigned repo works without falling back to the deprecated
     .agents/current-agent file.
     """
     new_repo = _make_local_git_repo(
-        project.parent, "deploy-svc",
+        project.parent,
+        "deploy-svc",
         with_remote="https://github.com/org/deploy-svc.git",
     )
     rc = _run(project, "project", "assign", str(new_repo), "--owner", "deploy-agent")
@@ -235,8 +250,14 @@ def test_assign_rejects_non_git_directory(project: Path):
 def test_assign_rejects_already_registered_name(project: Path):
     new_repo = _make_local_git_repo(project.parent, "fresh")
     rc = _run(
-        project, "project", "assign", str(new_repo),
-        "--owner", "ops-agent", "--name", "existing-svc",
+        project,
+        "project",
+        "assign",
+        str(new_repo),
+        "--owner",
+        "ops-agent",
+        "--name",
+        "existing-svc",
     )
     assert rc.returncode != 0
     assert "already registered" in (rc.stdout + rc.stderr)
@@ -319,8 +340,14 @@ def test_update_owner_field(project: Path):
 
 def test_update_multiple_fields_one_command(project: Path):
     rc = _run(
-        project, "project", "update", "existing-svc",
-        "--owner", "ops", "--url", "https://example.com/repo",
+        project,
+        "project",
+        "update",
+        "existing-svc",
+        "--owner",
+        "ops",
+        "--url",
+        "https://example.com/repo",
     )
     assert rc.returncode == 0
     e = find_repo(load_platform_yaml(project), "existing-svc")

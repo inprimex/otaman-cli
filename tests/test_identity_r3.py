@@ -8,6 +8,7 @@ These tests exercise all three fixes directly, distinct from
 test_identity_priority_chain.py / test_resolve_agent_identity.py (which
 cover the general priority-chain behavior these fixes sit inside).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -54,7 +55,9 @@ class TestOtamanAgentCrossCheck:
         assert result == "root-agent"
         assert capsys.readouterr().err == ""
 
-    def test_disagreeing_env_var_is_overridden_with_warning(self, project: Path, monkeypatch, capsys):
+    def test_disagreeing_env_var_is_overridden_with_warning(
+        self, project: Path, monkeypatch, capsys
+    ):
         monkeypatch.setenv("OTAMAN_AGENT", "stale-agent")
         result = resolve_agent_identity(project, project.parent / "monorepo" / "apps" / "api")
         assert result == "root-agent"
@@ -63,11 +66,15 @@ class TestOtamanAgentCrossCheck:
         assert "stale-agent" in err
         assert "root-agent" in err
 
-    def test_disagreeing_env_var_against_owner_paths_override(self, project: Path, monkeypatch, capsys):
+    def test_disagreeing_env_var_against_owner_paths_override(
+        self, project: Path, monkeypatch, capsys
+    ):
         """The cross-check must use the FULL owner-paths-aware resolution
         (web-agent for apps/web/**), not just the repo root owner."""
         monkeypatch.setenv("OTAMAN_AGENT", "stale-agent")
-        result = resolve_agent_identity(project, project.parent / "monorepo" / "apps" / "web" / "src")
+        result = resolve_agent_identity(
+            project, project.parent / "monorepo" / "apps" / "web" / "src"
+        )
         assert result == "web-agent"
         assert "web-agent" in capsys.readouterr().err
 
@@ -84,7 +91,9 @@ class TestOtamanAgentCrossCheck:
         cross-repo/override invocations use this, not OTAMAN_AGENT."""
         monkeypatch.setenv("OTAMAN_AGENT", "stale-agent")
         result = resolve_agent_identity(
-            project, project.parent / "monorepo" / "apps" / "api", explicit="deliberate-agent",
+            project,
+            project.parent / "monorepo" / "apps" / "api",
+            explicit="deliberate-agent",
         )
         assert result == "deliberate-agent"
 
@@ -96,7 +105,9 @@ class TestOwnerPathsDelegation:
         support and would have returned the repo root owner (root-agent)
         here instead of the more specific web-agent."""
         monkeypatch.delenv("OTAMAN_AGENT", raising=False)
-        result = resolve_agent_identity(project, project.parent / "monorepo" / "apps" / "web" / "src")
+        result = resolve_agent_identity(
+            project, project.parent / "monorepo" / "apps" / "web" / "src"
+        )
         assert result == "web-agent"
 
     def test_non_glob_path_falls_back_to_repo_root_owner(self, project: Path, monkeypatch):
@@ -105,7 +116,7 @@ class TestOwnerPathsDelegation:
         assert result == "root-agent"
 
 
-# ---------------------------------------------------------------- .agents/current-agent roster validation
+# -------------------------------------------------------- .agents/current-agent roster validation
 class TestCurrentAgentRosterValidation:
     def test_declared_value_accepted(self, project: Path, monkeypatch, capsys):
         monkeypatch.delenv("OTAMAN_AGENT", raising=False)

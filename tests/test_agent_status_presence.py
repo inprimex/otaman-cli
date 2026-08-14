@@ -3,6 +3,7 @@
 Hooks (1.6-1.8), check integration (1.10), and integration tests (1.12)
 land in a follow-up PR.
 """
+
 from __future__ import annotations
 
 import json
@@ -20,7 +21,6 @@ from otaman_cli.status import (
     FileStatusBackend,
     NatsKvStatusBackend,
     State,
-    StatusBackend,
     get_backend,
     is_agent_presence_enabled,
 )
@@ -37,9 +37,13 @@ class TestAgentStatusModel:
 
     def test_to_from_dict_roundtrip(self):
         s = AgentStatus(
-            agent="alpha", state=State.WORKING,
-            task="1.1 build it", change="ch-1", outcome=None,
-            blocked_by=None, since="2026-06-09T10:00:00Z",
+            agent="alpha",
+            state=State.WORKING,
+            task="1.1 build it",
+            change="ch-1",
+            outcome=None,
+            blocked_by=None,
+            since="2026-06-09T10:00:00Z",
             updated_at="2026-06-09T10:05:00Z",
         )
         d = s.to_dict()
@@ -72,7 +76,9 @@ class TestFileStatusBackend:
         b = FileStatusBackend(tmp_path)
         b.write(AgentStatus(agent="alpha", state=State.IDLE))
         sdir = tmp_path / ".agents" / "status"
-        leftovers = [p for p in sdir.iterdir() if p.name.startswith(".") and p.name.endswith(".tmp")]
+        leftovers = [
+            p for p in sdir.iterdir() if p.name.startswith(".") and p.name.endswith(".tmp")
+        ]
         assert leftovers == []
 
     def test_read_returns_none_when_absent(self, tmp_path: Path):
@@ -82,8 +88,11 @@ class TestFileStatusBackend:
     def test_read_after_write(self, tmp_path: Path):
         b = FileStatusBackend(tmp_path)
         original = AgentStatus(
-            agent="beta", state=State.BLOCKED,
-            blocked_by="human", change="ch", task="t",
+            agent="beta",
+            state=State.BLOCKED,
+            blocked_by="human",
+            change="ch",
+            task="t",
         )
         b.write(original)
         got = b.read("beta")
@@ -190,8 +199,9 @@ def _project_root(tmp_path: Path, agent: str = "cli-agent") -> Path:
     return tmp_path
 
 
-def _run_cli(root: Path, *args: str, agent: str = "cli-agent",
-             extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+def _run_cli(
+    root: Path, *args: str, agent: str = "cli-agent", extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
     env = {
         **os.environ,
         "OTAMAN_AGENT": agent,
@@ -202,14 +212,20 @@ def _run_cli(root: Path, *args: str, agent: str = "cli-agent",
         env.update(extra_env)
     return subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", *args],
-        cwd=root, env=env, capture_output=True, text=True, timeout=30,
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
 
 
 class TestSetStatusCommand:
     def test_set_working_writes_status_file(self, tmp_path: Path):
         root = _project_root(tmp_path)
-        r = _run_cli(root, "set-status", "working", "--task", "1.5", "--change", "agent-status-presence")
+        r = _run_cli(
+            root, "set-status", "working", "--task", "1.5", "--change", "agent-status-presence"
+        )
         assert r.returncode == 0, r.stderr
         f = root / ".agents" / "status" / "cli-agent.yaml"
         assert f.is_file()
@@ -290,9 +306,14 @@ class TestFleetStatusCommand:
         sdir = root / ".agents" / "status"
         sdir.mkdir(parents=True, exist_ok=True)
         body = {
-            "agent": agent, "state": state, "task": None, "change": None,
-            "outcome": None, "blocked_by": None,
-            "since": "2026-06-09T10:00:00Z", "updated_at": "2026-06-09T10:00:00Z",
+            "agent": agent,
+            "state": state,
+            "task": None,
+            "change": None,
+            "outcome": None,
+            "blocked_by": None,
+            "since": "2026-06-09T10:00:00Z",
+            "updated_at": "2026-06-09T10:00:00Z",
             **fields,
         }
         (sdir / f"{agent}.yaml").write_text(yaml.safe_dump(body), encoding="utf-8")

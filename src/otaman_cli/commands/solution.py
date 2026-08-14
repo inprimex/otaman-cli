@@ -6,7 +6,11 @@ generic flag loop).
 from __future__ import annotations
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.commands._flag_parsing import _parse_dependencies, _parse_flag_list, _parse_flag_value
+from otaman_cli.commands._flag_parsing import (
+    _parse_dependencies,
+    _parse_flag_list,
+    _parse_flag_value,
+)
 from otaman_cli.main import UI
 
 
@@ -14,8 +18,7 @@ def cmd_solution(args: list[str]) -> int:
     """`otaman solution <action> [...]` — dispatches to cli_solution.dispatch."""
     if not args:
         UI.error("Usage: otaman solution <action> [options]")
-        UI.muted("Actions: add | list | show | history | propose | "
-                 "promote-to-complete | discard")
+        UI.muted("Actions: add | list | show | history | propose | promote-to-complete | discard")
         return 1
 
     action, *rest_args = args
@@ -44,6 +47,7 @@ def cmd_solution(args: list[str]) -> int:
         UI.warn(f"Unrecognised arguments ignored: {rest}")
 
     from otaman_cli.registries import cli_solution
+
     return cli_solution.dispatch(action, parsed)
 
 

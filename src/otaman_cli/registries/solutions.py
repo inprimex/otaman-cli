@@ -15,7 +15,6 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-
 _SOLUTION_ID_RE = re.compile(r"^SOL-\d+-[a-z0-9-]+$")
 
 
@@ -106,6 +105,7 @@ class Solution(BaseModel):
     @classmethod
     def _cto_notes_null_to_empty(cls, v: Any) -> str:
         return "" if v is None else v
+
     status: SolutionStatus = SolutionStatus.CONSIDERING
     created: date
     updated: date

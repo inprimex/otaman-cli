@@ -24,20 +24,21 @@ from ruamel.yaml import YAML
 
 from otaman_cli.registries.transitions import utc_now_iso
 
-
 _YAML = YAML()
 _YAML.indent(mapping=2, sequence=4, offset=2)
 
 
-VALID_MESSAGE_TYPES = frozenset({
-    "outcome-estimate-requested",
-    "outcome-estimates-ready",
-    "outcome-cost-accepted",
-    "outcome-cost-rejected",
-    "outcome-status-changed",
-    "solution-status-changed",
-    "solution-recommendation",
-})
+VALID_MESSAGE_TYPES = frozenset(
+    {
+        "outcome-estimate-requested",
+        "outcome-estimates-ready",
+        "outcome-cost-accepted",
+        "outcome-cost-rejected",
+        "outcome-status-changed",
+        "solution-status-changed",
+        "solution-recommendation",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +87,9 @@ def build_outcome_estimates_ready(
 
 
 def build_outcome_cost_accepted(
-    outcome: dict[str, Any], solution: dict[str, Any], from_actor: str,
+    outcome: dict[str, Any],
+    solution: dict[str, Any],
+    from_actor: str,
 ) -> dict[str, Any]:
     """Built when ``otaman outcome accept-cost`` runs."""
     return {
@@ -106,7 +109,9 @@ def build_outcome_cost_accepted(
 
 
 def build_outcome_cost_rejected(
-    outcome: dict[str, Any], from_actor: str, note: str | None = None,
+    outcome: dict[str, Any],
+    from_actor: str,
+    note: str | None = None,
     rejected_solution: str | None = None,
 ) -> dict[str, Any]:
     """Built when ``otaman outcome reject-cost`` runs."""
@@ -125,7 +130,11 @@ def build_outcome_cost_rejected(
 
 
 def build_outcome_status_changed(
-    outcome: dict[str, Any], from_status: str, to_status: str, from_actor: str, action: str,
+    outcome: dict[str, Any],
+    from_status: str,
+    to_status: str,
+    from_actor: str,
+    action: str,
 ) -> dict[str, Any]:
     """Built on any outcome status mutation (promote/demote/retire)."""
     return {
@@ -144,7 +153,11 @@ def build_outcome_status_changed(
 
 
 def build_solution_status_changed(
-    solution: dict[str, Any], from_status: str, to_status: str, from_actor: str, action: str,
+    solution: dict[str, Any],
+    from_status: str,
+    to_status: str,
+    from_actor: str,
+    action: str,
 ) -> dict[str, Any]:
     """Built on any solution status mutation (select/promote-to-complete/discard)."""
     return {
@@ -226,6 +239,7 @@ def emit(
     }
 
     import io
+
     sio = io.StringIO()
     _YAML.dump(frontmatter, sio)
     fm_yaml = sio.getvalue()
@@ -234,11 +248,7 @@ def emit(
     _YAML.dump(payload, sio2)
     payload_yaml = sio2.getvalue()
 
-    body = (
-        f"---\n{fm_yaml}---\n\n"
-        f"## Subject: {msg_type}\n\n"
-        f"```yaml\n{payload_yaml}```\n"
-    )
+    body = f"---\n{fm_yaml}---\n\n## Subject: {msg_type}\n\n```yaml\n{payload_yaml}```\n"
     path.write_text(body, encoding="utf-8")
     return path
 

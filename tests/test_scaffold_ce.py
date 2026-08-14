@@ -86,11 +86,13 @@ def test_scaffold_initialises_git_repo(meta: Path) -> None:
     assert (target / ".git").is_dir()
     # Exactly one initial commit
     log = subprocess.run(
-        ["git", "log", "--oneline"], cwd=str(target),
-        capture_output=True, text=True,
+        ["git", "log", "--oneline"],
+        cwd=str(target),
+        capture_output=True,
+        text=True,
     )
     assert log.returncode == 0
-    lines = [l for l in log.stdout.splitlines() if l.strip()]
+    lines = [line for line in log.stdout.splitlines() if line.strip()]
     assert len(lines) == 1
     assert "scaffold: initialize epicbridge-business" in lines[0]
 
@@ -102,6 +104,7 @@ def test_scaffold_updates_platform_yaml_repos(meta: Path) -> None:
         meta_dir=meta,
     )
     import yaml
+
     doc = yaml.safe_load((meta / "platform.yaml").read_text(encoding="utf-8"))
     repo_names = [r["name"] for r in doc["repos"]]
     assert "epicbridge-business" in repo_names
@@ -127,7 +130,9 @@ def test_scaffold_strategy_repo_owned_by_cofounder(meta: Path) -> None:
 def test_no_processes_means_no_repos(meta: Path) -> None:
     """No business-triggering processes → no companion repos."""
     result = scaffold_companion_repos_ce(
-        program_slug="x", processes=[], meta_dir=meta,
+        program_slug="x",
+        processes=[],
+        meta_dir=meta,
     )
     assert result.repos == []
 
@@ -135,7 +140,9 @@ def test_no_processes_means_no_repos(meta: Path) -> None:
 def test_unknown_kind_raises(meta: Path) -> None:
     with pytest.raises(ScaffoldError, match="Unknown companion repo kind"):
         scaffold_companion_repos_ce(
-            program_slug="x", processes=[], meta_dir=meta,
+            program_slug="x",
+            processes=[],
+            meta_dir=meta,
             repo_kinds=["nonsense"],
         )
 
@@ -146,10 +153,14 @@ def test_unknown_kind_raises(meta: Path) -> None:
 
 def test_scaffold_idempotent_second_run_skips(meta: Path) -> None:
     scaffold_companion_repos_ce(
-        program_slug="epicbridge", processes=["outcomes"], meta_dir=meta,
+        program_slug="epicbridge",
+        processes=["outcomes"],
+        meta_dir=meta,
     )
     result = scaffold_companion_repos_ce(
-        program_slug="epicbridge", processes=["outcomes"], meta_dir=meta,
+        program_slug="epicbridge",
+        processes=["outcomes"],
+        meta_dir=meta,
     )
     assert result.created == []
     assert len(result.skipped) == 1
@@ -158,12 +169,17 @@ def test_scaffold_idempotent_second_run_skips(meta: Path) -> None:
 
 def test_idempotent_does_not_duplicate_platform_yaml_entries(meta: Path) -> None:
     scaffold_companion_repos_ce(
-        program_slug="epicbridge", processes=["outcomes"], meta_dir=meta,
+        program_slug="epicbridge",
+        processes=["outcomes"],
+        meta_dir=meta,
     )
     scaffold_companion_repos_ce(
-        program_slug="epicbridge", processes=["outcomes"], meta_dir=meta,
+        program_slug="epicbridge",
+        processes=["outcomes"],
+        meta_dir=meta,
     )
     import yaml
+
     doc = yaml.safe_load((meta / "platform.yaml").read_text(encoding="utf-8"))
     business_entries = [r for r in doc["repos"] if r["name"] == "epicbridge-business"]
     assert len(business_entries) == 1
@@ -171,17 +187,23 @@ def test_idempotent_does_not_duplicate_platform_yaml_entries(meta: Path) -> None
 
 def test_idempotent_does_not_duplicate_git_commits(meta: Path) -> None:
     scaffold_companion_repos_ce(
-        program_slug="epicbridge", processes=["outcomes"], meta_dir=meta,
+        program_slug="epicbridge",
+        processes=["outcomes"],
+        meta_dir=meta,
     )
     scaffold_companion_repos_ce(
-        program_slug="epicbridge", processes=["outcomes"], meta_dir=meta,
+        program_slug="epicbridge",
+        processes=["outcomes"],
+        meta_dir=meta,
     )
     target = meta.parent / "epicbridge-business"
     log = subprocess.run(
-        ["git", "log", "--oneline"], cwd=str(target),
-        capture_output=True, text=True,
+        ["git", "log", "--oneline"],
+        cwd=str(target),
+        capture_output=True,
+        text=True,
     )
-    lines = [l for l in log.stdout.splitlines() if l.strip()]
+    lines = [line for line in log.stdout.splitlines() if line.strip()]
     assert len(lines) == 1, f"Expected 1 commit after idempotent re-run; got {lines}"
 
 
@@ -204,6 +226,7 @@ def test_dry_run_does_not_write_filesystem(meta: Path) -> None:
     # platform.yaml NOT updated
     assert result.platform_yaml_updated is False
     import yaml
+
     doc = yaml.safe_load((meta / "platform.yaml").read_text(encoding="utf-8"))
     names = [r["name"] for r in doc["repos"]]
     assert "epicbridge-business" not in names
@@ -215,7 +238,9 @@ def test_dry_run_does_not_write_filesystem(meta: Path) -> None:
 
 def test_force_recreates_existing_repo(meta: Path) -> None:
     scaffold_companion_repos_ce(
-        program_slug="epicbridge", processes=["outcomes"], meta_dir=meta,
+        program_slug="epicbridge",
+        processes=["outcomes"],
+        meta_dir=meta,
     )
     target = meta.parent / "epicbridge-business"
     sentinel = target / "user-edit.txt"
@@ -223,7 +248,9 @@ def test_force_recreates_existing_repo(meta: Path) -> None:
     assert sentinel.is_file()
 
     scaffold_companion_repos_ce(
-        program_slug="epicbridge", processes=["outcomes"], meta_dir=meta,
+        program_slug="epicbridge",
+        processes=["outcomes"],
+        meta_dir=meta,
         force=True,
     )
     # Force removes the old dir; the user file is gone
@@ -238,6 +265,7 @@ def test_force_recreates_existing_repo(meta: Path) -> None:
 def test_scaffold_runs_without_network(meta: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """No HTTP / DNS calls. Block all socket use during the scaffold."""
     import socket
+
     original_socket = socket.socket
 
     def _blocked(*args, **kwargs):  # noqa: ANN001, ANN003
@@ -246,7 +274,9 @@ def test_scaffold_runs_without_network(meta: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(socket, "socket", _blocked)
     try:
         scaffold_companion_repos_ce(
-            program_slug="epicbridge", processes=["outcomes"], meta_dir=meta,
+            program_slug="epicbridge",
+            processes=["outcomes"],
+            meta_dir=meta,
         )
     finally:
         monkeypatch.setattr(socket, "socket", original_socket)
@@ -267,16 +297,30 @@ def test_outcome_add_succeeds_after_scaffold(meta: Path) -> None:
     env = {**os.environ, "OTAMAN_AGENT": "human"}
     rc = subprocess.run(
         [
-            sys.executable, "-m", "otaman_cli.main",
-            "outcome", "add", "JTBD-1-create-account",
-            "--as-a", "user", "--i-want-to", "x",
-            "--incremental-outcome", "y", "--so-i-can", "z",
+            sys.executable,
+            "-m",
+            "otaman_cli.main",
+            "outcome",
+            "add",
+            "JTBD-1-create-account",
+            "--as-a",
+            "user",
+            "--i-want-to",
+            "x",
+            "--incremental-outcome",
+            "y",
+            "--so-i-can",
+            "z",
         ],
-        capture_output=True, text=True, cwd=str(meta), env=env,
+        capture_output=True,
+        text=True,
+        cwd=str(meta),
+        env=env,
     )
     assert rc.returncode == 0, rc.stderr or rc.stdout
     business_outcomes = meta.parent / "epicbridge-business" / "outcomes.yaml"
     import yaml
+
     doc = yaml.safe_load(business_outcomes.read_text(encoding="utf-8"))
     assert len(doc["outcomes"]) == 1
     assert doc["outcomes"][0]["id"] == "JTBD-1-create-account"
@@ -289,9 +333,19 @@ def test_outcome_add_succeeds_after_scaffold(meta: Path) -> None:
 def test_cli_init_companion_repos_subcommand(meta: Path) -> None:
     env = {**os.environ, "OTAMAN_AGENT": "human"}
     rc = subprocess.run(
-        [sys.executable, "-m", "otaman_cli.main",
-         "init", "companion-repos", "--program", "epicbridge"],
-        capture_output=True, text=True, cwd=str(meta), env=env,
+        [
+            sys.executable,
+            "-m",
+            "otaman_cli.main",
+            "init",
+            "companion-repos",
+            "--program",
+            "epicbridge",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(meta),
+        env=env,
     )
     assert rc.returncode == 0, rc.stderr or rc.stdout
     target = meta.parent / "epicbridge-business"
@@ -302,9 +356,20 @@ def test_cli_init_companion_repos_subcommand(meta: Path) -> None:
 def test_cli_init_companion_repos_dry_run(meta: Path) -> None:
     env = {**os.environ, "OTAMAN_AGENT": "human"}
     rc = subprocess.run(
-        [sys.executable, "-m", "otaman_cli.main",
-         "init", "companion-repos", "--program", "epicbridge", "--dry-run"],
-        capture_output=True, text=True, cwd=str(meta), env=env,
+        [
+            sys.executable,
+            "-m",
+            "otaman_cli.main",
+            "init",
+            "companion-repos",
+            "--program",
+            "epicbridge",
+            "--dry-run",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(meta),
+        env=env,
     )
     assert rc.returncode == 0
     target = meta.parent / "epicbridge-business"
@@ -317,10 +382,21 @@ def test_cli_init_companion_repos_repos_flag(meta: Path) -> None:
     processes are enabled."""
     env = {**os.environ, "OTAMAN_AGENT": "human"}
     rc = subprocess.run(
-        [sys.executable, "-m", "otaman_cli.main",
-         "init", "companion-repos", "--program", "epicbridge",
-         "--repos", "strategy"],
-        capture_output=True, text=True, cwd=str(meta), env=env,
+        [
+            sys.executable,
+            "-m",
+            "otaman_cli.main",
+            "init",
+            "companion-repos",
+            "--program",
+            "epicbridge",
+            "--repos",
+            "strategy",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(meta),
+        env=env,
     )
     assert rc.returncode == 0, rc.stderr or rc.stdout
     assert (meta.parent / "epicbridge-strategy").is_dir()

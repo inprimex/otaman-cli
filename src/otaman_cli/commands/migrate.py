@@ -23,7 +23,7 @@ from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root
-from otaman_cli.main import C, UI
+from otaman_cli.main import UI, C
 from otaman_cli.safety import confirm_destructive_operation
 
 _ARTIFACT_NAMES = ("platform.yaml", ".agents", ".claude", ".mcp.json", "CLAUDE.md")
@@ -57,7 +57,7 @@ def cmd_migrate(args: list[str]) -> int:
     git_dir = root / ".git"
     if git_dir.is_dir():
         UI.warn(f"{root} already has a .git/ directory")
-        print(f"  This may already be a dedicated otaman folder. Proceed with caution.\n")
+        print("  This may already be a dedicated otaman folder. Proceed with caution.\n")
 
     # Determine otaman folder name
     config_path = root / "platform.yaml"
@@ -67,6 +67,7 @@ def cmd_migrate(args: list[str]) -> int:
 
     try:
         import yaml
+
         with open(config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
         project_name = config.get("project", root.name)
@@ -132,6 +133,7 @@ def cmd_migrate(args: list[str]) -> int:
         dst = maestro_dir / item_name
         if src.exists():
             import shutil
+
             if src.is_dir():
                 shutil.copytree(str(src), str(dst))
                 shutil.rmtree(str(src))
@@ -147,6 +149,7 @@ def cmd_migrate(args: list[str]) -> int:
         dst = maestro_dir / pattern
         if src.exists():
             import shutil
+
             shutil.copy2(str(src), str(dst))
             src.unlink()
             moved.append(pattern)
@@ -157,9 +160,10 @@ def cmd_migrate(args: list[str]) -> int:
     content = new_config_path.read_text(encoding="utf-8")
     # Replace ./repo paths with ../repo (otaman folder is now one level deeper)
     import re
-    content = re.sub(r'path:\s*\./([^\s]+)', r'path: ../\1', content)
+
+    content = re.sub(r"path:\s*\./([^\s]+)", r"path: ../\1", content)
     # Also fix specs.path if it points to a sibling
-    content = re.sub(r'(specs:\s*\n\s*path:\s*)\./([^\s]+)', r'\1../\2', content)
+    content = re.sub(r"(specs:\s*\n\s*path:\s*)\./([^\s]+)", r"\1../\2", content)
     new_config_path.write_text(content, encoding="utf-8")
     UI.ok("Rewrote repo paths in platform.yaml (./repo -> ../repo)")
 
@@ -205,7 +209,6 @@ def cmd_migrate(args: list[str]) -> int:
                     if ".otaman" in gi_content.splitlines():
                         needs_entry = False
                 if needs_entry:
-
                     with open(gi, "a", encoding="utf-8") as f:
                         f.write(chr(10) + ".otaman" + chr(10))
 
@@ -216,8 +219,9 @@ def cmd_migrate(args: list[str]) -> int:
         if meta_marker.exists():
             existing = meta_marker.read_text(encoding="utf-8")
             if "agent:" not in existing:
-                meta_marker.write_text(existing.rstrip() + chr(10) + "agent: human" + chr(10), encoding="utf-8")
-
+                meta_marker.write_text(
+                    existing.rstrip() + chr(10) + "agent: human" + chr(10), encoding="utf-8"
+                )
 
     except Exception as e:
         UI.warn(f"Could not write .otaman markers: {e}")
@@ -243,8 +247,10 @@ def cmd_migrate(args: list[str]) -> int:
     return 0
 
 
-register(CommandSpec(
-    name="migrate",
-    handler=cmd_migrate,
-    help="Migrate legacy layout to dedicated otaman folder",
-))
+register(
+    CommandSpec(
+        name="migrate",
+        handler=cmd_migrate,
+        help="Migrate legacy layout to dedicated otaman folder",
+    )
+)

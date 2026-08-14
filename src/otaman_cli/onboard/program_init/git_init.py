@@ -8,10 +8,10 @@ This module is intentionally thin: it shells out to `git` via subprocess
 and tolerates failures gracefully (the init flow must not fail because git
 is unavailable or the repo was already initialized by the user).
 """
+
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -111,6 +111,7 @@ def initial_commit(specs_path: Path, program_name: str, answers: dict[str, Any])
 
     try:
         import os
+
         merged_env = {**os.environ, **env}
         result = subprocess.run(
             ["git", "commit", "-m", commit_msg],

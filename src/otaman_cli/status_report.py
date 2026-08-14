@@ -16,7 +16,6 @@ Exit codes:
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import sys
@@ -55,12 +54,16 @@ def get_repo_git_status(repo_path: Path) -> dict[str, Any]:
 
     branch = run_git(repo_path, "branch", "--show-current") or "detached"
     status_output = run_git(repo_path, "status", "--porcelain")
-    modified = len([l for l in status_output.splitlines() if l.strip()]) if status_output else 0
+    modified = (
+        len([line for line in status_output.splitlines() if line.strip()]) if status_output else 0
+    )
 
     # Ahead/behind
     ahead = 0
     behind = 0
-    ab_output = run_git(repo_path, "rev-list", "--left-right", "--count", f"{branch}...origin/{branch}")
+    ab_output = run_git(
+        repo_path, "rev-list", "--left-right", "--count", f"{branch}...origin/{branch}"
+    )
     if ab_output and "\t" in ab_output:
         parts = ab_output.split("\t")
         ahead = int(parts[0])
@@ -137,14 +140,16 @@ def get_pending_messages(bus_dir: Path) -> list[dict[str, Any]]:
                     subject = line.strip().replace("## Subject:", "").strip()
                     break
 
-            messages.append({
-                "id": fm.get("id", ""),
-                "from": fm.get("from", ""),
-                "to": fm.get("to", ""),
-                "priority": fm.get("priority", "normal"),
-                "type": fm.get("type", ""),
-                "subject": subject,
-            })
+            messages.append(
+                {
+                    "id": fm.get("id", ""),
+                    "from": fm.get("from", ""),
+                    "to": fm.get("to", ""),
+                    "priority": fm.get("priority", "normal"),
+                    "type": fm.get("type", ""),
+                    "subject": subject,
+                }
+            )
         except (OSError, yaml.YAMLError):
             continue
 
@@ -167,13 +172,15 @@ def get_pending_reviews(reviews_dir: Path) -> list[dict[str, Any]]:
             fm = yaml.safe_load(fm_match.group(1))
             if not isinstance(fm, dict):
                 continue
-            reviews.append({
-                "reviewer": fm.get("reviewer", ""),
-                "scope": fm.get("scope", ""),
-                "status": fm.get("status", ""),
-                "date": fm.get("date", ""),
-                "file": f.name,
-            })
+            reviews.append(
+                {
+                    "reviewer": fm.get("reviewer", ""),
+                    "scope": fm.get("scope", ""),
+                    "status": fm.get("status", ""),
+                    "date": fm.get("date", ""),
+                    "file": f.name,
+                }
+            )
         except (OSError, yaml.YAMLError):
             continue
 
@@ -207,13 +214,15 @@ def get_proposals(agents_dir: Path) -> list[dict[str, Any]]:
                     title = stripped[3:].strip()
                     break
 
-            proposals.append({
-                "id": fm.get("id", ""),
-                "status": fm.get("status", "proposed"),
-                "author": fm.get("author", ""),
-                "title": title,
-                "file": f.name,
-            })
+            proposals.append(
+                {
+                    "id": fm.get("id", ""),
+                    "status": fm.get("status", "proposed"),
+                    "author": fm.get("author", ""),
+                    "title": title,
+                    "file": f.name,
+                }
+            )
         except (OSError, yaml.YAMLError):
             continue
 
@@ -225,6 +234,7 @@ def main() -> int:
         project_root = Path(sys.argv[1]).resolve()
     else:
         from otaman_core._resolve import find_maestro_root
+
         project_root = find_maestro_root() or Path.cwd().resolve()
     repo_filter = sys.argv[2] if len(sys.argv) > 2 else None
 
@@ -271,14 +281,16 @@ def main() -> int:
 
         agent_msgs = count_bus_messages(bus_path, repo_cfg.get("owner"))
 
-        report["repos"].append({
-            "name": name,
-            "owner": repo_cfg.get("owner", ""),
-            "path": repo_cfg["path"],
-            "disabled": repo_cfg.get("disabled", False),
-            **git_status,
-            "pending_messages": agent_msgs.get("pending", 0),
-        })
+        report["repos"].append(
+            {
+                "name": name,
+                "owner": repo_cfg.get("owner", ""),
+                "path": repo_cfg["path"],
+                "disabled": repo_cfg.get("disabled", False),
+                **git_status,
+                "pending_messages": agent_msgs.get("pending", 0),
+            }
+        )
 
     print(json.dumps(report, indent=2))
     return 0

@@ -1,7 +1,6 @@
 """Tests for scaffold.py — companion-repos logic (tasks.md 3.1)."""
-from __future__ import annotations
 
-import pytest
+from __future__ import annotations
 
 from otaman_cli.onboard.program_init.scaffold import (
     ScaffoldResult,
@@ -54,8 +53,8 @@ class TestScaffoldCompanionRepos:
 
     def test_bridge_called_when_available(self, monkeypatch):
         """If bridge is importable, its function is called."""
-        from types import SimpleNamespace
         import sys
+        from types import SimpleNamespace
 
         fake_bridge = SimpleNamespace(
             scaffold=SimpleNamespace(

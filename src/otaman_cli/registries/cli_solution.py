@@ -29,7 +29,7 @@ from otaman_cli.registries.roles import (
     resolve_operating_actor,
     resolve_roles,
 )
-from otaman_cli.registries.solutions import SolutionRegistry, SolutionStatus
+from otaman_cli.registries.solutions import SolutionRegistry
 from otaman_cli.registries.transitions import append_transition, make_transition
 
 
@@ -77,6 +77,7 @@ def _ctx(root: Path):
         platform = load_program_extensions(root / "platform.yaml")
     except Exception:
         from otaman_cli.registries.platform_ext import ProgramExtensions
+
         platform = ProgramExtensions()
     roles = resolve_roles(actor, platform)
     return actor, roles, platform
@@ -101,9 +102,7 @@ def cmd_add(args: dict[str, Any]) -> int:
     required = ("id", "outcome", "description")
     missing = [k for k in required if not args.get(k)]
     if missing:
-        return _bail(
-            "Missing required flag(s): " + ", ".join(f"--{k}" for k in missing)
-        )
+        return _bail("Missing required flag(s): " + ", ".join(f"--{k}" for k in missing))
 
     loaded = _load(root)
     if loaded is None:
@@ -186,8 +185,7 @@ def cmd_add(args: dict[str, Any]) -> int:
         score=round(chosen.score, 4),
         rationale=rationale,
         alternatives=[
-            {"id": a.solution_id, "score": round(a.score, 4),
-             "effort-days": a.effort_days}
+            {"id": a.solution_id, "score": round(a.score, 4), "effort-days": a.effort_days}
             for a in alternatives_results
         ],
         from_actor=actor,
@@ -421,7 +419,11 @@ def cmd_promote_to_complete(args: dict[str, Any]) -> int:
     _emit_bus(
         root,
         bus_messages.build_solution_status_changed(
-            s, from_status, "Complete", actor, "promote-to-complete",
+            s,
+            from_status,
+            "Complete",
+            actor,
+            "promote-to-complete",
         ),
     )
     UI.ok(f"Solution {s['id']}: {from_status} → Complete")
@@ -466,7 +468,11 @@ def cmd_discard(args: dict[str, Any]) -> int:
     _emit_bus(
         root,
         bus_messages.build_solution_status_changed(
-            s, from_status, "Discarded", actor, "discard",
+            s,
+            from_status,
+            "Discarded",
+            actor,
+            "discard",
         ),
     )
     UI.ok(f"Discarded solution: {s['id']}")

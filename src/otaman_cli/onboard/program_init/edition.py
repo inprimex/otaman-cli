@@ -24,6 +24,7 @@ Security notes:
     - ``OTAMAN_LICENSE_FILE`` is resolved via ``Path.resolve()`` before use to
       prevent path-traversal attacks (LOW finding from PR #6 review).
 """
+
 from __future__ import annotations
 
 import os
@@ -98,6 +99,7 @@ def detect_mode(platform_yaml_path: Path | None = None) -> int:
     if platform_yaml_path and platform_yaml_path.is_file():
         try:
             import yaml  # PyYAML — fast read
+
             data = yaml.safe_load(platform_yaml_path.read_text(encoding="utf-8")) or {}
             mode_val = int(data.get("mode", 1))
             if mode_val >= 2:

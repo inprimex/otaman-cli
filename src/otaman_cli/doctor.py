@@ -49,7 +49,9 @@ def _run(cmd: list[str], timeout: int = 10) -> tuple[int, str, str]:
         resolved = _which(cmd[0])
         if resolved and resolved != cmd[0]:
             try:
-                r = subprocess.run([resolved] + cmd[1:], capture_output=True, text=True, timeout=timeout)
+                r = subprocess.run(
+                    [resolved] + cmd[1:], capture_output=True, text=True, timeout=timeout
+                )
                 return r.returncode, r.stdout.strip(), r.stderr.strip()
             except (FileNotFoundError, subprocess.TimeoutExpired):
                 pass
@@ -66,10 +68,10 @@ def _which(name: str) -> str | None:
     # Check common user-install locations (not in PATH for non-interactive SSH)
     home = Path.home()
     candidates = [
-        home / ".dotnet" / name,                    # dotnet-install.sh
-        home / ".cargo" / "bin" / name,             # rustup
-        home / ".local" / "bin" / name,             # pip --user
-        home / "go" / "bin" / name,                 # go install
+        home / ".dotnet" / name,  # dotnet-install.sh
+        home / ".cargo" / "bin" / name,  # rustup
+        home / ".local" / "bin" / name,  # pip --user
+        home / "go" / "bin" / name,  # go install
     ]
     # nvm-installed node/npm/claude
     nvm_dir = Path(os.environ.get("NVM_DIR", home / ".nvm"))
@@ -94,15 +96,19 @@ def check_git_identity() -> dict[str, Any]:
 
     issues = []
     if not name:
-        issues.append({
-            "issue": "Git user.name not configured",
-            "fix": 'git config --global user.name "Your Name"',
-        })
+        issues.append(
+            {
+                "issue": "Git user.name not configured",
+                "fix": 'git config --global user.name "Your Name"',
+            }
+        )
     if not email:
-        issues.append({
-            "issue": "Git user.email not configured",
-            "fix": 'git config --global user.email "you@example.com"',
-        })
+        issues.append(
+            {
+                "issue": "Git user.email not configured",
+                "fix": 'git config --global user.email "you@example.com"',
+            }
+        )
 
     if issues:
         result["status"] = "fail"
@@ -157,7 +163,12 @@ def check_git_platform(repos: list[dict[str, Any]], project_root: Path) -> dict[
 
     if not platforms:
         result["status"] = "warn"
-        result["issues"] = [{"issue": "No git remotes detected — repos may not be pushed", "fix": "git remote add origin <url>"}]
+        result["issues"] = [
+            {
+                "issue": "No git remotes detected — repos may not be pushed",
+                "fix": "git remote add origin <url>",
+            }
+        ]
         return result
 
     # Primary platform
@@ -170,7 +181,11 @@ def check_git_platform(repos: list[dict[str, Any]], project_root: Path) -> dict[
         "github": ("gh", "gh auth status", "sudo apt install gh || brew install gh"),
         "gitlab": ("glab", "glab auth status", "sudo apt install glab || brew install glab"),
         "bitbucket": ("bb", "bb auth status", "pip install bitbucket-cli"),
-        "azure-devops": ("az", "az devops configure --list", "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash"),
+        "azure-devops": (
+            "az",
+            "az devops configure --list",
+            "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash",
+        ),
     }
 
     cli_name, auth_cmd, install_cmd = cli_map.get(primary, ("", "", ""))
@@ -194,13 +209,16 @@ def check_git_platform(repos: list[dict[str, Any]], project_root: Path) -> dict[
             issue_text = f"{cli_name} CLI not installed"
             issue_text += (
                 " — optional, `otaman git-host` covers it via API"
-                if api_live else " — agents cannot create PRs"
+                if api_live
+                else " — agents cannot create PRs"
             )
-            issues.append({
-                "issue": issue_text,
-                "fix": install_cmd,
-                "severity": cli_severity,
-            })
+            issues.append(
+                {
+                    "issue": issue_text,
+                    "fix": install_cmd,
+                    "severity": cli_severity,
+                }
+            )
         else:
             # Check authentication
             rc, out, err = _run(auth_cmd.split())
@@ -213,17 +231,19 @@ def check_git_platform(repos: list[dict[str, Any]], project_root: Path) -> dict[
                         " — optional, `otaman git-host` is authenticated "
                         "via platform.yaml's `git_host:` block"
                     )
-                issues.append({
-                    "issue": issue_text,
-                    "fix": f"{cli_name} auth login",
-                    "severity": cli_severity,
-                })
+                issues.append(
+                    {
+                        "issue": issue_text,
+                        "fix": f"{cli_name} auth login",
+                        "severity": cli_severity,
+                    }
+                )
 
     result["details"]["pr_enabled"] = (
-        (bool(cli_name) and result["details"].get("cli_installed")
-         and result["details"].get("authenticated", False))
-        or api_live
-    )
+        bool(cli_name)
+        and result["details"].get("cli_installed")
+        and result["details"].get("authenticated", False)
+    ) or api_live
 
     if issues:
         # Only critical/high severity flips the overall status to "fail";
@@ -248,7 +268,20 @@ def check_runtimes(repos: list[dict[str, Any]], project_root: Path) -> dict[str,
 
     for repo in repos:
         tech = repo.get("tech", [])
-        if any(t in tech for t in ("nodejs", "typescript", "react", "nextjs", "vue", "angular", "express", "nestjs", "svelte")):
+        if any(
+            t in tech
+            for t in (
+                "nodejs",
+                "typescript",
+                "react",
+                "nextjs",
+                "vue",
+                "angular",
+                "express",
+                "nestjs",
+                "svelte",
+            )
+        ):
             needs_node = True
         if any(t in tech for t in ("python", "python-ml", "django", "flask", "fastapi")):
             needs_python = True
@@ -271,7 +304,11 @@ def check_runtimes(repos: list[dict[str, Any]], project_root: Path) -> dict[str,
             nvm_dir = os.environ.get("NVM_DIR", os.path.expanduser("~/.nvm"))
             has_nvm = os.path.isdir(nvm_dir)
             in_path = shutil.which("node") is not None
-            runtimes["nodejs"] = {"version": ver, "manager": "nvm" if has_nvm else "system", "path": node_path}
+            runtimes["nodejs"] = {
+                "version": ver,
+                "manager": "nvm" if has_nvm else "system",
+                "path": node_path,
+            }
             if not in_path:
                 runtimes["nodejs"]["note"] = "Found but not in PATH (source ~/.nvm/nvm.sh)"
             # Check npm
@@ -280,11 +317,14 @@ def check_runtimes(repos: list[dict[str, Any]], project_root: Path) -> dict[str,
                 rc, npm_ver, _ = _run(["npm", "--version"])
                 runtimes["npm"] = {"version": npm_ver}
         else:
-            result["issues"].append({
-                "issue": "Node.js not found — needed for JS/TS repos",
-                "fix": "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash && nvm install 22",
-                "severity": "high",
-            })
+            result["issues"].append(
+                {
+                    "issue": "Node.js not found — needed for JS/TS repos",
+                    "fix": "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh"
+                    " | bash && nvm install 22",
+                    "severity": "high",
+                }
+            )
 
     if needs_python:
         py_path = _which("python3") or _which("py") or _which("python")
@@ -296,17 +336,21 @@ def check_runtimes(repos: list[dict[str, Any]], project_root: Path) -> dict[str,
             if rc == 0:
                 runtimes["pip"] = {"version": pip_ver.split()[1] if pip_ver else ""}
             else:
-                result["issues"].append({
-                    "issue": "pip not available — needed for Python dependency management",
-                    "fix": "curl -sSL https://bootstrap.pypa.io/get-pip.py | python3 - --user",
-                    "severity": "medium",
-                })
+                result["issues"].append(
+                    {
+                        "issue": "pip not available — needed for Python dependency management",
+                        "fix": "curl -sSL https://bootstrap.pypa.io/get-pip.py | python3 - --user",
+                        "severity": "medium",
+                    }
+                )
         else:
-            result["issues"].append({
-                "issue": "Python not found — needed for ML/backend repos",
-                "fix": "sudo apt install python3 python3-pip",
-                "severity": "high",
-            })
+            result["issues"].append(
+                {
+                    "issue": "Python not found — needed for ML/backend repos",
+                    "fix": "sudo apt install python3 python3-pip",
+                    "severity": "high",
+                }
+            )
 
     if needs_dotnet:
         dotnet_path = _which("dotnet")
@@ -315,17 +359,21 @@ def check_runtimes(repos: list[dict[str, Any]], project_root: Path) -> dict[str,
             in_path = shutil.which("dotnet") is not None
             runtimes["dotnet"] = {"version": ver, "path": dotnet_path}
             if not in_path:
-                runtimes["dotnet"]["note"] = "Found but not in PATH (source ~/.bashrc or add ~/.dotnet to PATH)"
+                runtimes["dotnet"]["note"] = (
+                    "Found but not in PATH (source ~/.bashrc or add ~/.dotnet to PATH)"
+                )
             # Check SDKs
             rc, sdks, _ = _run([dotnet_path, "--list-sdks"])
             if sdks:
                 runtimes["dotnet"]["sdks"] = sdks.splitlines()
         else:
-            result["issues"].append({
-                "issue": ".NET SDK not found — needed for C# repos",
-                "fix": "See https://dot.net/install or: sudo apt install dotnet-sdk-8.0",
-                "severity": "high",
-            })
+            result["issues"].append(
+                {
+                    "issue": ".NET SDK not found — needed for C# repos",
+                    "fix": "See https://dot.net/install or: sudo apt install dotnet-sdk-8.0",
+                    "severity": "high",
+                }
+            )
 
     if needs_rust:
         cargo_path = _which("cargo")
@@ -333,11 +381,13 @@ def check_runtimes(repos: list[dict[str, Any]], project_root: Path) -> dict[str,
             rc, ver, _ = _run(["rustc", "--version"])
             runtimes["rust"] = {"version": ver}
         else:
-            result["issues"].append({
-                "issue": "Rust not found",
-                "fix": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
-                "severity": "high",
-            })
+            result["issues"].append(
+                {
+                    "issue": "Rust not found",
+                    "fix": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
+                    "severity": "high",
+                }
+            )
 
     if needs_go:
         go_path = _which("go")
@@ -345,11 +395,13 @@ def check_runtimes(repos: list[dict[str, Any]], project_root: Path) -> dict[str,
             rc, ver, _ = _run(["go", "version"])
             runtimes["go"] = {"version": ver}
         else:
-            result["issues"].append({
-                "issue": "Go not found",
-                "fix": "See https://go.dev/dl/ or: sudo apt install golang",
-                "severity": "high",
-            })
+            result["issues"].append(
+                {
+                    "issue": "Go not found",
+                    "fix": "See https://go.dev/dl/ or: sudo apt install golang",
+                    "severity": "high",
+                }
+            )
 
     if needs_java:
         java_path = _which("java")
@@ -357,11 +409,13 @@ def check_runtimes(repos: list[dict[str, Any]], project_root: Path) -> dict[str,
             rc, ver, _ = _run(["java", "--version"])
             runtimes["java"] = {"version": ver.splitlines()[0] if ver else ""}
         else:
-            result["issues"].append({
-                "issue": "Java not found",
-                "fix": "sudo apt install openjdk-17-jdk",
-                "severity": "high",
-            })
+            result["issues"].append(
+                {
+                    "issue": "Java not found",
+                    "fix": "sudo apt install openjdk-17-jdk",
+                    "severity": "high",
+                }
+            )
 
     result["details"] = runtimes
     if result["issues"]:
@@ -388,24 +442,31 @@ def check_claude_cli() -> dict[str, Any]:
                 candidate = node_ver / "bin" / "claude"
                 if candidate.exists():
                     result["details"]["path"] = str(candidate)
-                    result["details"]["note"] = "Found in nvm but not in PATH — source ~/.nvm/nvm.sh first"
+                    result["details"]["note"] = (
+                        "Found in nvm but not in PATH — source ~/.nvm/nvm.sh first"
+                    )
                     found = True
                     break
 
         if not found:
             result["status"] = "fail"
-            result["issues"] = [{
-                "issue": "Claude CLI not installed",
-                "fix": "npm install -g @anthropic-ai/claude-code",
-                "severity": "critical",
-            }]
+            result["issues"] = [
+                {
+                    "issue": "Claude CLI not installed",
+                    "fix": "npm install -g @anthropic-ai/claude-code",
+                    "severity": "critical",
+                }
+            ]
         else:
             result["status"] = "warn"
-            result["issues"] = [{
-                "issue": "Claude CLI found in nvm but not in current PATH",
-                "fix": "Add to .bashrc: export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\"",
-                "severity": "medium",
-            }]
+            result["issues"] = [
+                {
+                    "issue": "Claude CLI found in nvm but not in current PATH",
+                    "fix": 'Add to .bashrc: export NVM_DIR="$HOME/.nvm" '
+                    '&& [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"',
+                    "severity": "medium",
+                }
+            ]
 
     return result
 
@@ -467,11 +528,13 @@ def check_ssh_keys(repos: list[dict[str, Any]], project_root: Path) -> dict[str,
 
         if not keys and not result["details"].get("gh_authenticated"):
             result["status"] = "warn"
-            result["issues"] = [{
-                "issue": f"{ssh_repos} repos use SSH remotes but no SSH keys found",
-                "fix": 'ssh-keygen -t ed25519 -C "your@email.com"',
-                "severity": "medium",
-            }]
+            result["issues"] = [
+                {
+                    "issue": f"{ssh_repos} repos use SSH remotes but no SSH keys found",
+                    "fix": 'ssh-keygen -t ed25519 -C "your@email.com"',
+                    "severity": "medium",
+                }
+            ]
 
     return result
 
@@ -486,11 +549,13 @@ def check_mcp_deps() -> dict[str, Any]:
             __import__(module)
             result["details"][module] = "installed"
         except ImportError:
-            issues.append({
-                "issue": f"Python module '{module}' not installed — MCP server needs it",
-                "fix": f"pip3 install --user {pkg}",
-                "severity": "high",
-            })
+            issues.append(
+                {
+                    "issue": f"Python module '{module}' not installed — MCP server needs it",
+                    "fix": f"pip3 install --user {pkg}",
+                    "severity": "high",
+                }
+            )
 
     if issues:
         result["status"] = "fail"
@@ -521,11 +586,14 @@ def check_tmux() -> dict[str, Any]:
         result["details"]["path"] = tmux_path
     else:
         result["status"] = "warn"
-        result["issues"] = [{
-            "issue": "tmux not installed — highly recommended for remote SSH work",
-            "fix": "apt install tmux  /  brew install tmux  /  see references/connection-resilience.md",
-            "severity": "low",
-        }]
+        result["issues"] = [
+            {
+                "issue": "tmux not installed — highly recommended for remote SSH work",
+                "fix": "apt install tmux  /  brew install tmux  /  "
+                "see references/connection-resilience.md",
+                "severity": "low",
+            }
+        ]
     return result
 
 
@@ -559,30 +627,37 @@ def check_openspec(config: dict[str, Any], project_root: Path) -> dict[str, Any]
                 result["details"]["version"] = ver
                 result["details"]["via_npx"] = True
                 result["status"] = "warn"
-                result["issues"] = [{
-                    "issue": "OpenSpec available via npx but not as global command",
-                    "fix": "npm install -g @fission-ai/openspec@latest",
-                    "severity": "low",
-                }]
+                result["issues"] = [
+                    {
+                        "issue": "OpenSpec available via npx but not as global command",
+                        "fix": "npm install -g @fission-ai/openspec@latest",
+                        "severity": "low",
+                    }
+                ]
                 return result
 
         result["status"] = "fail"
-        result["issues"] = [{
-            "issue": "OpenSpec CLI not installed — specs.format is 'openspec' but the CLI is missing",
-            "fix": "npm install -g @fission-ai/openspec@latest",
-            "severity": "high",
-        }]
+        result["issues"] = [
+            {
+                "issue": "OpenSpec CLI not installed — "
+                "specs.format is 'openspec' but the CLI is missing",
+                "fix": "npm install -g @fission-ai/openspec@latest",
+                "severity": "high",
+            }
+        ]
 
     # Check specs repo exists
     if specs_path:
         specs_dir = (project_root / specs_path).resolve()
         result["details"]["specs_dir_exists"] = specs_dir.is_dir()
         if not specs_dir.is_dir():
-            result.setdefault("issues", []).append({
-                "issue": f"Specs directory not found: {specs_path}",
-                "fix": f"Clone the specs repo or update specs.path in platform.yaml",
-                "severity": "high",
-            })
+            result.setdefault("issues", []).append(
+                {
+                    "issue": f"Specs directory not found: {specs_path}",
+                    "fix": "Clone the specs repo or update specs.path in platform.yaml",
+                    "severity": "high",
+                }
+            )
             result["status"] = "fail"
 
     return result
@@ -596,29 +671,35 @@ def check_maestro_plugin(project_root: Path) -> dict[str, Any]:
     # Check .agents/ exists
     agents_dir = project_root / ".agents"
     if not agents_dir.is_dir():
-        issues.append({
-            "issue": ".agents/ directory not found — run otaman init first",
-            "fix": "otaman init",
-            "severity": "critical",
-        })
+        issues.append(
+            {
+                "issue": ".agents/ directory not found — run otaman init first",
+                "fix": "otaman init",
+                "severity": "critical",
+            }
+        )
 
     # Check ownership.json
     ownership = agents_dir / "ownership.json"
     if agents_dir.is_dir() and not ownership.exists():
-        issues.append({
-            "issue": "ownership.json missing — run otaman init",
-            "fix": "otaman init",
-            "severity": "critical",
-        })
+        issues.append(
+            {
+                "issue": "ownership.json missing — run otaman init",
+                "fix": "otaman init",
+                "severity": "critical",
+            }
+        )
 
     # Check platform.yaml
     config = project_root / "platform.yaml"
     if not config.exists():
-        issues.append({
-            "issue": "platform.yaml not found",
-            "fix": "otaman scan",
-            "severity": "critical",
-        })
+        issues.append(
+            {
+                "issue": "platform.yaml not found",
+                "fix": "otaman scan",
+                "severity": "critical",
+            }
+        )
 
     # Check .mcp.json in repos
     if config.exists() and yaml:
@@ -635,11 +716,15 @@ def check_maestro_plugin(project_root: Path) -> dict[str, Any]:
             # but it must be run from the otaman folder, not from inside a
             # managed repo, so include the absolute path.
             names = ", ".join(repos_without_mcp)
-            issues.append({
-                "issue": f"{len(repos_without_mcp)} repo(s) missing .mcp.json (MCP tools won't work): {names}",
-                "fix": f"cd {project_root} && otaman init   # re-run from otaman folder to install .mcp.json",
-                "severity": "high",
-            })
+            issues.append(
+                {
+                    "issue": f"{len(repos_without_mcp)} repo(s) missing .mcp.json "
+                    f"(MCP tools won't work): {names}",
+                    "fix": f"cd {project_root} && otaman init   "
+                    "# re-run from otaman folder to install .mcp.json",
+                    "severity": "high",
+                }
+            )
             result["details"]["repos_without_mcp"] = repos_without_mcp
 
     if issues:
@@ -679,47 +764,58 @@ def check_secrets_leaks(project_root: Path) -> dict[str, Any]:
     if is_git:
         # 1. Tracked in HEAD?
         rc, out, _ = _run(
-            ["git", "-C", str(project_root), "ls-files", "--error-unmatch",
-             ".otaman/secrets.env"],
+            ["git", "-C", str(project_root), "ls-files", "--error-unmatch", ".otaman/secrets.env"],
             timeout=10,
         )
         tracked = rc == 0
         result["details"]["tracked_in_head"] = tracked
         if tracked:
-            issues.append({
-                "issue": ".otaman/secrets.env is tracked in git — secrets may leak on push",
-                "fix": (
-                    "Rotate any tokens stored here, then:\n"
-                    "  git -C <otaman-folder> rm --cached .otaman/secrets.env\n"
-                    "  git -C <otaman-folder> commit -m 'untrack secrets.env'\n"
-                    "  (see: https://github.com/newren/git-filter-repo to purge from history)"
-                ),
-                "severity": "critical",
-            })
+            issues.append(
+                {
+                    "issue": ".otaman/secrets.env is tracked in git — secrets may leak on push",
+                    "fix": (
+                        "Rotate any tokens stored here, then:\n"
+                        "  git -C <otaman-folder> rm --cached .otaman/secrets.env\n"
+                        "  git -C <otaman-folder> commit -m 'untrack secrets.env'\n"
+                        "  (see: https://github.com/newren/git-filter-repo to purge from history)"
+                    ),
+                    "severity": "critical",
+                }
+            )
 
         # 2. Appears anywhere in history?
         rc, out, _ = _run(
-            ["git", "-C", str(project_root), "log", "--all", "--pretty=format:%H",
-             "--", ".otaman/secrets.env"],
+            [
+                "git",
+                "-C",
+                str(project_root),
+                "log",
+                "--all",
+                "--pretty=format:%H",
+                "--",
+                ".otaman/secrets.env",
+            ],
             timeout=15,
         )
         in_history = bool(out.strip())
         result["details"]["in_git_history"] = in_history
         if in_history and not tracked:
             # Only flag separately if it's not also currently tracked
-            commit_count = len([l for l in out.splitlines() if l.strip()])
-            issues.append({
-                "issue": (
-                    f".otaman/secrets.env appears in {commit_count} past commit(s) — "
-                    f"secrets may still be exposed in history"
-                ),
-                "fix": (
-                    "Rotate any tokens that may have been committed, then purge:\n"
-                    "  git filter-repo --path .otaman/secrets.env --invert-paths\n"
-                    "  (or: git filter-branch ... --force-push afterwards)"
-                ),
-                "severity": "critical",
-            })
+            commit_count = len([line for line in out.splitlines() if line.strip()])
+            issues.append(
+                {
+                    "issue": (
+                        f".otaman/secrets.env appears in {commit_count} past commit(s) — "
+                        f"secrets may still be exposed in history"
+                    ),
+                    "fix": (
+                        "Rotate any tokens that may have been committed, then purge:\n"
+                        "  git filter-repo --path .otaman/secrets.env --invert-paths\n"
+                        "  (or: git filter-branch ... --force-push afterwards)"
+                    ),
+                    "severity": "critical",
+                }
+            )
     else:
         result["details"]["tracked_in_head"] = False
         result["details"]["in_git_history"] = False
@@ -745,15 +841,18 @@ def check_secrets_leaks(project_root: Path) -> dict[str, Any]:
         # entry, not the current repo's. Showing the absolute path
         # eliminates the foot-gun.
         gi_display = str(gitignore)
-        issues.append({
-            "issue": f".gitignore missing entries: {', '.join(missing_gi)} (file: {gi_display})",
-            "fix": (
-                f"Run `otaman init` from the otaman folder ({project_root}) to regenerate, "
-                f"or add manually:\n"
-                f"  echo '.otaman/secrets.env' >> {gi_display}"
-            ),
-            "severity": "high",
-        })
+        issues.append(
+            {
+                "issue": f".gitignore missing entries: {', '.join(missing_gi)} "
+                f"(file: {gi_display})",
+                "fix": (
+                    f"Run `otaman init` from the otaman folder ({project_root}) to regenerate, "
+                    f"or add manually:\n"
+                    f"  echo '.otaman/secrets.env' >> {gi_display}"
+                ),
+                "severity": "high",
+            }
+        )
 
     # 4. Mode check (POSIX only).
     if secrets_path.is_file() and os.name == "posix":
@@ -761,11 +860,13 @@ def check_secrets_leaks(project_root: Path) -> dict[str, Any]:
             mode = secrets_path.stat().st_mode & 0o777
             result["details"]["mode"] = f"{mode:o}"
             if mode not in (0o600, 0o400):
-                issues.append({
-                    "issue": f".otaman/secrets.env mode is {mode:o} (should be 600 or 400)",
-                    "fix": f"chmod 600 {secrets_path}",
-                    "severity": "medium",
-                })
+                issues.append(
+                    {
+                        "issue": f".otaman/secrets.env mode is {mode:o} (should be 600 or 400)",
+                        "fix": f"chmod 600 {secrets_path}",
+                        "severity": "medium",
+                    }
+                )
         except OSError:
             pass
 
@@ -811,12 +912,14 @@ def check_git_host(project_root: Path) -> dict[str, Any]:
             summary.append({"repo": name, "remote": None})
         else:
             providers_seen.add(info.provider)
-            summary.append({
-                "repo": name,
-                "provider": info.provider,
-                "host": info.host,
-                "slug": info.slug,
-            })
+            summary.append(
+                {
+                    "repo": name,
+                    "provider": info.provider,
+                    "host": info.host,
+                    "slug": info.slug,
+                }
+            )
     result["details"]["remotes"] = summary
 
     cfg = gh.load_git_host_config(project_root)
@@ -831,19 +934,20 @@ def check_git_host(project_root: Path) -> dict[str, Any]:
     issues: list[dict[str, Any]] = []
 
     # Config/provider mismatch — usually a stale copy-paste.
-    if providers_seen and cfg.provider not in providers_seen \
-            and "unknown" not in providers_seen:
-        issues.append({
-            "issue": (
-                f"platform.yaml git_host.provider={cfg.provider!r} but "
-                f"origin remotes point at {sorted(providers_seen)}"
-            ),
-            "fix": (
-                "Either update `git_host.provider` in platform.yaml to match "
-                "your remotes, or re-point origin if it's wrong."
-            ),
-            "severity": "medium",
-        })
+    if providers_seen and cfg.provider not in providers_seen and "unknown" not in providers_seen:
+        issues.append(
+            {
+                "issue": (
+                    f"platform.yaml git_host.provider={cfg.provider!r} but "
+                    f"origin remotes point at {sorted(providers_seen)}"
+                ),
+                "fix": (
+                    "Either update `git_host.provider` in platform.yaml to match "
+                    "your remotes, or re-point origin if it's wrong."
+                ),
+                "severity": "medium",
+            }
+        )
 
     # Token resolution + validation.
     try:
@@ -862,23 +966,27 @@ def check_git_host(project_root: Path) -> dict[str, Any]:
         # from "token rejected" (likely expired / wrong scope).
         err = validation.error or ""
         if "not found" in err:
-            issues.append({
-                "issue": "git_host token not resolvable from configured sources",
-                "fix": (
-                    "Set the env var named in platform.yaml's git_host.token "
-                    "sources, or add it to .otaman/secrets.env."
-                ),
-                "severity": "high",
-            })
+            issues.append(
+                {
+                    "issue": "git_host token not resolvable from configured sources",
+                    "fix": (
+                        "Set the env var named in platform.yaml's git_host.token "
+                        "sources, or add it to .otaman/secrets.env."
+                    ),
+                    "severity": "high",
+                }
+            )
         else:
-            issues.append({
-                "issue": f"git_host token rejected by provider: {err}",
-                "fix": (
-                    "Token may have expired or been revoked. Regenerate a "
-                    "PAT and re-add to .otaman/secrets.env."
-                ),
-                "severity": "high",
-            })
+            issues.append(
+                {
+                    "issue": f"git_host token rejected by provider: {err}",
+                    "fix": (
+                        "Token may have expired or been revoked. Regenerate a "
+                        "PAT and re-add to .otaman/secrets.env."
+                    ),
+                    "severity": "high",
+                }
+            )
 
     if issues:
         result["status"] = "warn"  # token issues don't break core workflow
@@ -909,7 +1017,9 @@ def check_plugin_doctor(project_root: Path) -> dict[str, Any]:
         repo_tag = f"{w.repo}: " if w.repo else ""
         issue: dict[str, Any] = {
             "issue": f"{repo_tag}{w.message} ({w.code})",
-            "severity": {"info": "low", "warn": "medium", "error": "high"}.get(w.severity, "medium"),
+            "severity": {"info": "low", "warn": "medium", "error": "high"}.get(
+                w.severity, "medium"
+            ),
         }
         if w.hint:
             issue["fix"] = w.hint
@@ -929,10 +1039,11 @@ def check_launch_commands_resume(repos: list[dict[str, Any]]) -> dict[str, Any]:
     the in-progress one. (M-13b in finish-maestro-to-otaman-migration: legacy string sweep)
     """
     import re as _re
+
     result: dict[str, Any] = {"check": "launch_commands_resume", "status": "ok", "details": {}}
     issues = []
-    _claude_pat = _re.compile(r'\bclaude\b')
-    _resume_pat = _re.compile(r'(?:^|\s)(?:-c\b|--continue\b|--resume\b)')
+    _claude_pat = _re.compile(r"\bclaude\b")
+    _resume_pat = _re.compile(r"(?:^|\s)(?:-c\b|--continue\b|--resume\b)")
 
     for repo in repos:
         name = repo.get("name", "?")
@@ -943,17 +1054,20 @@ def check_launch_commands_resume(repos: list[dict[str, Any]]) -> dict[str, Any]:
             cmds = [cmds]
         for cmd in cmds:
             if _claude_pat.search(cmd) and not _resume_pat.search(cmd):
-                issues.append({
-                    "issue": (
-                        f"repo `{name}`: launch_commands lacks -c — "
-                        "SSH reconnect will start a fresh session"
-                    ),
-                    "fix": (
-                        f"Add -c to the claude invocation in platform.yaml for repo '{name}', "
-                        "e.g.: claude -c --plugin-dir ... (see M-3 in finish-maestro-to-otaman-migration: legacy)"
-                    ),
-                    "severity": "low",
-                })
+                issues.append(
+                    {
+                        "issue": (
+                            f"repo `{name}`: launch_commands lacks -c — "
+                            "SSH reconnect will start a fresh session"
+                        ),
+                        "fix": (
+                            f"Add -c to the claude invocation in platform.yaml for repo '{name}', "
+                            "e.g.: claude -c --plugin-dir ... "
+                            "(see M-3 in finish-maestro-to-otaman-migration: legacy)"
+                        ),
+                        "severity": "low",
+                    }
+                )
                 break
 
     if issues:
@@ -981,11 +1095,14 @@ def check_human_roster(config: dict[str, Any]) -> dict[str, Any]:
     roster_present = isinstance(roster, list) and len(roster) > 0
 
     if pm_configured and not roster_present:
-        issues.append({
-            "severity": "high",
-            "message": "pm-sync configured but human-roster is empty",
-            "fix": "Add a `human-roster:` block to platform.yaml, then run `otaman pm init --roster`",
-        })
+        issues.append(
+            {
+                "severity": "high",
+                "message": "pm-sync configured but human-roster is empty",
+                "fix": "Add a `human-roster:` block to platform.yaml, "
+                "then run `otaman pm init --roster`",
+            }
+        )
         details["status"] = "fail"
     elif not pm_configured:
         # Nothing to check — pm-sync absent → roster optional
@@ -1010,44 +1127,55 @@ def check_human_roster(config: dict[str, Any]) -> dict[str, Any]:
 
             if entry.get("pm-user-id") is None:
                 entries_with_missing_id += 1
-                issues.append({
-                    "severity": "medium",
-                    "message": f"{name}: pm-user-id not set",
-                    "fix": "Run `otaman pm init --roster` to resolve from the PM tool",
-                })
+                issues.append(
+                    {
+                        "severity": "medium",
+                        "message": f"{name}: pm-user-id not set",
+                        "fix": "Run `otaman pm init --roster` to resolve from the PM tool",
+                    }
+                )
 
             if not entry.get("email"):
                 entries_with_missing_email += 1
-                issues.append({
-                    "severity": "medium",
-                    "message": f"{name}: email field empty (required for pm-user-id resolution)",
-                    "fix": f"Add `email: <addr>` to the {name} entry in platform.yaml",
-                })
+                issues.append(
+                    {
+                        "severity": "medium",
+                        "message": f"{name}: email field empty "
+                        "(required for pm-user-id resolution)",
+                        "fix": f"Add `email: <addr>` to the {name} entry in platform.yaml",
+                    }
+                )
 
             roles = entry.get("roles") or []
             if isinstance(roles, list):
                 bad = [r for r in roles if r not in valid_roles]
                 if bad:
                     entries_with_unknown_role += 1
-                    issues.append({
-                        "severity": "medium",
-                        "message": f"{name}: unknown role(s) {bad}",
-                        "fix": f"Valid roles: {', '.join(sorted(valid_roles))}",
-                    })
+                    issues.append(
+                        {
+                            "severity": "medium",
+                            "message": f"{name}: unknown role(s) {bad}",
+                            "fix": f"Valid roles: {', '.join(sorted(valid_roles))}",
+                        }
+                    )
             if not roles:
-                issues.append({
-                    "severity": "high",
-                    "message": f"{name}: roles list is empty (at least one role required)",
-                    "fix": f"Add at least one of: {', '.join(sorted(valid_roles))}",
-                })
+                issues.append(
+                    {
+                        "severity": "high",
+                        "message": f"{name}: roles list is empty (at least one role required)",
+                        "fix": f"Add at least one of: {', '.join(sorted(valid_roles))}",
+                    }
+                )
 
-    details.update({
-        "pm_sync_configured": pm_configured,
-        "roster_entries": len(roster) if isinstance(roster, list) else 0,
-        "missing_pm_user_id": entries_with_missing_id,
-        "missing_email": entries_with_missing_email,
-        "unknown_role": entries_with_unknown_role,
-    })
+    details.update(
+        {
+            "pm_sync_configured": pm_configured,
+            "roster_entries": len(roster) if isinstance(roster, list) else 0,
+            "missing_pm_user_id": entries_with_missing_id,
+            "missing_email": entries_with_missing_email,
+            "unknown_role": entries_with_unknown_role,
+        }
+    )
 
     # Status derivation
     if any(i.get("severity") == "high" for i in issues):
@@ -1120,6 +1248,7 @@ def main() -> int:
         project_root = Path(sys.argv[1]).resolve()
     else:
         from otaman_core._resolve import find_maestro_root
+
         project_root = find_maestro_root()
         if not project_root:
             print(json.dumps({"error": "No otaman project found"}))

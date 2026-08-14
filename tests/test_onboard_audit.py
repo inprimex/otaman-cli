@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-import pytest
-
-from otaman_cli.onboard.audit import OnboardAudit, CE_SOURCE, CE_SPECVERSION
+from otaman_cli.onboard.audit import CE_SOURCE, CE_SPECVERSION, OnboardAudit
 
 
 class TestEmit:
@@ -33,7 +30,9 @@ class TestEmit:
 class TestConvenienceHelpers:
     def test_user_added(self, tmp_path):
         audit = OnboardAudit(tmp_path)
-        audit.user_added(actor="ceo@example.com", subject="alice@example.com", roles=["otaman:developer"])
+        audit.user_added(
+            actor="ceo@example.com", subject="alice@example.com", roles=["otaman:developer"]
+        )
         path = next(tmp_path.glob("*.jsonl"))
         envelope = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
         assert envelope["type"] == "otaman.onboard.user_added"

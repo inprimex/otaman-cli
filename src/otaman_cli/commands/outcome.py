@@ -15,8 +15,10 @@ def cmd_outcome(args: list[str]) -> int:
     """`otaman outcome <action> [...]` — dispatches to cli_outcome.dispatch."""
     if not args:
         UI.error("Usage: otaman outcome <action> [options]")
-        UI.muted("Actions: add | list | show | history | promote | demote | "
-                 "retire | request-estimate | accept-cost | reject-cost")
+        UI.muted(
+            "Actions: add | list | show | history | promote | demote | "
+            "retire | request-estimate | accept-cost | reject-cost"
+        )
         return 1
 
     action, *rest_args = args
@@ -50,6 +52,7 @@ def cmd_outcome(args: list[str]) -> int:
         UI.warn(f"Unrecognised arguments ignored: {rest}")
 
     from otaman_cli.registries import cli_outcome
+
     return cli_outcome.dispatch(action, parsed)
 
 

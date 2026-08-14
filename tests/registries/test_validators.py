@@ -19,11 +19,10 @@ from otaman_cli.registries.outcomes import (
     Outcome,
     OutcomeRegistry,
     OutcomeStatus,
-    Priority,
-    promote_target,
     demote_target,
+    promote_target,
 )
-from otaman_cli.registries.personas import Persona, PersonaKind, PersonaRegistry
+from otaman_cli.registries.personas import Persona, PersonaRegistry
 from otaman_cli.registries.platform_ext import (
     DEFAULT_IMPACT_WEIGHTS,
     ProgramExtensions,
@@ -32,12 +31,9 @@ from otaman_cli.registries.platform_ext import (
 )
 from otaman_cli.registries.solutions import (
     Dependency,
-    DependencyKind,
     Solution,
     SolutionRegistry,
-    SolutionStatus,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -94,18 +90,26 @@ def _make_solution(**overrides):
 
 def test_persona_id_must_match_pattern():
     with pytest.raises(ValidationError):
-        Persona.model_validate({
-            "id": "BadID",
-            "name": "X", "description": "Y", "kind": "end-user",
-        })
+        Persona.model_validate(
+            {
+                "id": "BadID",
+                "name": "X",
+                "description": "Y",
+                "kind": "end-user",
+            }
+        )
 
 
 def test_persona_kind_enum_rejects_unknown():
     with pytest.raises(ValidationError):
-        Persona.model_validate({
-            "id": "persona-foo", "name": "X", "description": "Y",
-            "kind": "robot",
-        })
+        Persona.model_validate(
+            {
+                "id": "persona-foo",
+                "name": "X",
+                "description": "Y",
+                "kind": "robot",
+            }
+        )
 
 
 def test_persona_registry_rejects_duplicate_ids():
@@ -116,8 +120,9 @@ def test_persona_registry_rejects_duplicate_ids():
 
 def test_persona_required_fields():
     with pytest.raises(ValidationError):
-        Persona.model_validate({"id": "persona-x", "name": "", "description": "Y",
-                                "kind": "end-user"})
+        Persona.model_validate(
+            {"id": "persona-x", "name": "", "description": "Y", "kind": "end-user"}
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -131,8 +136,7 @@ def test_outcome_id_must_match_pattern():
 
 def test_outcome_statement_requires_four_fields():
     bad = _make_outcome()
-    bad["statement"] = {"as-a": "", "i-want-to": "x",
-                        "incremental-outcome": "x", "so-i-can": "x"}
+    bad["statement"] = {"as-a": "", "i-want-to": "x", "incremental-outcome": "x", "so-i-can": "x"}
     with pytest.raises(ValidationError):
         Outcome.model_validate(bad)
 
@@ -163,10 +167,14 @@ def test_outcome_transitions_must_be_legal_promote():
     """A promote from Drafting must target Backlog, not Approved."""
     bad = _make_outcome(status="Backlog")
     bad["transitions"] = [
-        {"at": "2026-04-01T09:00:00Z", "by": "cpo-agent", "action": "create",
-         "to": "Drafting"},
-        {"at": "2026-04-01T10:00:00Z", "by": "cpo-agent", "action": "promote",
-         "from": "Drafting", "to": "Approved"},   # illegal — skips Backlog
+        {"at": "2026-04-01T09:00:00Z", "by": "cpo-agent", "action": "create", "to": "Drafting"},
+        {
+            "at": "2026-04-01T10:00:00Z",
+            "by": "cpo-agent",
+            "action": "promote",
+            "from": "Drafting",
+            "to": "Approved",
+        },  # illegal — skips Backlog
     ]
     with pytest.raises(ValidationError, match="illegal promote"):
         Outcome.model_validate(bad)
@@ -255,10 +263,11 @@ def test_triage_rejects_non_positive_weight():
 
 def test_program_extensions_rejects_duplicate_release_ids():
     with pytest.raises(ValidationError, match="duplicate release id"):
-        ProgramExtensions.model_validate({
-            "releases": [{"id": "X", "description": ""},
-                         {"id": "X", "description": ""}],
-        })
+        ProgramExtensions.model_validate(
+            {
+                "releases": [{"id": "X", "description": ""}, {"id": "X", "description": ""}],
+            }
+        )
 
 
 def test_t_shirt_scale_must_be_positive():
@@ -271,9 +280,14 @@ def test_t_shirt_scale_must_be_positive():
 
 
 def test_cross_validator_flags_missing_persona():
-    outcomes = OutcomeRegistry.model_validate({"outcomes": [_make_outcome(persona="persona-missing")]})
+    outcomes = OutcomeRegistry.model_validate(
+        {"outcomes": [_make_outcome(persona="persona-missing")]}
+    )
     issues = validate_cross_refs(
-        outcomes, SolutionRegistry(), PersonaRegistry(), ProgramExtensions(),
+        outcomes,
+        SolutionRegistry(),
+        PersonaRegistry(),
+        ProgramExtensions(),
     )
     kinds = [i.kind for i in issues]
     assert "missing-persona" in kinds
@@ -283,7 +297,10 @@ def test_cross_validator_flags_missing_chosen_solution():
     o = _make_outcome(**{"chosen-solution": "SOL-99-ghost", "cost-accepted": True})
     outcomes = OutcomeRegistry.model_validate({"outcomes": [o]})
     issues = validate_cross_refs(
-        outcomes, SolutionRegistry(), PersonaRegistry(), ProgramExtensions(),
+        outcomes,
+        SolutionRegistry(),
+        PersonaRegistry(),
+        ProgramExtensions(),
     )
     assert any(i.kind == "missing-chosen-solution" for i in issues)
 
@@ -292,7 +309,10 @@ def test_cross_validator_flags_missing_outcome_for_solution():
     s = _make_solution(**{"outcome-id": "JTBD-99-ghost"})
     solutions = SolutionRegistry.model_validate({"solutions": [s]})
     issues = validate_cross_refs(
-        OutcomeRegistry(), solutions, PersonaRegistry(), ProgramExtensions(),
+        OutcomeRegistry(),
+        solutions,
+        PersonaRegistry(),
+        ProgramExtensions(),
     )
     assert any(i.kind == "missing-outcome" for i in issues)
 

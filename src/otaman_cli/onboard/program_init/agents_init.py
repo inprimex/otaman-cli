@@ -16,6 +16,7 @@ Structure created:
         ownership.json
         agents.yaml
 """
+
 from __future__ import annotations
 
 import json
@@ -72,9 +73,7 @@ def init_agents_structure(specs_path: Path, program_name: str) -> list[str]:
     if not ownership_path.exists():
         payload = dict(_OWNERSHIP_TEMPLATE)
         payload["program"] = program_name
-        ownership_path.write_text(
-            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
-        )
+        ownership_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         created.append(str(ownership_path.relative_to(specs_path)))
 
     # agents.yaml

@@ -19,7 +19,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-
 # Type → default response-effort (Q4 §49-65 of design.md)
 TYPE_DEFAULT_EFFORT: dict[str, str] = {
     "question": "S",
@@ -78,7 +77,9 @@ def make_sort_key(msg: dict[str, Any]):
 
 
 def deadline_is_imminent(
-    deadline_iso: str | None, *, now: datetime | None = None,
+    deadline_iso: str | None,
+    *,
+    now: datetime | None = None,
 ) -> bool:
     """Return True when *deadline_iso* is within ``DEADLINE_WINDOW`` of *now*.
 
@@ -98,7 +99,10 @@ def deadline_is_imminent(
 
 
 def has_outbound_reply(
-    active_dir: Path, *, in_reply_to_id: str, from_agent: str,
+    active_dir: Path,
+    *,
+    in_reply_to_id: str,
+    from_agent: str,
 ) -> bool:
     """Check whether *from_agent* has sent a reply with ``reply-to: <id>``.
 

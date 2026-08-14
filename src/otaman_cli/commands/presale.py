@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.main import C, UI, run_script
+from otaman_cli.main import UI, C, run_script
 
 
 def _find_presale_dir(start: Path) -> Path | None:
@@ -44,10 +44,13 @@ def cmd_presale(args: list[str]) -> int:
             UI.info(f"Found existing pre-sale project at: {C.BOLD}{presale_dir}{C.RESET}")
             try:
                 import yaml
+
                 meta = yaml.safe_load(meta_path.read_text(encoding="utf-8"))
-                UI.kv("Project", f"{meta.get('project_name', '?')} ({meta.get('project_code', '?')})")
-                UI.kv("Domain", meta.get('domain', '?'))
-                UI.kv("Phase", meta.get('current_phase', '?'))
+                UI.kv(
+                    "Project", f"{meta.get('project_name', '?')} ({meta.get('project_code', '?')})"
+                )
+                UI.kv("Domain", meta.get("domain", "?"))
+                UI.kv("Phase", meta.get("current_phase", "?"))
             except Exception:
                 pass
             UI.muted("To continue this estimation, use /otaman:presale in Claude Code.")
@@ -60,20 +63,30 @@ def cmd_presale(args: list[str]) -> int:
         client = args[2] if len(args) > 2 else ""
     else:
         print("Setting up a new pre-sale estimation project.\n")
-        project_name = input(f"  Project name: ").strip()
+        project_name = input("  Project name: ").strip()
         if not project_name:
             UI.error("Project name required")
             return 1
-        domain = input(f"  Domain (healthcare/fintech/marketplace/ml-ai/saas/ecommerce/iot/general): ").strip()
+        domain = input(
+            "  Domain (healthcare/fintech/marketplace/ml-ai/saas/ecommerce/iot/general): "
+        ).strip()
         if not domain:
             domain = "general"
-        client = input(f"  Client name (optional): ").strip()
+        client = input("  Client name (optional): ").strip()
 
     # Generate project code
     from datetime import date
-    domain_prefix = {"healthcare": "HLT", "fintech": "FIN", "marketplace": "MKT",
-                     "ml-ai": "ML", "saas": "SAS", "ecommerce": "ECM",
-                     "iot": "IOT", "general": "GEN"}.get(domain, "GEN")
+
+    domain_prefix = {
+        "healthcare": "HLT",
+        "fintech": "FIN",
+        "marketplace": "MKT",
+        "ml-ai": "ML",
+        "saas": "SAS",
+        "ecommerce": "ECM",
+        "iot": "IOT",
+        "general": "GEN",
+    }.get(domain, "GEN")
     date_suffix = date.today().strftime("%y%m%d")
     project_code = f"{domain_prefix}-EST-{date_suffix}"
 
@@ -113,6 +126,7 @@ def cmd_retrospective(args: list[str]) -> int:
         if meta_path.exists():
             try:
                 import yaml
+
                 meta = yaml.safe_load(meta_path.read_text(encoding="utf-8"))
                 project_code = project_code or meta.get("project_code", "UNKNOWN")
             except Exception:
@@ -121,12 +135,15 @@ def cmd_retrospective(args: list[str]) -> int:
     if not project_code:
         UI.error("No project code found.")
         UI.muted("Usage: otaman retrospective [project-code]")
-        UI.muted("Or run from a directory with .otaman-presale/project-meta.yaml (or legacy: .maestro-presale/)")
+        UI.muted(
+            "Or run from a directory with .otaman-presale/project-meta.yaml "
+            "(or legacy: .maestro-presale/)"
+        )
         return 1
 
     UI.kv("Project", project_code, C.BOLD)
     if meta:
-        UI.kv("Domain", meta.get('domain', '?'))
+        UI.kv("Domain", meta.get("domain", "?"))
         est = meta.get("estimation", {})
         if est.get("total_range_hours"):
             rng = est["total_range_hours"]
@@ -141,5 +158,13 @@ def cmd_retrospective(args: list[str]) -> int:
     return 0
 
 
-register(CommandSpec(name="presale", handler=cmd_presale, help="Initialize pre-sale estimation project"))
-register(CommandSpec(name="retrospective", handler=cmd_retrospective, help="Post-project retrospective (updates benchmarks)"))
+register(
+    CommandSpec(name="presale", handler=cmd_presale, help="Initialize pre-sale estimation project")
+)
+register(
+    CommandSpec(
+        name="retrospective",
+        handler=cmd_retrospective,
+        help="Post-project retrospective (updates benchmarks)",
+    )
+)

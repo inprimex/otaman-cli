@@ -32,7 +32,6 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
-
 DEFAULT_SCOPE = "openid profile urn:zitadel:iam:org:projects:roles"
 
 # F032 (security GAP finding, 2026-07-04, plan confirmed by Roman 2026-07-07):
@@ -84,11 +83,12 @@ def _validate_issuer_scheme(issuer: str) -> None:
 class DeviceFlowConfig:
     """Where to authenticate and how to identify ourselves."""
 
-    issuer: str                                 # e.g. https://zitadel.example.com (F032: http:// only for loopback/dev, see _validate_issuer_scheme)
-    client_id: str                              # Native OIDC client_id from Zitadel
-    project_id: str = ""                        # if set, added to scope for project-aud
+    # F032: http:// only for loopback/dev, see _validate_issuer_scheme
+    issuer: str  # e.g. https://zitadel.example.com
+    client_id: str  # Native OIDC client_id from Zitadel
+    project_id: str = ""  # if set, added to scope for project-aud
     scopes: list[str] = field(default_factory=list)
-    external_host: str | None = None            # Host header override for ExternalDomain enforcement
+    external_host: str | None = None  # Host header override for ExternalDomain enforcement
     token_path: Path = Path.home() / ".otaman" / "token.cache"
 
 
@@ -96,7 +96,7 @@ class DeviceFlowConfig:
 class CachedToken:
     access_token: str
     refresh_token: str | None
-    expires_at: int                             # epoch seconds; 0 = no expiry given
+    expires_at: int  # epoch seconds; 0 = no expiry given
     issuer: str
     client_id: str
 
@@ -110,7 +110,7 @@ class CachedToken:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> "CachedToken":
+    def from_dict(cls, d: dict) -> CachedToken:
         return cls(
             access_token=d["access_token"],
             refresh_token=d.get("refresh_token"),
@@ -146,9 +146,9 @@ def _post_form(url: str, data: dict, *, extra_headers: dict | None = None) -> di
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            raise LoginError(f"HTTP {e.code} from {url}: {text}")
+            raise LoginError(f"HTTP {e.code} from {url}: {text}") from e
     except urllib.error.URLError as e:
-        raise LoginError(f"network error contacting {url}: {e}")
+        raise LoginError(f"network error contacting {url}: {e}") from e
 
 
 def build_scope(cfg: DeviceFlowConfig) -> str:
@@ -169,15 +169,18 @@ def initiate_device_flow(cfg: DeviceFlowConfig) -> dict:
         extra_headers=extras,
     )
     if "error" in resp:
-        raise LoginError(f"device_authorization failed: {resp.get('error_description', resp['error'])}")
+        raise LoginError(
+            f"device_authorization failed: {resp.get('error_description', resp['error'])}"
+        )
     for key in ("device_code", "user_code", "verification_uri_complete"):
         if key not in resp:
             raise LoginError(f"device_authorization response missing {key!r}: {resp}")
     return resp
 
 
-def poll_for_token(cfg: DeviceFlowConfig, *, device_code: str, interval: float, expires_in: int,
-                   on_pending=None) -> dict:
+def poll_for_token(
+    cfg: DeviceFlowConfig, *, device_code: str, interval: float, expires_in: int, on_pending=None
+) -> dict:
     """Poll /oauth/v2/token until success, denial, or expiry.
 
     Returns the token-endpoint JSON response on success.
@@ -245,7 +248,11 @@ def config_from_env() -> DeviceFlowConfig:
             "(values come from zitadel-bootstrap.py output)"
         )
     _validate_issuer_scheme(issuer)
-    path = Path(os.environ.get("OTAMAN_TOKEN_CACHE", "")) if os.environ.get("OTAMAN_TOKEN_CACHE") else Path.home() / ".otaman" / "token.cache"
+    path = (
+        Path(os.environ.get("OTAMAN_TOKEN_CACHE", ""))
+        if os.environ.get("OTAMAN_TOKEN_CACHE")
+        else Path.home() / ".otaman" / "token.cache"
+    )
     return DeviceFlowConfig(
         issuer=issuer,
         client_id=client_id,
@@ -278,7 +285,7 @@ def cmd_login(args: argparse.Namespace) -> int:
 
     print()
     print("=" * 60)
-    print(f"  Open this URL in your browser:")
+    print("  Open this URL in your browser:")
     print(f"    {device['verification_uri_complete']}")
     print()
     print(f"  Or visit {device.get('verification_uri', '<see above>')}")
@@ -293,14 +300,18 @@ def cmd_login(args: argparse.Namespace) -> int:
     spin_state = [0]
 
     def on_pending():
-        sys.stderr.write(f"\rwaiting for browser confirmation {spinner[spin_state[0] % len(spinner)]}")
+        sys.stderr.write(
+            f"\rwaiting for browser confirmation {spinner[spin_state[0] % len(spinner)]}"
+        )
         sys.stderr.flush()
         spin_state[0] += 1
 
     try:
         token_resp = poll_for_token(
-            cfg, device_code=device["device_code"],
-            interval=interval, expires_in=expires_in,
+            cfg,
+            device_code=device["device_code"],
+            interval=interval,
+            expires_in=expires_in,
             on_pending=on_pending,
         )
     except LoginError as e:
@@ -310,7 +321,11 @@ def cmd_login(args: argparse.Namespace) -> int:
 
     sys.stderr.write("\r" + " " * 50 + "\r")  # clear spinner line
 
-    expires_at = int(time.time() + int(token_resp.get("expires_in", 0))) if token_resp.get("expires_in") else 0
+    expires_at = (
+        int(time.time() + int(token_resp.get("expires_in", 0)))
+        if token_resp.get("expires_in")
+        else 0
+    )
     cached = CachedToken(
         access_token=token_resp["access_token"],
         refresh_token=token_resp.get("refresh_token"),
@@ -332,7 +347,8 @@ def cmd_whoami_token(args: argparse.Namespace) -> int:
         return 2
     expires_at_human = (
         time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(cached.expires_at))
-        if cached.expires_at else "(no expiry)"
+        if cached.expires_at
+        else "(no expiry)"
     )
     print(f"token cache: {path}")
     print(f"  issuer:     {cached.issuer}")

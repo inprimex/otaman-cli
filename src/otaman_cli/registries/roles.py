@@ -8,12 +8,11 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from otaman_cli.identity import _read_otaman_agent_field
 from otaman_cli.registries.platform_ext import ProgramExtensions
-
 
 # Operation → required role(s) table (Appendix E.4).
 OPERATION_ROLES: dict[str, tuple[str, ...]] = {
@@ -49,15 +48,17 @@ OPERATION_ROLES: dict[str, tuple[str, ...]] = {
 
 # Fields that may not be edited via a generic ``update-field`` command;
 # only their named transition command may change them (Appendix E.5).
-TRANSITION_ONLY_FIELDS: frozenset[str] = frozenset({
-    "status",
-    "chosen-solution",
-    "cost-accepted",
-    "estimate-requested",
-    "created",
-    "id",
-    "transitions",
-})
+TRANSITION_ONLY_FIELDS: frozenset[str] = frozenset(
+    {
+        "status",
+        "chosen-solution",
+        "cost-accepted",
+        "estimate-requested",
+        "created",
+        "id",
+        "transitions",
+    }
+)
 
 
 def resolve_operating_actor(cwd: Path | None = None) -> str:

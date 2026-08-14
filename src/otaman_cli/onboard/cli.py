@@ -22,6 +22,7 @@ def _cmd_program_init(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
     from otaman_cli.onboard.program_init import run_program_init
+
     return run_program_init(args)
 
 
@@ -33,14 +34,17 @@ def build_onboard_parser(parser: argparse.ArgumentParser) -> None:
     p_add = sub.add_parser("add-user", help="add a user")
     p_add.add_argument("email", help="user's email address")
     p_add.add_argument(
-        "--role", required=True,
+        "--role",
+        required=True,
         help="role(s), comma-separated; bare names get otaman: prefix "
-             "(e.g. 'developer,approver' → ['otaman:developer','otaman:approver'])",
+        "(e.g. 'developer,approver' → ['otaman:developer','otaman:approver'])",
     )
     p_add.add_argument("--display-name", help="display name; defaults to email-local-part")
     p_add.add_argument("--unix-user", help="Unix username; defaults to email-local-part")
     p_add.add_argument("--telegram-id", type=int, help="Telegram numeric user id (optional)")
-    p_add.add_argument("--state-dir", help="override state dir; default $OTAMAN_STATE_DIR or /var/otaman")
+    p_add.add_argument(
+        "--state-dir", help="override state dir; default $OTAMAN_STATE_DIR or /var/otaman"
+    )
     p_add.add_argument("--apply", action="store_true", help="actually do it (default is dry-run)")
     p_add.set_defaults(func=cmd_add_user)
 
@@ -72,7 +76,8 @@ def build_onboard_parser(parser: argparse.ArgumentParser) -> None:
         ),
     )
     p_prog.add_argument(
-        "--program", "-p",
+        "--program",
+        "-p",
         metavar="SLUG",
         help="program slug (kebab-case); asked interactively if omitted",
     )

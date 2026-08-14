@@ -22,7 +22,6 @@ from pathlib import Path
 
 from otaman_cli.registries.loader import resolve_registry_path, yaml_load
 
-
 # Matches @solution:SOL-N-slug — solution id must follow the Appendix B.3 regex.
 _SOLUTION_ANNOTATION_RE = re.compile(r"@solution:(SOL-\d+-[a-z0-9-]+)")
 
@@ -35,8 +34,8 @@ class SolutionAnnotation:
     """One @solution:<id> annotation found in tasks.md."""
 
     solution_id: str
-    line_number: int     # 1-based
-    task_text: str       # the full task line (without the - [ ] prefix)
+    line_number: int  # 1-based
+    task_text: str  # the full task line (without the - [ ] prefix)
 
 
 @dataclass(frozen=True)
@@ -44,8 +43,8 @@ class AnnotationFindings:
     """Result of scanning a tasks.md file for @solution: annotations."""
 
     annotations: list[SolutionAnnotation]
-    valid_ids: list[str]           # ids that exist in solutions.yaml
-    missing_ids: list[str]         # ids referenced but not in solutions.yaml
+    valid_ids: list[str]  # ids that exist in solutions.yaml
+    missing_ids: list[str]  # ids referenced but not in solutions.yaml
     solutions_yaml_path: Path | None
 
     @property
@@ -69,13 +68,15 @@ def parse_solution_annotations(tasks_md_text: str) -> list[SolutionAnnotation]:
         task_match = _TASK_LINE_RE.match(line)
         if not task_match:
             continue
-        task_text = line[task_match.end():].rstrip()
+        task_text = line[task_match.end() :].rstrip()
         for m in _SOLUTION_ANNOTATION_RE.finditer(line):
-            out.append(SolutionAnnotation(
-                solution_id=m.group(1),
-                line_number=line_idx,
-                task_text=task_text,
-            ))
+            out.append(
+                SolutionAnnotation(
+                    solution_id=m.group(1),
+                    line_number=line_idx,
+                    task_text=task_text,
+                )
+            )
     return out
 
 
@@ -101,7 +102,10 @@ def scan_tasks_md(tasks_md_path: Path, project_root: Path | None) -> AnnotationF
     """
     if not tasks_md_path.is_file():
         return AnnotationFindings(
-            annotations=[], valid_ids=[], missing_ids=[], solutions_yaml_path=None,
+            annotations=[],
+            valid_ids=[],
+            missing_ids=[],
+            solutions_yaml_path=None,
         )
 
     text = tasks_md_path.read_text(encoding="utf-8")

@@ -28,7 +28,6 @@ from otaman_cli.registries.solutions import (
     load_solutions,
 )
 
-
 DEFAULT_IMPACT_WEIGHTS: dict[str, float] = {"XS": 1, "S": 2, "M": 3, "L": 5, "XL": 8}
 DEFAULT_T_SHIRT_SCALE: dict[str, float] = {
     "Tiny": 1,
@@ -56,9 +55,7 @@ class TriageConfig(BaseModel):
         valid_keys = {i.value for i in Impact}
         for k, w in v.items():
             if k not in valid_keys:
-                raise ValueError(
-                    f"impact-weights key {k!r} must be one of {sorted(valid_keys)}"
-                )
+                raise ValueError(f"impact-weights key {k!r} must be one of {sorted(valid_keys)}")
             if w <= 0:
                 raise ValueError(f"impact-weights[{k!r}] must be > 0; got {w}")
         return v
@@ -182,8 +179,8 @@ class CrossRefIssue(BaseModel):
     """A single broken cross-reference, surfaced by `validate_cross_refs`."""
 
     kind: str  # "missing-persona" | "missing-release" | "missing-outcome" |
-               # "missing-solution" | "outcome-id-mismatch" |
-               # "missing-tshirt-key" | "missing-chosen-solution" | ...
+    # "missing-solution" | "outcome-id-mismatch" |
+    # "missing-tshirt-key" | "missing-chosen-solution" | ...
     file: str  # "outcomes.yaml" | "solutions.yaml"
     entity_id: str
     detail: str
@@ -210,84 +207,102 @@ def validate_cross_refs(
     # -- outcomes.yaml cross-refs --
     for o in outcomes.outcomes:
         if o.persona is not None and o.persona not in persona_ids:
-            issues.append(CrossRefIssue(
-                kind="missing-persona",
-                file="outcomes.yaml",
-                entity_id=o.id,
-                detail=f"persona '{o.persona}' not found in personas.yaml",
-            ))
+            issues.append(
+                CrossRefIssue(
+                    kind="missing-persona",
+                    file="outcomes.yaml",
+                    entity_id=o.id,
+                    detail=f"persona '{o.persona}' not found in personas.yaml",
+                )
+            )
         if o.chosen_solution is not None and o.chosen_solution not in solution_ids:
-            issues.append(CrossRefIssue(
-                kind="missing-chosen-solution",
-                file="outcomes.yaml",
-                entity_id=o.id,
-                detail=f"chosen-solution '{o.chosen_solution}' not found in solutions.yaml",
-            ))
+            issues.append(
+                CrossRefIssue(
+                    kind="missing-chosen-solution",
+                    file="outcomes.yaml",
+                    entity_id=o.id,
+                    detail=f"chosen-solution '{o.chosen_solution}' not found in solutions.yaml",
+                )
+            )
         if o.release is not None and release_ids and o.release not in release_ids:
-            issues.append(CrossRefIssue(
-                kind="missing-release",
-                file="outcomes.yaml",
-                entity_id=o.id,
-                detail=f"release '{o.release}' not declared in platform.yaml program.releases",
-            ))
+            issues.append(
+                CrossRefIssue(
+                    kind="missing-release",
+                    file="outcomes.yaml",
+                    entity_id=o.id,
+                    detail=f"release '{o.release}' not declared in platform.yaml program.releases",
+                )
+            )
 
     # Rule A.6.7: chosen-solution must point to a solution whose outcome-id == this.id
     for o in outcomes.outcomes:
         if o.chosen_solution and o.chosen_solution in solution_ids:
             sol = solutions.get(o.chosen_solution)
             if sol is not None and sol.outcome_id != o.id:
-                issues.append(CrossRefIssue(
-                    kind="outcome-id-mismatch",
-                    file="solutions.yaml",
-                    entity_id=sol.id,
-                    detail=(
-                        f"solution outcome-id={sol.outcome_id!r} doesn't match outcome "
-                        f"{o.id} that selected it as chosen-solution"
-                    ),
-                ))
+                issues.append(
+                    CrossRefIssue(
+                        kind="outcome-id-mismatch",
+                        file="solutions.yaml",
+                        entity_id=sol.id,
+                        detail=(
+                            f"solution outcome-id={sol.outcome_id!r} doesn't match outcome "
+                            f"{o.id} that selected it as chosen-solution"
+                        ),
+                    )
+                )
 
     # -- solutions.yaml cross-refs --
     for s in solutions.solutions:
         if s.outcome_id not in outcome_ids:
-            issues.append(CrossRefIssue(
-                kind="missing-outcome",
-                file="solutions.yaml",
-                entity_id=s.id,
-                detail=f"outcome-id '{s.outcome_id}' not found in outcomes.yaml",
-            ))
-        if s.release is not None and release_ids and s.release not in release_ids:
-            issues.append(CrossRefIssue(
-                kind="missing-release",
-                file="solutions.yaml",
-                entity_id=s.id,
-                detail=f"release '{s.release}' not declared in platform.yaml program.releases",
-            ))
-        if s.t_shirt is not None and t_shirt_keys and s.t_shirt not in t_shirt_keys:
-            issues.append(CrossRefIssue(
-                kind="missing-tshirt-key",
-                file="solutions.yaml",
-                entity_id=s.id,
-                detail=(
-                    f"t-shirt '{s.t_shirt}' not in platform.yaml program.t-shirt-scale "
-                    f"({sorted(t_shirt_keys)})"
-                ),
-            ))
-        # Dependency ref resolution
-        for d in s.dependencies:
-            if d.kind == DependencyKind.OUTCOME and d.ref and d.ref not in outcome_ids:
-                issues.append(CrossRefIssue(
+            issues.append(
+                CrossRefIssue(
                     kind="missing-outcome",
                     file="solutions.yaml",
                     entity_id=s.id,
-                    detail=f"dependency ref '{d.ref}' (kind=outcome) not in outcomes.yaml",
-                ))
-            elif d.kind == DependencyKind.SOLUTION and d.ref and d.ref not in solution_ids:
-                issues.append(CrossRefIssue(
-                    kind="missing-solution",
+                    detail=f"outcome-id '{s.outcome_id}' not found in outcomes.yaml",
+                )
+            )
+        if s.release is not None and release_ids and s.release not in release_ids:
+            issues.append(
+                CrossRefIssue(
+                    kind="missing-release",
                     file="solutions.yaml",
                     entity_id=s.id,
-                    detail=f"dependency ref '{d.ref}' (kind=solution) not in solutions.yaml",
-                ))
+                    detail=f"release '{s.release}' not declared in platform.yaml program.releases",
+                )
+            )
+        if s.t_shirt is not None and t_shirt_keys and s.t_shirt not in t_shirt_keys:
+            issues.append(
+                CrossRefIssue(
+                    kind="missing-tshirt-key",
+                    file="solutions.yaml",
+                    entity_id=s.id,
+                    detail=(
+                        f"t-shirt '{s.t_shirt}' not in platform.yaml program.t-shirt-scale "
+                        f"({sorted(t_shirt_keys)})"
+                    ),
+                )
+            )
+        # Dependency ref resolution
+        for d in s.dependencies:
+            if d.kind == DependencyKind.OUTCOME and d.ref and d.ref not in outcome_ids:
+                issues.append(
+                    CrossRefIssue(
+                        kind="missing-outcome",
+                        file="solutions.yaml",
+                        entity_id=s.id,
+                        detail=f"dependency ref '{d.ref}' (kind=outcome) not in outcomes.yaml",
+                    )
+                )
+            elif d.kind == DependencyKind.SOLUTION and d.ref and d.ref not in solution_ids:
+                issues.append(
+                    CrossRefIssue(
+                        kind="missing-solution",
+                        file="solutions.yaml",
+                        entity_id=s.id,
+                        detail=f"dependency ref '{d.ref}' (kind=solution) not in solutions.yaml",
+                    )
+                )
 
     # B.7 rule 9: Solution.Complete requires the parent outcome's chosen-solution == this.id
     for s in solutions.solutions:
@@ -296,15 +311,18 @@ def validate_cross_refs(
             if parent is None:
                 continue  # already flagged above as missing-outcome
             if parent.chosen_solution != s.id:
-                issues.append(CrossRefIssue(
-                    kind="complete-without-chosen-solution",
-                    file="solutions.yaml",
-                    entity_id=s.id,
-                    detail=(
-                        f"solution status=Complete but parent outcome {parent.id}.chosen-solution"
-                        f"={parent.chosen_solution!r} (expected {s.id!r})"
-                    ),
-                ))
+                issues.append(
+                    CrossRefIssue(
+                        kind="complete-without-chosen-solution",
+                        file="solutions.yaml",
+                        entity_id=s.id,
+                        detail=(
+                            f"solution status=Complete but parent outcome "
+                            f"{parent.id}.chosen-solution"
+                            f"={parent.chosen_solution!r} (expected {s.id!r})"
+                        ),
+                    )
+                )
 
     return issues
 

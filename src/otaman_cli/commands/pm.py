@@ -17,10 +17,12 @@ def cmd_pm(args: list[str]) -> int:
     """`otaman pm <action> [...]` — PM tool sync (Easy8 / Redmine)."""
     from otaman_cli.pm.cmd_init import cmd_pm_init
     from otaman_cli.pm.cmd_status import cmd_pm_status
+
     sub = args[0] if args else ""
     rest = args[1:] if args else []
     if sub == "configure":
         from otaman_cli.pm.cmd_configure import cmd_pm_configure
+
         return cmd_pm_configure(rest)
     elif sub == "init":
         return cmd_pm_init(rest)
@@ -31,4 +33,10 @@ def cmd_pm(args: list[str]) -> int:
         return 1
 
 
-register(CommandSpec(name="pm", handler=cmd_pm, help="PM tool sync: configure <provider> | init <provider> | status"))
+register(
+    CommandSpec(
+        name="pm",
+        handler=cmd_pm,
+        help="PM tool sync: configure <provider> | init <provider> | status",
+    )
+)

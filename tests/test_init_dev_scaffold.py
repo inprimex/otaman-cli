@@ -3,12 +3,10 @@
 Covers tasks.md 3.1 (schema validation), 3.2 (wizard defaults + --yes),
 3.3 (end-to-end integration), and 3.4 (load_settings merge).
 """
+
 from __future__ import annotations
 
-import io
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -78,7 +76,9 @@ class TestWizardDefaults:
         assert spec.enabled is True
 
     def test_default_settings_drops_spec_dupe(self):
-        s = default_settings(project_name="proj", extra_agent_names=["spec-agent", "spec-agent", "backend-agent"])
+        s = default_settings(
+            project_name="proj", extra_agent_names=["spec-agent", "spec-agent", "backend-agent"]
+        )
         assert [a.name for a in s.agents].count("spec-agent") == 1
 
     def test_default_settings_local_connection_no_ssh(self):
@@ -91,7 +91,9 @@ class TestWizardDefaults:
             raise AssertionError("--yes path must not call input()")
 
         monkeypatch.setattr("builtins.input", _no_input)
-        s = run_wizard(project_name="proj", platform_agent_names=["spec-agent", "backend-agent"], yes=True)
+        s = run_wizard(
+            project_name="proj", platform_agent_names=["spec-agent", "backend-agent"], yes=True
+        )
         assert s.agents[0].name == "spec-agent"
         assert s.connection.mode == "local"
 
@@ -141,9 +143,7 @@ class TestEndToEnd:
         s = LaunchSettings(
             tmux=TmuxLayoutConfig(session_prefix="proj"),
             agents=[AgentEntry(name="spec-agent", enabled=True)],
-            connection=Connection(
-                mode="ssh", ssh=SSHParams(host="dev.local", user="roman")
-            ),
+            connection=Connection(mode="ssh", ssh=SSHParams(host="dev.local", user="roman")),
         )
         r = generate(s, tmp_path / "launcher")
         assert "ssh " in r.launch_sh.read_text()
@@ -156,7 +156,7 @@ class TestEndToEnd:
         platform_yaml = tmp_path / "platform.yaml"
         platform_yaml.write_text(
             "project: tmp-proj\n"
-            "version: \"1.0\"\n"
+            'version: "1.0"\n'
             "mode: 1\n"
             "edition: ce\n"
             "roles: [main]\n"
@@ -238,7 +238,10 @@ class TestAmendmentMetaAgent:
         assert meta_entries[0].enabled is True
 
     def test_yes_flag_with_meta_agent(self, monkeypatch):
-        monkeypatch.setattr("builtins.input", lambda *_: (_ for _ in ()).throw(AssertionError("no prompts in --yes")))
+        monkeypatch.setattr(
+            "builtins.input",
+            lambda *_: (_ for _ in ()).throw(AssertionError("no prompts in --yes")),
+        )
         s = run_wizard(
             project_name="proj",
             platform_agent_names=["spec-agent", "cpo-agent"],
@@ -255,7 +258,7 @@ class TestAmendmentMetaAgent:
         platform_yaml = tmp_path / "platform.yaml"
         platform_yaml.write_text(
             "project: meta-test\n"
-            "version: \"1.0\"\n"
+            'version: "1.0"\n'
             "mode: 1\n"
             "edition: ce\n"
             "roles: [main]\n"
@@ -270,6 +273,7 @@ class TestAmendmentMetaAgent:
             encoding="utf-8",
         )
         from otaman_cli.commands.init import _scaffold_launcher_after_init
+
         _scaffold_launcher_after_init(platform_yaml, yes=True)
 
         live = yaml.safe_load((tmp_path / "launcher" / "launch-settings.yaml").read_text())
@@ -282,7 +286,7 @@ class TestAmendmentMetaAgent:
         platform_yaml = tmp_path / "platform.yaml"
         platform_yaml.write_text(
             "project: no-meta\n"
-            "version: \"1.0\"\n"
+            'version: "1.0"\n'
             "mode: 1\n"
             "edition: ce\n"
             "roles: [main]\n"
@@ -295,6 +299,7 @@ class TestAmendmentMetaAgent:
             encoding="utf-8",
         )
         from otaman_cli.commands.init import _scaffold_launcher_after_init
+
         _scaffold_launcher_after_init(platform_yaml, yes=True)
 
         live = yaml.safe_load((tmp_path / "launcher" / "launch-settings.yaml").read_text())
@@ -318,11 +323,7 @@ class TestLoadSettingsMerge:
 
         # Local override: switch to ssh mode
         (out / "launch-settings.local.yaml").write_text(
-            "connection:\n"
-            "  mode: ssh\n"
-            "  ssh:\n"
-            "    host: override.example.com\n"
-            "    user: dev\n",
+            "connection:\n  mode: ssh\n  ssh:\n    host: override.example.com\n    user: dev\n",
             encoding="utf-8",
         )
         loaded = load_settings(out)

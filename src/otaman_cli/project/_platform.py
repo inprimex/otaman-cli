@@ -13,7 +13,6 @@ from typing import Any
 
 from ruamel.yaml import YAML
 
-
 # Module-shared ruamel instance — round-trip preserves comments + ordering
 _YAML = YAML()
 _YAML.preserve_quotes = True
@@ -103,19 +102,29 @@ def git_commit_platform_yaml(root: Path, message: str) -> tuple[int, str]:
     """
     add = subprocess.run(
         ["git", "add", "platform.yaml"],
-        cwd=str(root), capture_output=True, text=True,
+        cwd=str(root),
+        capture_output=True,
+        text=True,
     )
     if add.returncode != 0:
         return add.returncode, (add.stderr or add.stdout)
     commit = subprocess.run(
         [
             "git",
-            "-c", "user.email=otaman@localhost",
-            "-c", "user.name=otaman",
-            "-c", "commit.gpgsign=false",
-            "commit", "--quiet", "-m", message,
+            "-c",
+            "user.email=otaman@localhost",
+            "-c",
+            "user.name=otaman",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            message,
         ],
-        cwd=str(root), capture_output=True, text=True,
+        cwd=str(root),
+        capture_output=True,
+        text=True,
     )
     return commit.returncode, (commit.stderr or commit.stdout)
 

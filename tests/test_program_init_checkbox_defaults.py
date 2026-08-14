@@ -30,6 +30,7 @@ def mock_questionary(monkeypatch):
     fake.checkbox.return_value.ask.return_value = []
     # Use a real Choice constructor so the code under test can build them
     import questionary as real_q
+
     fake.Choice = real_q.Choice
 
     monkeypatch.setattr(qmod, "questionary", fake)

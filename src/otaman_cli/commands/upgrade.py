@@ -88,7 +88,8 @@ def cmd_upgrade(args: list[str]) -> int:
             yes = True
         elif a == "--launcher":
             if i + 1 >= len(args):
-                UI.error("--launcher requires a path"); return 1
+                UI.error("--launcher requires a path")
+                return 1
             only_launcher = args[i + 1]
             i += 1
         else:
@@ -97,16 +98,25 @@ def cmd_upgrade(args: list[str]) -> int:
         i += 1
 
     try:
-        from otaman_cli import _launchers_registry as reg  # type: ignore
         import yaml  # type: ignore
+
+        from otaman_cli import _launchers_registry as reg  # type: ignore
     except ImportError as e:
         UI.error(f"Missing dependency: {e}")
         return 1
 
     entries = reg.list_entries()
     if only_launcher:
-        normalised = str(Path(only_launcher).expanduser().resolve()) if Path(only_launcher).exists() else only_launcher
-        entries = [e for e in entries if str(Path(e["path"]).resolve()) == normalised or e["path"] == only_launcher]
+        normalised = (
+            str(Path(only_launcher).expanduser().resolve())
+            if Path(only_launcher).exists()
+            else only_launcher
+        )
+        entries = [
+            e
+            for e in entries
+            if str(Path(e["path"]).resolve()) == normalised or e["path"] == only_launcher
+        ]
         if not entries:
             UI.error(f"Launcher not in registry: {only_launcher}")
             UI.muted("Run `otaman launcher add <path>` to register it first.")
@@ -292,10 +302,7 @@ def _upgrade_one(
             if not plugin_path:
                 UI.warn("    Cannot run otaman init -- no ssh_plugin_path configured")
                 return 3
-            remote = (
-                f"cd {shlex.quote(maestro_root)} && "
-                f"bash -l -c 'otaman init'"
-            )
+            remote = f"cd {shlex.quote(maestro_root)} && bash -l -c 'otaman init'"
             full = ssh_cmd + [remote]
             UI.muted(f"    Run: {' '.join(full)}")
             if not dry_run:
@@ -342,8 +349,10 @@ def _upgrade_one(
     return 2
 
 
-register(CommandSpec(
-    name="upgrade",
-    handler=cmd_upgrade,
-    help="Walk launcher registry: git pull + otaman init each",
-))
+register(
+    CommandSpec(
+        name="upgrade",
+        handler=cmd_upgrade,
+        help="Walk launcher registry: git pull + otaman init each",
+    )
+)

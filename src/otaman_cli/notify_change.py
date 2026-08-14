@@ -19,14 +19,12 @@ treat the message identically regardless of trigger source.
 
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
 
 _ANN_RE = re.compile(r"@otaman-[a-z0-9.-]+", re.IGNORECASE)
 
@@ -113,6 +111,7 @@ def _lookup_owners(annotations: list[str], platform_yaml: Path) -> list[str]:
         return []
     try:
         import yaml
+
         doc = yaml.safe_load(platform_yaml.read_text(encoding="utf-8")) or {}
     except Exception:
         return []
@@ -134,7 +133,7 @@ def _lookup_owners(annotations: list[str], platform_yaml: Path) -> list[str]:
     for ann in annotations:
         owner = by_name.get(ann)
         if owner is None and ann.startswith("otaman-"):
-            owner = by_name.get(ann[len("otaman-"):])
+            owner = by_name.get(ann[len("otaman-") :])
         if owner and owner not in seen:
             seen.add(owner)
             out.append(owner)
@@ -205,15 +204,20 @@ def _build_message(
 
 def _git_metadata(specs_root: Path) -> tuple[str, str, str]:
     """Capture HEAD commit hash / message / author for the message body."""
+
     def _git(*args: str) -> str:
         try:
             r = subprocess.run(
                 ["git", "-C", str(specs_root), *args],
-                capture_output=True, text=True, timeout=10, check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
             )
             return r.stdout.strip() if r.returncode == 0 else ""
         except (OSError, subprocess.TimeoutExpired):
             return ""
+
     return (
         _git("rev-parse", "--short", "HEAD") or "(no-commit)",
         _git("log", "-1", "--format=%s") or "(unknown commit message)",
@@ -326,7 +330,9 @@ def notify_change(project_root: Path, change_name: str) -> tuple[int, dict[str, 
             try:
                 subprocess.run(
                     [py, str(map_tasks), str(tasks_md)],
-                    capture_output=True, timeout=30, check=False,
+                    capture_output=True,
+                    timeout=30,
+                    check=False,
                 )
                 summary["map_tasks_called"] = True
             except (OSError, subprocess.TimeoutExpired):

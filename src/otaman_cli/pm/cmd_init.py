@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from otaman_core.pm_sync import load_pm_sync_config, PmSyncConfig, PmAdapterCapabilities
+    from otaman_core.pm_sync import PmAdapterCapabilities, PmSyncConfig, load_pm_sync_config
 except ImportError:
     load_pm_sync_config = None  # type: ignore[assignment]
     PmSyncConfig = None  # type: ignore[assignment]
@@ -18,8 +18,9 @@ from otaman_cli.identity import find_project_root
 
 
 def cmd_pm_init(args: list[str]) -> int:
-    """otaman pm init <provider> [--url URL] [--dry-run] [--seed-backlog] [--no-webhooks] [--admin-key KEY]"""
-    from otaman_cli.main import UI, C
+    """otaman pm init <provider> [--url URL] [--dry-run] [--seed-backlog]
+    [--no-webhooks] [--admin-key KEY]"""
+    from otaman_cli.main import UI
 
     # -----------------------------------------------------------------------
     # Parse args
@@ -61,7 +62,10 @@ def cmd_pm_init(args: list[str]) -> int:
             i += 1
 
     if not provider:
-        UI.error("Usage: otaman pm init <provider> [--url URL] [--dry-run] [--seed-backlog] [--no-webhooks] [--admin-key KEY] [--roster]")
+        UI.error(
+            "Usage: otaman pm init <provider> [--url URL] [--dry-run] "
+            "[--seed-backlog] [--no-webhooks] [--admin-key KEY] [--roster]"
+        )
         UI.muted("Supported providers: easy8")
         return 1
 
@@ -98,9 +102,13 @@ def cmd_pm_init(args: list[str]) -> int:
 
     if url_override and config is not None:
         from dataclasses import replace as dc_replace
+
         config = dc_replace(config, base_url=url_override)
 
-    UI.ok(f"Config loaded -- provider: {provider}, base-url: {getattr(config, 'base_url', '(not set)')}")
+    UI.ok(
+        f"Config loaded -- provider: {provider}, "
+        f"base-url: {getattr(config, 'base_url', '(not set)')}"
+    )
 
     # -----------------------------------------------------------------------
     # Step 2: Validate identity-mode against adapter capabilities
@@ -109,6 +117,7 @@ def cmd_pm_init(args: list[str]) -> int:
     try:
         if provider == "easy8":
             from otaman_adapters.easy8 import EASY8_CAPABILITIES  # type: ignore[import]
+
             identity_mode = getattr(config, "identity_mode", None)
             if identity_mode == "user" and not EASY8_CAPABILITIES.agent_identity_user:
                 UI.error(f"Adapter '{provider}' does not support identity-mode 'user'.")
@@ -118,7 +127,9 @@ def cmd_pm_init(args: list[str]) -> int:
                 return 1
             UI.ok(f"Identity-mode validated: {identity_mode or '(default)'}")
         else:
-            UI.muted(f"Identity-mode validation not available for provider '{provider}' -- skipping")
+            UI.muted(
+                f"Identity-mode validation not available for provider '{provider}' -- skipping"
+            )
     except ImportError:
         UI.muted("otaman-adapters not installed -- skipping identity-mode validation")
     except Exception as exc:
@@ -142,11 +153,7 @@ def cmd_pm_init(args: list[str]) -> int:
             UI.muted("[dry-run] Skipping adapter instantiation (no HTTP calls in dry-run mode)")
         else:
             env_key = f"OTAMAN_PM_{provider.upper()}_API_KEY"
-            api_key = (
-                admin_key
-                or os.environ.get(env_key)
-                or os.environ.get("OTAMAN_PM_ADMIN_KEY")
-            )
+            api_key = admin_key or os.environ.get(env_key) or os.environ.get("OTAMAN_PM_ADMIN_KEY")
             if not api_key:
                 UI.error(
                     f"No API key found. Set {env_key} or OTAMAN_PM_ADMIN_KEY, "
@@ -157,19 +164,24 @@ def cmd_pm_init(args: list[str]) -> int:
             try:
                 _status_map = getattr(config, "status_map", {}) or {}
                 _tracker = getattr(config, "tracker", "Task") or "Task"
-                adapter = Easy8Adapter(base_url=base_url, api_key=api_key, status_map=_status_map, tracker=_tracker)
+                adapter = Easy8Adapter(
+                    base_url=base_url, api_key=api_key, status_map=_status_map, tracker=_tracker
+                )
             except Exception as exc:
                 UI.error(f"Failed to instantiate Easy8Adapter: {exc}")
                 return 1
             UI.ok(f"Adapter ready: Easy8Adapter (base_url={base_url})")
     else:
-        UI.warn(f"Unknown provider '{provider}' -- only 'easy8' is supported. Continuing in stub mode.")
+        UI.warn(
+            f"Unknown provider '{provider}' -- only 'easy8' is supported. Continuing in stub mode."
+        )
 
     # -----------------------------------------------------------------------
     # Load platform.yaml raw doc for repos list (used in steps 4-7)
     # -----------------------------------------------------------------------
     try:
         import yaml
+
         text = platform_yaml_path.read_text(encoding="utf-8")
         doc: dict[str, Any] = yaml.safe_load(text) or {}
     except Exception as exc:
@@ -198,7 +210,9 @@ def cmd_pm_init(args: list[str]) -> int:
     identifier = getattr(config, "program_key", None) or "otaman"
 
     if dry_run or adapter is None:
-        UI.muted(f"[dry-run] Would create root project: identifier={identifier!r}, name={project_name!r}")
+        UI.muted(
+            f"[dry-run] Would create root project: identifier={identifier!r}, name={project_name!r}"
+        )
         root_project_id = "dry-run-root"
     else:
         try:
@@ -219,7 +233,10 @@ def cmd_pm_init(args: list[str]) -> int:
         repo_identifier = _to_identifier(repo_name)
         homepage = f"https://github.com/{gh_org}/{repo_name}"
         if dry_run or adapter is None:
-            UI.muted(f"[dry-run] Would create subproject: {repo_identifier!r} (parent={root_project_id}, homepage={homepage})")
+            UI.muted(
+                f"[dry-run] Would create subproject: {repo_identifier!r} "
+                f"(parent={root_project_id}, homepage={homepage})"
+            )
             subprojects.append((repo_name, 0))  # placeholder id for dry-run
         else:
             try:
@@ -240,7 +257,12 @@ def cmd_pm_init(args: list[str]) -> int:
     # -----------------------------------------------------------------------
     UI.action("Step 6: Validate status map")
     status_map = getattr(config, "status_map", {}) or {}
-    default_map = {"declared": "New", "in_progress": "In Progress", "blocked": "Feedback", "done": "Closed"}
+    default_map = {
+        "declared": "New",
+        "in_progress": "In Progress",
+        "blocked": "Feedback",
+        "done": "Closed",
+    }
     effective_map = {**default_map, **status_map}
 
     if dry_run or adapter is None:
@@ -248,6 +270,7 @@ def cmd_pm_init(args: list[str]) -> int:
     else:
         try:
             from otaman_adapters.easy8 import Easy8Adapter  # type: ignore[import]
+
             if isinstance(adapter, Easy8Adapter):
                 adapter._status_map.update(status_map)  # type: ignore[attr-defined]
             existing = {s.name.lower() for s in adapter.list_statuses()}  # type: ignore[attr-defined]
@@ -256,7 +279,10 @@ def cmd_pm_init(args: list[str]) -> int:
                 if pm_name.lower() in existing:
                     UI.ok(f"  {state} → '{pm_name}' ✓")
                 else:
-                    UI.warn(f"  {state} → '{pm_name}' NOT FOUND on instance (create it via Admin > Issue Statuses)")
+                    UI.warn(
+                        f"  {state} → '{pm_name}' NOT FOUND on instance "
+                        "(create it via Admin > Issue Statuses)"
+                    )
                     all_ok = False
             if all_ok:
                 UI.ok("All status mappings verified")
@@ -279,7 +305,9 @@ def cmd_pm_init(args: list[str]) -> int:
                 except Exception as exc:
                     UI.warn(f"  Could not create custom field '{field_name}': {exc}")
             else:
-                UI.muted(f"  Manual step: create custom field '{field_name}' via Admin > Custom Fields")
+                UI.muted(
+                    f"  Manual step: create custom field '{field_name}' via Admin > Custom Fields"
+                )
 
     # -----------------------------------------------------------------------
     # Step 8: Register + activate webhooks
@@ -288,7 +316,9 @@ def cmd_pm_init(args: list[str]) -> int:
         UI.action("Step 8: Register webhooks")
         webhook_url = getattr(config, "webhook_target", None)
         if not webhook_url:
-            UI.muted("No webhook_target configured in pm-sync block -- skipping webhook registration.")
+            UI.muted(
+                "No webhook_target configured in pm-sync block -- skipping webhook registration."
+            )
         elif dry_run or adapter is None:
             UI.muted(f"[dry-run] Would register webhook: {webhook_url}")
         else:
@@ -361,6 +391,7 @@ def cmd_pm_init(args: list[str]) -> int:
         UI.action("Step 10: Configure Easy8 MCP server")
         try:
             from otaman_cli.pm.cmd_configure import _write_mcp_config
+
             _write_mcp_config(root, getattr(config, "base_url", ""), UI)
         except Exception as exc:
             UI.warn(f"Could not write MCP config: {exc}")
@@ -381,7 +412,10 @@ def cmd_pm_init(args: list[str]) -> int:
     if roster_mode:
         UI.action("Step 12: Resolve roster pm-user-id")
         _resolve_roster_pm_user_ids(
-            platform_yaml_path, adapter=adapter, dry_run=dry_run, UI=UI,
+            platform_yaml_path,
+            adapter=adapter,
+            dry_run=dry_run,
+            UI=UI,
         )
 
     # -----------------------------------------------------------------------
@@ -403,6 +437,7 @@ def cmd_pm_init(args: list[str]) -> int:
 # ---------------------------------------------------------------------------
 # human-roster task 5.2 — resolve pm-user-id for each roster entry
 # ---------------------------------------------------------------------------
+
 
 def _resolve_roster_pm_user_ids(
     platform_yaml_path: Path,
@@ -450,7 +485,9 @@ def _resolve_roster_pm_user_ids(
                 continue
             name = entry.get("name", "(unknown)")
             if entry.get("pm-user-id") is not None:
-                UI.muted(f"  [dry-run] {name}: pm-user-id already set ({entry['pm-user-id']}) — skip")
+                UI.muted(
+                    f"  [dry-run] {name}: pm-user-id already set ({entry['pm-user-id']}) — skip"
+                )
                 skipped += 1
                 continue
             UI.muted(f"  [dry-run] Would resolve pm-user-id for {name} ({entry.get('email', '?')})")
@@ -458,7 +495,10 @@ def _resolve_roster_pm_user_ids(
         return
 
     if adapter is None:
-        UI.warn("Adapter unavailable — cannot resolve pm-user-id (run without --dry-run after configuring OTAMAN_PM_EASY8_API_KEY)")
+        UI.warn(
+            "Adapter unavailable — cannot resolve pm-user-id "
+            "(run without --dry-run after configuring OTAMAN_PM_EASY8_API_KEY)"
+        )
         return
 
     # Real resolution path — needs HumanRosterEntry + resolve_pm_user_id
@@ -480,7 +520,10 @@ def _resolve_roster_pm_user_ids(
 
         try:
             roster_entry = HumanRosterEntry(
-                name=name, email=email, roles=list(roles), pm_user_id=None,
+                name=name,
+                email=email,
+                roles=list(roles),
+                pm_user_id=None,
             )
             user_id = resolve_pm_user_id(adapter, roster_entry)
         except Exception as exc:
@@ -500,8 +543,10 @@ def _resolve_roster_pm_user_ids(
     if resolved > 0:
         # Write platform.yaml back — use ruamel.yaml for round-trip preservation
         try:
-            from ruamel.yaml import YAML as _RuamelYAML
             import io as _io
+
+            from ruamel.yaml import YAML as _RuamelYAML
+
             rt = _RuamelYAML()
             rt.preserve_quotes = True
             rt.indent(mapping=2, sequence=4, offset=2)
@@ -523,9 +568,11 @@ def _resolve_roster_pm_user_ids(
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _to_identifier(name: str) -> str:
     """Convert a project name to a Redmine-safe identifier (lowercase, hyphens)."""
     import re
+
     slug = re.sub(r"[^a-z0-9-]", "-", name.lower())
     slug = re.sub(r"-+", "-", slug).strip("-")
     return slug or "project"
@@ -534,15 +581,19 @@ def _to_identifier(name: str) -> str:
 def _detect_gh_org() -> str | None:
     """Try to detect the GitHub organisation from 'git remote get-url origin'."""
     import subprocess
+
     try:
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode == 0:
             url = result.stdout.strip()
             # https://github.com/ORG/REPO.git  or  git@github.com:ORG/REPO.git
             import re
+
             m = re.search(r"github\.com[:/]([^/]+)/", url)
             if m:
                 return m.group(1)

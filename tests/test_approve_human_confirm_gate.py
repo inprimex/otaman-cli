@@ -7,6 +7,7 @@ so any Bash-tool-driven agent session could forge a human decision simply
 by shelling out to `otaman approve approve <stem>`. Now gated on
 `confirm_human_decision` (real TTY + typed phrase, no bypass).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -26,7 +27,9 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def _stage_pending_request(project: Path, stem: str = "20260101T000000-cli-agent-to-human-spec-change-request") -> Path:
+def _stage_pending_request(
+    project: Path, stem: str = "20260101T000000-cli-agent-to-human-spec-change-request"
+) -> Path:
     msg = project / ".agents" / "bus" / "active" / f"{stem}.md"
     msg.write_text(
         "---\n"
@@ -54,7 +57,8 @@ class TestApproveConfirmGate:
         ack_dir = project / ".agents" / "bus" / "active" / "acks"
         assert list(ack_dir.glob("*.ack")) == []
         broadcast_files = [
-            f for f in (project / ".agents" / "bus" / "active").glob("*.md")
+            f
+            for f in (project / ".agents" / "bus" / "active").glob("*.md")
             if "spec-change-approved" in f.name
         ]
         assert broadcast_files == []
@@ -62,8 +66,10 @@ class TestApproveConfirmGate:
     def test_tty_wrong_phrase_refuses_and_writes_nothing(self, project: Path):
         stem = "20260101T000000-cli-agent-to-human-spec-change-request"
         _stage_pending_request(project, stem)
-        with mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=True), \
-             mock.patch("builtins.input", return_value="yes"):
+        with (
+            mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=True),
+            mock.patch("builtins.input", return_value="yes"),
+        ):
             rc = cmd_approve(["approve", stem])
         assert rc != 0
         ack_dir = project / ".agents" / "bus" / "active" / "acks"
@@ -72,15 +78,18 @@ class TestApproveConfirmGate:
     def test_tty_correct_phrase_approves(self, project: Path):
         stem = "20260101T000000-cli-agent-to-human-spec-change-request"
         _stage_pending_request(project, stem)
-        with mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=True), \
-             mock.patch("builtins.input", return_value="CONFIRM"):
+        with (
+            mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=True),
+            mock.patch("builtins.input", return_value="CONFIRM"),
+        ):
             rc = cmd_approve(["approve", stem])
         assert rc == 0
         ack_file = project / ".agents" / "bus" / "active" / "acks" / f"{stem}.human.ack"
         assert ack_file.is_file()
         assert ack_file.read_text(encoding="utf-8").strip() == "approved"
         broadcast_files = [
-            f for f in (project / ".agents" / "bus" / "active").glob("*.md")
+            f
+            for f in (project / ".agents" / "bus" / "active").glob("*.md")
             if "spec-change-approved" in f.name
         ]
         assert len(broadcast_files) == 1
@@ -91,15 +100,18 @@ class TestApproveConfirmGate:
     def test_tty_correct_phrase_rejects(self, project: Path):
         stem = "20260101T000000-cli-agent-to-human-spec-change-request"
         _stage_pending_request(project, stem)
-        with mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=True), \
-             mock.patch("builtins.input", return_value="CONFIRM"):
+        with (
+            mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=True),
+            mock.patch("builtins.input", return_value="CONFIRM"),
+        ):
             rc = cmd_approve(["reject", stem, "-d", "not now"])
         assert rc == 0
         ack_file = project / ".agents" / "bus" / "active" / "acks" / f"{stem}.human.ack"
         assert ack_file.is_file()
         assert ack_file.read_text(encoding="utf-8").strip() == "rejected"
         reject_files = [
-            f for f in (project / ".agents" / "bus" / "active").glob("*.md")
+            f
+            for f in (project / ".agents" / "bus" / "active").glob("*.md")
             if "spec-change-rejected" in f.name
         ]
         assert len(reject_files) == 1
@@ -111,7 +123,9 @@ class TestApproveConfirmGate:
         """Read-only listing must not be gated -- only approve/reject write."""
         stem = "20260101T000000-cli-agent-to-human-spec-change-request"
         _stage_pending_request(project, stem)
-        with mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=False), \
-             mock.patch("builtins.input", side_effect=AssertionError("must not prompt")):
+        with (
+            mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=False),
+            mock.patch("builtins.input", side_effect=AssertionError("must not prompt")),
+        ):
             rc = cmd_approve(["list"])
         assert rc == 0

@@ -11,6 +11,7 @@ Deliberately narrower than the general `otaman whoami` display chain:
 (both self-asserted signals any agent's own tool calls can set) — only
 the per-repo `.otaman` `agent:` marker is.
 """
+
 from __future__ import annotations
 
 import os
@@ -18,10 +19,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 
-
-def _run_cli(root: Path, *args: str, env_overrides: dict | None = None) -> subprocess.CompletedProcess:
+def _run_cli(
+    root: Path, *args: str, env_overrides: dict | None = None
+) -> subprocess.CompletedProcess:
     env = {
         **os.environ,
         "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
@@ -32,7 +33,11 @@ def _run_cli(root: Path, *args: str, env_overrides: dict | None = None) -> subpr
         env.update(env_overrides)
     return subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", *args],
-        cwd=root, env=env, capture_output=True, text=True, timeout=30,
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
 
 
@@ -41,7 +46,8 @@ def _stage_project(tmp_path: Path, *, otaman_marker_agent: str | None = None) ->
     (tmp_path / "platform.yaml").write_text("project: tst\nrepos: []\n", encoding="utf-8")
     if otaman_marker_agent is not None:
         (tmp_path / ".otaman").write_text(
-            f"otaman_root: .\nagent: {otaman_marker_agent}\n", encoding="utf-8",
+            f"otaman_root: .\nagent: {otaman_marker_agent}\n",
+            encoding="utf-8",
         )
     return tmp_path
 
@@ -56,7 +62,9 @@ class TestResolveOnly:
     def test_otaman_agent_env_alone_does_not_resolve(self, tmp_path: Path):
         """The whole point of --resolve-only: OTAMAN_AGENT is not trusted."""
         _stage_project(tmp_path, otaman_marker_agent=None)
-        r = _run_cli(tmp_path, "whoami", "--resolve-only", env_overrides={"OTAMAN_AGENT": "cli-agent"})
+        r = _run_cli(
+            tmp_path, "whoami", "--resolve-only", env_overrides={"OTAMAN_AGENT": "cli-agent"}
+        )
         assert r.returncode == 1
         assert r.stdout.strip() == ""
 

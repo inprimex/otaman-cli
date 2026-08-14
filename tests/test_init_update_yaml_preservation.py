@@ -12,14 +12,13 @@ The fix applies the OTAMAN_AGENT=<owner> injection via in-place text
 substitution instead. These tests verify the on-disk file's structure
 is preserved after `_cmd_init_update()`.
 """
+
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from textwrap import dedent
 
 import pytest
-
 
 HANDCRAFTED_PLATFORM_YAML = dedent("""\
     # Sample Platform Configuration
@@ -144,9 +143,7 @@ class TestInitUpdateStructurePreservation:
 
         text = (project / "platform.yaml").read_text(encoding="utf-8")
         # At least two `  - name:` lines (one per repo)
-        name_marker_count = sum(
-            1 for line in text.splitlines() if line.startswith("  - name:")
-        )
+        name_marker_count = sum(1 for line in text.splitlines() if line.startswith("  - name:"))
         assert name_marker_count == 2, (
             f"expected 2 repo entries beginning with `  - name:`, "
             f"found {name_marker_count} — repo-entry fields were likely reordered"
