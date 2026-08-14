@@ -74,15 +74,21 @@ def cmd_check(args: list[str]) -> int:
     # Parse messages
     messages = []
     total = {"pending": 0, "read": 0, "resolved": 0}
+    # cofounder-agent bug report 20260811T202643: a file check cannot parse
+    # used to be skipped SILENTLY — a trust-critical delivery gap (a pending
+    # message no one knows exists). Collect and warn instead.
+    unparseable: list[str] = []
 
     for f in sorted(active_dir.glob("*.md")):
         try:
             content = f.read_text(encoding="utf-8")
             fm_match = re.match(r"^---\n(.+?)\n---", content, re.DOTALL)
             if not fm_match:
+                unparseable.append(f.name)
                 continue
             fm = yaml.safe_load(fm_match.group(1))
             if not isinstance(fm, dict):
+                unparseable.append(f.name)
                 continue
 
             to = fm.get("to", "")
@@ -129,6 +135,7 @@ def cmd_check(args: list[str]) -> int:
                 }
             )
         except (OSError, yaml.YAMLError):
+            unparseable.append(f.name)
             continue
 
     # bus-cc-routing task 2.2 — partition CC copies into their own bucket so
@@ -216,6 +223,18 @@ def cmd_check(args: list[str]) -> int:
             cc_read = sum(1 for m in cc_other if m["status"] == "read")
             cc_resolved = sum(1 for m in cc_other if m["status"] == "resolved")
             UI.muted(f"  Also (CC): {cc_read} read, {cc_resolved} resolved")
+
+    if unparseable:
+        print()
+        UI.warn(
+            f"{len(unparseable)} file(s) in the active bus could not be parsed "
+            "and are NOT listed above:"
+        )
+        for name in unparseable[:5]:
+            UI.muted(f"  - {name}")
+        if len(unparseable) > 5:
+            UI.muted(f"  ... and {len(unparseable) - 5} more")
+        UI.muted("  One of them may be a message addressed to you. Inspect the file directly.")
 
     # Show blocked tasks
     blocked_file = root / ".agents" / "blocked" / f"{agent}.md"
