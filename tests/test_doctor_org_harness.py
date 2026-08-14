@@ -7,15 +7,13 @@ Covers:
 - min_version too old → exit 1
 - Org or runner.harnesses missing → exit 1 with clear error
 """
+
 from __future__ import annotations
 
 import getpass
-import os
 import stat
-import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -198,7 +196,7 @@ class TestCheckOrgHarnesses:
                 bin_path.unlink()
 
 
-# --------------------------------------------------------------------- non-POSIX graceful degradation
+# ------------------------------------------------------------------- non-POSIX graceful degradation
 class TestPosixOnlyGracefulDegradation:
     """`_check_org_harnesses` used to crash with ModuleNotFoundError on any
     platform lacking `pwd` (Windows) once it got past the platform.yaml/org/
@@ -226,42 +224,57 @@ class TestPosixOnlyGracefulDegradation:
 # --------------------------------------------------------------------- _print_org_harness_report
 class TestPrintReport:
     def test_install_hint_appears_for_missing(self, capsys):
-        _print_org_harness_report("myorg", [{
-            "harness_id": "claude-code",
-            "binary": "claude",
-            "status": "missing",
-            "path": "/home/u/.local/bin/claude",
-        }])
+        _print_org_harness_report(
+            "myorg",
+            [
+                {
+                    "harness_id": "claude-code",
+                    "binary": "claude",
+                    "status": "missing",
+                    "path": "/home/u/.local/bin/claude",
+                }
+            ],
+        )
         out = capsys.readouterr().out
         assert "claude-code" in out
         assert "NOT FOUND" in out
         assert "sudo bash ce-bootstrap.sh --org=myorg --install-harness=claude-code" in out
 
     def test_upgrade_hint_for_too_old(self, capsys):
-        _print_org_harness_report("myorg", [{
-            "harness_id": "claude-code",
-            "binary": "claude",
-            "status": "too_old",
-            "version": "1.0.0",
-            "min_version": "2.0.0",
-            "path": "/home/u/.local/bin/claude",
-        }])
+        _print_org_harness_report(
+            "myorg",
+            [
+                {
+                    "harness_id": "claude-code",
+                    "binary": "claude",
+                    "status": "too_old",
+                    "version": "1.0.0",
+                    "min_version": "2.0.0",
+                    "path": "/home/u/.local/bin/claude",
+                }
+            ],
+        )
         out = capsys.readouterr().out
         assert "sudo bash ce-bootstrap.sh --org=myorg --upgrade-harness=claude-code" in out
 
     def test_ok_line_includes_version(self, capsys):
-        _print_org_harness_report("myorg", [{
-            "harness_id": "claude-code",
-            "binary": "claude",
-            "status": "ok",
-            "version": "v2.3.1",
-        }])
+        _print_org_harness_report(
+            "myorg",
+            [
+                {
+                    "harness_id": "claude-code",
+                    "binary": "claude",
+                    "status": "ok",
+                    "version": "v2.3.1",
+                }
+            ],
+        )
         out = capsys.readouterr().out
         assert "claude-code" in out
         assert "v2.3.1" in out
 
 
-# --------------------------------------------------------------------- cmd_doctor additive behavior (task 3.2)
+# ---------------------------------------------------------- cmd_doctor additive behavior (task 3.2)
 class TestDoctorOrgAdditive:
     """`doctor` without --org must not run harness checks."""
 
@@ -270,6 +283,7 @@ class TestDoctorOrgAdditive:
         instead of the shared flag loop passing it as a keyword -- one fewer
         command routed through that loop (F021/F022)."""
         import inspect
+
         sig = inspect.signature(cmd_doctor)
         assert list(sig.parameters) == ["args"]
 
@@ -290,7 +304,10 @@ class TestDoctorOrgAdditive:
         # Stub the heavy doctor.py runner to short-circuit
         class _StubResult:
             returncode = 0
-            stdout = '{"summary": {"passed": 1, "warned": 0, "failed": 0, "total": 1}, "checks": [], "maestro_dir": "x"}'
+            stdout = (
+                '{"summary": {"passed": 1, "warned": 0, "failed": 0, "total": 1}, '
+                '"checks": [], "maestro_dir": "x"}'
+            )
             stderr = ""
 
         monkeypatch.setattr(m, "run_script", lambda *a, **kw: _StubResult())

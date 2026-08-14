@@ -37,6 +37,7 @@ def isolated_registry(monkeypatch, tmp_path: Path) -> Path:
 @pytest.fixture
 def reg(isolated_registry):
     from otaman_cli import _launchers_registry as r
+
     return r
 
 
@@ -71,7 +72,6 @@ def _make_fake_launcher(tmp_path: Path, name: str, conn_type: str = "local") -> 
 
 
 class TestRegistryHelpers:
-
     def test_load_returns_empty_when_missing(self, reg) -> None:
         assert reg.load() == []
 
@@ -85,13 +85,15 @@ class TestRegistryHelpers:
         assert entry["last_used"]
 
     def test_register_twice_returns_existing(self, reg, tmp_path: Path) -> None:
-        target = tmp_path / "p1"; target.mkdir()
+        target = tmp_path / "p1"
+        target.mkdir()
         reg.register(target)
         was_new, _ = reg.register(target)
         assert was_new is False
 
     def test_register_updates_last_used(self, reg, tmp_path: Path) -> None:
-        target = tmp_path / "p1"; target.mkdir()
+        target = tmp_path / "p1"
+        target.mkdir()
         _, e1 = reg.register(target)
         first_last = e1["last_used"]
         # Re-register; last_used should be >= first
@@ -100,13 +102,15 @@ class TestRegistryHelpers:
         assert e2["added"] == e1["added"]  # added only set once
 
     def test_unregister_removes(self, reg, tmp_path: Path) -> None:
-        target = tmp_path / "p1"; target.mkdir()
+        target = tmp_path / "p1"
+        target.mkdir()
         reg.register(target)
         assert reg.unregister(target) is True
         assert reg.list_entries() == []
 
     def test_unregister_returns_false_if_absent(self, reg, tmp_path: Path) -> None:
-        target = tmp_path / "p1"; target.mkdir()
+        target = tmp_path / "p1"
+        target.mkdir()
         assert reg.unregister(target) is False
 
     def test_list_sorted_by_last_used_descending(
@@ -115,19 +119,30 @@ class TestRegistryHelpers:
         # Timestamps in register() are per-second, so a tight register/register
         # loop produces ties. Construct the registry directly with explicit
         # different timestamps so the sort assertion is deterministic.
-        a = tmp_path / "a"; a.mkdir()
-        b = tmp_path / "b"; b.mkdir()
+        a = tmp_path / "a"
+        a.mkdir()
+        b = tmp_path / "b"
+        b.mkdir()
         import yaml
+
         isolated_registry.parent.mkdir(exist_ok=True)
         isolated_registry.write_text(
-            yaml.safe_dump({
-                "launchers": [
-                    {"path": str(a.resolve()), "added": "2026-01-01T00:00:00+00:00",
-                     "last_used": "2026-01-01T00:00:00+00:00"},
-                    {"path": str(b.resolve()), "added": "2026-01-02T00:00:00+00:00",
-                     "last_used": "2026-01-02T00:00:00+00:00"},
-                ],
-            }),
+            yaml.safe_dump(
+                {
+                    "launchers": [
+                        {
+                            "path": str(a.resolve()),
+                            "added": "2026-01-01T00:00:00+00:00",
+                            "last_used": "2026-01-01T00:00:00+00:00",
+                        },
+                        {
+                            "path": str(b.resolve()),
+                            "added": "2026-01-02T00:00:00+00:00",
+                            "last_used": "2026-01-02T00:00:00+00:00",
+                        },
+                    ],
+                }
+            ),
             encoding="utf-8",
         )
         entries = reg.list_entries()
@@ -221,7 +236,6 @@ class TestLauncherCli:
 
 
 class TestMaestroUpgrade:
-
     @staticmethod
     def _run(args: list[str], registry: Path, **kwargs):
         cli_invoke = [sys.executable, "-m", "otaman_cli.main"]
@@ -244,9 +258,7 @@ class TestMaestroUpgrade:
         assert r.returncode == 0
         assert "No launchers registered" in (r.stdout + r.stderr)
 
-    def test_dry_run_local_launcher(
-        self, isolated_registry: Path, tmp_path: Path
-    ) -> None:
+    def test_dry_run_local_launcher(self, isolated_registry: Path, tmp_path: Path) -> None:
         launcher = _make_fake_launcher(tmp_path, "local1", conn_type="local")
         self._run(["launcher", "add", str(launcher)], isolated_registry)
         r = self._run(["upgrade", "--dry-run"], isolated_registry)
@@ -256,9 +268,7 @@ class TestMaestroUpgrade:
         assert "init" in r.stdout
         assert "1 succeeded" in r.stdout
 
-    def test_dry_run_ssh_launcher(
-        self, isolated_registry: Path, tmp_path: Path
-    ) -> None:
+    def test_dry_run_ssh_launcher(self, isolated_registry: Path, tmp_path: Path) -> None:
         launcher = _make_fake_launcher(tmp_path, "ssh1", conn_type="ssh")
         self._run(["launcher", "add", str(launcher)], isolated_registry)
         r = self._run(["upgrade", "--dry-run"], isolated_registry)
@@ -270,9 +280,7 @@ class TestMaestroUpgrade:
         assert "git pull" in r.stdout
         assert "bash -l -c 'otaman init'" in r.stdout
 
-    def test_hostile_host_rejected(
-        self, isolated_registry: Path, tmp_path: Path
-    ) -> None:
+    def test_hostile_host_rejected(self, isolated_registry: Path, tmp_path: Path) -> None:
         """F031 regression: a launch-settings.yaml ssh_default_host starting
         with '-' must never reach ssh's argv as an unguarded flag (e.g.
         -oProxyCommand=... would execute a local command)."""
@@ -294,9 +302,7 @@ class TestMaestroUpgrade:
         assert "unsafe ssh_default_host" in (r.stdout + r.stderr)
         assert "ProxyCommand" not in (r.stdout + r.stderr) or "Refusing" in (r.stdout + r.stderr)
 
-    def test_hostile_ssh_key_rejected(
-        self, isolated_registry: Path, tmp_path: Path
-    ) -> None:
+    def test_hostile_ssh_key_rejected(self, isolated_registry: Path, tmp_path: Path) -> None:
         launcher = tmp_path / "hostile_key"
         launcher.mkdir()
         (launcher / "launch-settings.yaml").write_text(
@@ -343,9 +349,7 @@ class TestMaestroUpgrade:
         # The raw, unquoted injection payload must never appear bare.
         assert "; touch /tmp/pwned && git pull" not in r.stdout
 
-    def test_dry_run_skip_pull(
-        self, isolated_registry: Path, tmp_path: Path
-    ) -> None:
+    def test_dry_run_skip_pull(self, isolated_registry: Path, tmp_path: Path) -> None:
         launcher = _make_fake_launcher(tmp_path, "skipp", conn_type="ssh")
         self._run(["launcher", "add", str(launcher)], isolated_registry)
         r = self._run(["upgrade", "--dry-run", "--skip-pull"], isolated_registry)
@@ -367,21 +371,18 @@ class TestMaestroUpgrade:
         launcher = _make_fake_launcher(tmp_path, "local1", conn_type="local")
         self._run(["launcher", "add", str(launcher)], isolated_registry)
         r = self._run(
-            ["upgrade", "--skip-pull", "--skip-init"], isolated_registry,
+            ["upgrade", "--skip-pull", "--skip-init"],
+            isolated_registry,
             input="",
         )
         assert r.returncode != 0
         assert "--yes" in (r.stdout + r.stderr)
         assert "succeeded" not in r.stdout  # per-launcher loop never ran
 
-    def test_yes_flag_bypasses_batch_confirm(
-        self, isolated_registry: Path, tmp_path: Path
-    ) -> None:
+    def test_yes_flag_bypasses_batch_confirm(self, isolated_registry: Path, tmp_path: Path) -> None:
         launcher = _make_fake_launcher(tmp_path, "local1", conn_type="local")
         self._run(["launcher", "add", str(launcher)], isolated_registry)
-        r = self._run(
-            ["upgrade", "--yes", "--skip-pull", "--skip-init"], isolated_registry
-        )
+        r = self._run(["upgrade", "--yes", "--skip-pull", "--skip-init"], isolated_registry)
         assert r.returncode == 0
         assert "1 succeeded" in r.stdout
 
@@ -391,7 +392,8 @@ class TestMaestroUpgrade:
         launcher = _make_fake_launcher(tmp_path, "ssh1", conn_type="ssh")
         self._run(["launcher", "add", str(launcher)], isolated_registry)
         r = self._run(
-            ["upgrade", "--skip-pull", "--skip-init"], isolated_registry,
+            ["upgrade", "--skip-pull", "--skip-init"],
+            isolated_registry,
             input="",
         )
         assert r.returncode != 0  # refused (no --yes, no TTY)
@@ -409,9 +411,7 @@ class TestMaestroUpgrade:
         assert r.returncode == 0
         assert "--yes" not in r.stdout
 
-    def test_dry_run_skip_init(
-        self, isolated_registry: Path, tmp_path: Path
-    ) -> None:
+    def test_dry_run_skip_init(self, isolated_registry: Path, tmp_path: Path) -> None:
         launcher = _make_fake_launcher(tmp_path, "skipi", conn_type="ssh")
         self._run(["launcher", "add", str(launcher)], isolated_registry)
         r = self._run(["upgrade", "--dry-run", "--skip-init"], isolated_registry)
@@ -426,6 +426,7 @@ class TestMaestroUpgrade:
         launcher = _make_fake_launcher(tmp_path, "ghost")
         self._run(["launcher", "add", str(launcher)], isolated_registry)
         import shutil
+
         shutil.rmtree(launcher)
         r = self._run(["upgrade", "--dry-run"], isolated_registry)
         assert r.returncode != 0
@@ -435,9 +436,7 @@ class TestMaestroUpgrade:
         r = self._run(["upgrade", "--bogus"], isolated_registry)
         assert r.returncode != 0
 
-    def test_extends_chain_resolves(
-        self, isolated_registry: Path, tmp_path: Path
-    ) -> None:
+    def test_extends_chain_resolves(self, isolated_registry: Path, tmp_path: Path) -> None:
         """The mesh connections in greenbin/watchtower extend lan; upgrade must
         walk the chain to find ssh_remote_root + ssh_plugin_path that live in
         the parent. Without this, real-world configs report "missing
@@ -486,9 +485,10 @@ class TestUpgradeOneLocalConnectionPath:
     """
 
     def test_plugin_root_resolves_against_main_module(self, tmp_path: Path) -> None:
-        from otaman_cli.commands.upgrade import _upgrade_one
+        from unittest.mock import MagicMock, patch
+
         from otaman_cli import main as main_module
-        from unittest.mock import patch, MagicMock
+        from otaman_cli.commands.upgrade import _upgrade_one
 
         with patch("otaman_cli.commands.upgrade.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)

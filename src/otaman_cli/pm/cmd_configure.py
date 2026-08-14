@@ -1,4 +1,5 @@
 """`otaman pm configure <provider>` — write pm-sync block to platform.yaml."""
+
 from __future__ import annotations
 
 import re
@@ -8,7 +9,8 @@ from otaman_cli.identity import find_project_root
 
 
 def cmd_pm_configure(args: list[str]) -> int:
-    """otaman pm configure <provider> [--url URL] [--webhook URL] [--no-webhooks] [--tracker NAME]"""
+    """otaman pm configure <provider> [--url URL] [--webhook URL]
+    [--no-webhooks] [--tracker NAME]"""
     from otaman_cli.main import UI
 
     # Parse args
@@ -22,20 +24,28 @@ def cmd_pm_configure(args: list[str]) -> int:
     while i < len(args):
         tok = args[i]
         if tok == "--url" and i + 1 < len(args):
-            base_url = args[i + 1]; i += 2
+            base_url = args[i + 1]
+            i += 2
         elif tok == "--webhook" and i + 1 < len(args):
-            webhook_target = args[i + 1]; i += 2
+            webhook_target = args[i + 1]
+            i += 2
         elif tok == "--no-webhooks":
-            no_webhooks = True; i += 1
+            no_webhooks = True
+            i += 1
         elif tok == "--tracker" and i + 1 < len(args):
-            tracker = args[i + 1]; i += 2
+            tracker = args[i + 1]
+            i += 2
         elif not tok.startswith("-") and provider is None:
-            provider = tok; i += 1
+            provider = tok
+            i += 1
         else:
             i += 1
 
     if not provider:
-        UI.error("Usage: otaman pm configure <provider> --url <base-url> [--webhook <url>] [--no-webhooks] [--tracker <name>]")
+        UI.error(
+            "Usage: otaman pm configure <provider> --url <base-url> "
+            "[--webhook <url>] [--no-webhooks] [--tracker <name>]"
+        )
         UI.muted("Supported providers: easy8")
         return 1
 
@@ -53,6 +63,7 @@ def cmd_pm_configure(args: list[str]) -> int:
 
     # Determine program name and key from platform.yaml
     import yaml
+
     doc = yaml.safe_load(text) or {}
 
     # Prefer existing pm-sync values (idempotent re-configure)
@@ -74,10 +85,17 @@ def cmd_pm_configure(args: list[str]) -> int:
         program_key_str = ""
 
     if not program_key_str:
-        program_key_str = re.sub(r"[^a-z0-9-]", "-", program_name_str.lower()).strip("-") or "program"
+        program_key_str = (
+            re.sub(r"[^a-z0-9-]", "-", program_name_str.lower()).strip("-") or "program"
+        )
 
     # Build pm-sync block
-    webhook_line = f"  webhook-target: {webhook_target}" if webhook_target and not no_webhooks else "  # webhook-target: https://<your-bridge>/pm-sync/easy8  # set when bridge is deployed"
+    webhook_line = (
+        f"  webhook-target: {webhook_target}"
+        if webhook_target and not no_webhooks
+        else "  # webhook-target: https://<your-bridge>/pm-sync/easy8"
+        "  # set when bridge is deployed"
+    )
     pm_sync_block = (
         f"pm-sync:\n"
         f"  provider: {provider}\n"
@@ -123,6 +141,7 @@ def cmd_pm_configure(args: list[str]) -> int:
 def _write_mcp_config(root: Path, base_url: str, UI) -> None:
     """Add Easy8 MCP server entry to .mcp.json (create if absent)."""
     import json
+
     mcp_path = root / ".mcp.json"
     try:
         config = json.loads(mcp_path.read_text()) if mcp_path.exists() else {}
@@ -134,7 +153,8 @@ def _write_mcp_config(root: Path, base_url: str, UI) -> None:
     config["mcpServers"]["easy8"] = {
         "type": "http",
         "url": mcp_url,
-        "description": "Easy8 MCP server — Tier 2 agent operations (issue queries, bulk transitions, project summaries)",
+        "description": "Easy8 MCP server — Tier 2 agent operations "
+        "(issue queries, bulk transitions, project summaries)",
         "headers": {"X-Redmine-API-Key": "${OTAMAN_PM_EASY8_API_KEY}"},
     }
 

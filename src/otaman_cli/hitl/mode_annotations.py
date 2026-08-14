@@ -25,7 +25,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-
 Mode = Literal["headless", "interactive"]
 
 
@@ -48,11 +47,11 @@ _TASK_LINE_RE = re.compile(r"^\s*-\s+\[[ xX]\]\s+(.+)$")
 class ResolvedTask:
     """One task line with its resolved mode."""
 
-    line_number: int   # 1-based
+    line_number: int  # 1-based
     raw_line: str
     mode: Mode
     has_explicit_annotation: bool
-    body: str          # task text with the mode annotation stripped
+    body: str  # task text with the mode annotation stripped
 
 
 def resolve_task_mode(task_line: str) -> tuple[Mode, bool, str]:
@@ -108,7 +107,7 @@ def resolve_task_mode(task_line: str) -> tuple[Mode, bool, str]:
     # Second pass: detect unknown bracketed token in the mode-position slot
     # (i.e., the first whitespace-separated token after @otaman-<repo>).
     for prefix_match in _AGENT_PREFIX_RE.finditer(payload):
-        tail = payload[prefix_match.end():].lstrip()
+        tail = payload[prefix_match.end() :].lstrip()
         if not tail:
             continue
         first_token = tail.split(None, 1)[0]
@@ -146,13 +145,15 @@ def resolve_tasks_md(tasks_md_text: str) -> list[ResolvedTask]:
             mode, has_explicit, body = resolve_task_mode(line)
         except ModeAnnotationError as exc:
             raise ModeAnnotationError(f"line {line_idx}: {exc}") from None
-        out.append(ResolvedTask(
-            line_number=line_idx,
-            raw_line=line,
-            mode=mode,
-            has_explicit_annotation=has_explicit,
-            body=body,
-        ))
+        out.append(
+            ResolvedTask(
+                line_number=line_idx,
+                raw_line=line,
+                mode=mode,
+                has_explicit_annotation=has_explicit,
+                body=body,
+            )
+        )
     return out
 
 
@@ -163,7 +164,7 @@ class ModeSummary:
     headless: int = 0
     interactive: int = 0
     explicit_count: int = 0
-    default_count: int = 0   # tasks that defaulted to interactive (no annotation)
+    default_count: int = 0  # tasks that defaulted to interactive (no annotation)
 
     @classmethod
     def from_resolved(cls, tasks: list[ResolvedTask]) -> ModeSummary:

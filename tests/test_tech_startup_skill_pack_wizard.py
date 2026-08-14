@@ -1,23 +1,20 @@
 """Tests for tech-startup-skill-pack-implementation tasks 4.1-4.4.
 
-  4.1 — When domain=tech-startup, the generated platform.yaml has
-        skills.profile = tech-startup-cofounder
-  4.2 — Confirmation screen appears before write
-  4.3 — Confirmation screen includes cofounder identity note
-  4.4 — Tests covering (a-d):
-        (a) tech-startup domain sets profile
-        (b) other domains do not set the profile
-        (c) confirmation screen is shown
-        (d) user can override profile before confirming
+4.1 — When domain=tech-startup, the generated platform.yaml has
+      skills.profile = tech-startup-cofounder
+4.2 — Confirmation screen appears before write
+4.3 — Confirmation screen includes cofounder identity note
+4.4 — Tests covering (a-d):
+      (a) tech-startup domain sets profile
+      (b) other domains do not set the profile
+      (c) confirmation screen is shown
+      (d) user can override profile before confirming
 """
+
 from __future__ import annotations
 
-import io
-import sys
 from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 import yaml
 
 from otaman_cli.onboard.program_init.platform_gen import write_platform_yaml
@@ -34,30 +31,36 @@ class TestPrefill:
 
     def test_tech_startup_domain_sets_profile_in_output_yaml(self, tmp_path: Path):
         out = tmp_path / "platform.yaml"
-        write_platform_yaml({
-            "program_name": "myprog",
-            "primary_repo": ".",
-            "domains": ["tech-startup"],
-            # The wizard sets `skill_profile` based on the recommendation;
-            # mimic that here for an end-to-end check.
-            "skill_profile": _recommend_skill_profile({"domains": ["tech-startup"]}),
-            "mode": 1,
-            "active_edition": "ce",
-        }, out)
+        write_platform_yaml(
+            {
+                "program_name": "myprog",
+                "primary_repo": ".",
+                "domains": ["tech-startup"],
+                # The wizard sets `skill_profile` based on the recommendation;
+                # mimic that here for an end-to-end check.
+                "skill_profile": _recommend_skill_profile({"domains": ["tech-startup"]}),
+                "mode": 1,
+                "active_edition": "ce",
+            },
+            out,
+        )
         doc = yaml.safe_load(out.read_text())
         assert doc["skills"]["profile"] == "tech-startup-cofounder"
 
     # 4.4 (b)
     def test_other_domains_do_not_set_tech_startup_profile(self, tmp_path: Path):
         out = tmp_path / "platform.yaml"
-        write_platform_yaml({
-            "program_name": "fin-app",
-            "primary_repo": ".",
-            "domains": ["fintech"],
-            "skill_profile": _recommend_skill_profile({"domains": ["fintech"]}),
-            "mode": 1,
-            "active_edition": "ce",
-        }, out)
+        write_platform_yaml(
+            {
+                "program_name": "fin-app",
+                "primary_repo": ".",
+                "domains": ["fintech"],
+                "skill_profile": _recommend_skill_profile({"domains": ["fintech"]}),
+                "mode": 1,
+                "active_edition": "ce",
+            },
+            out,
+        )
         doc = yaml.safe_load(out.read_text())
         assert doc["skills"]["profile"] != "tech-startup-cofounder"
         assert doc["skills"]["profile"] == "fintech-default"
@@ -132,16 +135,20 @@ class TestProfileOverride:
     def test_eof_falls_through_to_accept_as_is(self, monkeypatch):
         """Non-interactive shell (no stdin) → don't crash, accept the prefill."""
         answers = {"domains": ["tech-startup"], "skill_profile": "tech-startup-cofounder"}
+
         def _raise_eof(*_a, **_kw):
             raise EOFError
+
         monkeypatch.setattr("builtins.input", _raise_eof)
         _confirm_tech_startup_prefill(answers, dry_run=False)
         assert answers["skill_profile"] == "tech-startup-cofounder"
 
     def test_keyboard_interrupt_falls_through_to_accept(self, monkeypatch):
         answers = {"domains": ["tech-startup"], "skill_profile": "tech-startup-cofounder"}
+
         def _raise_kbd(*_a, **_kw):
             raise KeyboardInterrupt
+
         monkeypatch.setattr("builtins.input", _raise_kbd)
         _confirm_tech_startup_prefill(answers, dry_run=False)
         # Profile unchanged, no exception bubbled
@@ -150,8 +157,10 @@ class TestProfileOverride:
     def test_dry_run_does_not_call_input(self, monkeypatch):
         """Dry-run skips the input() call entirely."""
         answers = {"domains": ["tech-startup"]}
+
         def _boom(*_a, **_kw):
             raise AssertionError("input() must NOT be called in dry-run")
+
         monkeypatch.setattr("builtins.input", _boom)
         _confirm_tech_startup_prefill(answers, dry_run=True)
         # No error → input wasn't called
@@ -168,14 +177,17 @@ class TestEndToEndPrefill:
         profile = _recommend_skill_profile({"domains": domains})
 
         out = tmp_path / "platform.yaml"
-        write_platform_yaml({
-            "program_name": "ts-app",
-            "primary_repo": ".",
-            "domains": domains,
-            "skill_profile": profile,
-            "mode": 1,
-            "active_edition": "ce",
-        }, out)
+        write_platform_yaml(
+            {
+                "program_name": "ts-app",
+                "primary_repo": ".",
+                "domains": domains,
+                "skill_profile": profile,
+                "mode": 1,
+                "active_edition": "ce",
+            },
+            out,
+        )
         doc = yaml.safe_load(out.read_text())
         assert doc["skills"]["profile"] == "tech-startup-cofounder"
         # domain preserved in output

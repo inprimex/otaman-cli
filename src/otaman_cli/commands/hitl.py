@@ -20,7 +20,14 @@ def cmd_hitl(args: list[str]) -> int:
     if rest:
         UI.warn(f"Unrecognised arguments ignored: {rest}")
     from otaman_cli.hitl import commands as _hitl
+
     return _hitl.dispatch(action, parsed)
 
 
-register(CommandSpec(name="hitl", handler=cmd_hitl, help="HITL stack: list pending review requests, next, take <id>"))
+register(
+    CommandSpec(
+        name="hitl",
+        handler=cmd_hitl,
+        help="HITL stack: list pending review requests, next, take <id>",
+    )
+)

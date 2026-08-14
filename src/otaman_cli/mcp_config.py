@@ -43,6 +43,7 @@ def load_cached_token(path: Path):
     expired = False
     if expires_at > 0:
         import time
+
         expired = time.time() >= (expires_at - 30)
     return token, expired
 
@@ -70,38 +71,46 @@ def main(argv=None) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument(
-        "--bridge-url", required=True,
+        "--bridge-url",
+        required=True,
         help="Bridge base URL (e.g. http://localhost:8090). /mcp is appended.",
     )
     ap.add_argument(
-        "--server-name", default=DEFAULT_SERVER_NAME,
+        "--server-name",
+        default=DEFAULT_SERVER_NAME,
         help=f"MCP server name in the config (default: {DEFAULT_SERVER_NAME!r})",
     )
     ap.add_argument(
-        "--token-cache", type=Path, default=DEFAULT_TOKEN_CACHE,
+        "--token-cache",
+        type=Path,
+        default=DEFAULT_TOKEN_CACHE,
         help=f"Path to token cache (default: {DEFAULT_TOKEN_CACHE})",
     )
     ap.add_argument(
-        "--output", "-o", type=Path,
+        "--output",
+        "-o",
+        type=Path,
         help="Write JSON to this file instead of stdout",
     )
     ap.add_argument(
-        "--indent", type=int, default=2,
+        "--indent",
+        type=int,
+        default=2,
         help="JSON indent (default 2; 0 for single-line)",
     )
     ap.add_argument(
-        "--allow-expired", action="store_true",
+        "--allow-expired",
+        action="store_true",
         help="Emit config even if the cached token has expired (useful for "
-             "scripting before `otaman login`); the resulting config will "
-             "fail at use time.",
+        "scripting before `otaman login`); the resulting config will "
+        "fail at use time.",
     )
     args = ap.parse_args(argv)
 
     token, expired = load_cached_token(args.token_cache)
     if token is None:
         print(
-            f"ERROR: no token found at {args.token_cache}. "
-            f"Run `otaman login` first.",
+            f"ERROR: no token found at {args.token_cache}. Run `otaman login` first.",
             file=sys.stderr,
         )
         return 1

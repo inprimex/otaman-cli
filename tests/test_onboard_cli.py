@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -36,12 +35,17 @@ class TestArgparseWiring:
 class TestEndToEnd:
     def test_add_then_list(self, tmp_path, capsys):
         # add-user with --apply
-        rc = onboard_main([
-            "add-user", "alice@example.com",
-            "--role", "developer",
-            "--state-dir", str(tmp_path),
-            "--apply",
-        ])
+        rc = onboard_main(
+            [
+                "add-user",
+                "alice@example.com",
+                "--role",
+                "developer",
+                "--state-dir",
+                str(tmp_path),
+                "--apply",
+            ]
+        )
         assert rc == 0
         capsys.readouterr()  # clear
 
@@ -53,11 +57,16 @@ class TestEndToEnd:
 
     def test_add_user_dry_run_default(self, tmp_path, capsys):
         # No --apply → dry-run
-        rc = onboard_main([
-            "add-user", "alice@example.com",
-            "--role", "developer",
-            "--state-dir", str(tmp_path),
-        ])
+        rc = onboard_main(
+            [
+                "add-user",
+                "alice@example.com",
+                "--role",
+                "developer",
+                "--state-dir",
+                str(tmp_path),
+            ]
+        )
         assert rc == 0
         out = capsys.readouterr().out
         assert "DRY-RUN" in out
@@ -67,12 +76,17 @@ class TestEndToEnd:
         assert "no users registered" in out
 
     def test_add_user_then_doctor(self, tmp_path, capsys):
-        onboard_main([
-            "add-user", "alice@example.com",
-            "--role", "developer,approver",
-            "--state-dir", str(tmp_path),
-            "--apply",
-        ])
+        onboard_main(
+            [
+                "add-user",
+                "alice@example.com",
+                "--role",
+                "developer,approver",
+                "--state-dir",
+                str(tmp_path),
+                "--apply",
+            ]
+        )
         capsys.readouterr()  # clear
         rc = onboard_main(["doctor", "--state-dir", str(tmp_path)])
         # WARN allowed; FAIL is exit 1
@@ -81,12 +95,17 @@ class TestEndToEnd:
         assert "summary:" in out
 
     def test_list_users_json(self, tmp_path, capsys):
-        onboard_main([
-            "add-user", "alice@example.com",
-            "--role", "developer",
-            "--state-dir", str(tmp_path),
-            "--apply",
-        ])
+        onboard_main(
+            [
+                "add-user",
+                "alice@example.com",
+                "--role",
+                "developer",
+                "--state-dir",
+                str(tmp_path),
+                "--apply",
+            ]
+        )
         capsys.readouterr()
         rc = onboard_main(["list-users", "--state-dir", str(tmp_path), "--json"])
         assert rc == 0

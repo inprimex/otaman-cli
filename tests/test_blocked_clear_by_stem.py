@@ -4,15 +4,13 @@
 all agent files by Proposal-stem match.  Idempotent: no-match exits 0 and
 already-tombstoned entries are not double-tombstoned.
 """
+
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
-
-import pytest
 
 from otaman_cli.commands.blocked import _cmd_blocked_clear_by_stem
 
@@ -40,7 +38,7 @@ def _entry(title: str, stem: str, change: str = "") -> str:
     lines = [
         f"## Blocked: {title}",
         f"- **Proposal**: {stem}",
-        f"- **Blocked since**: 2026-06-10T10:00:00Z",
+        "- **Blocked since**: 2026-06-10T10:00:00Z",
     ]
     if change:
         lines.append(f"- **Change**: {change}")
@@ -58,7 +56,11 @@ def _run_cli(root: Path, *args: str) -> subprocess.CompletedProcess:
     }
     return subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", *args],
-        cwd=root, env=env, capture_output=True, text=True, timeout=30,
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
 
 
@@ -159,7 +161,7 @@ class TestNoDoubleTombstone:
         assert text2.count("-->") == 1
 
 
-# ---------------------------------------------------------------- CLI subprocess (task 2.1 end-to-end)
+# ------------------------------------------------------------ CLI subprocess (task 2.1 end-to-end)
 class TestClearByStemCli:
     def test_cli_clear_subcommand_dispatches(self, tmp_path: Path):
         root = _setup_root(tmp_path)

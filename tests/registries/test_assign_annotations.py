@@ -9,9 +9,6 @@ Covers:
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -23,7 +20,6 @@ from otaman_cli.registries.assign_annotations import (
     scan_tasks_md,
 )
 from otaman_cli.registries.loader import yaml_dump
-
 
 # ---------------------------------------------------------------------------
 # parse_solution_annotations
@@ -96,12 +92,15 @@ def test_parse_no_annotations_in_repo_only_task():
 
 def test_load_solution_ids_from_yaml(tmp_path):
     p = tmp_path / "solutions.yaml"
-    yaml_dump({
-        "solutions": [
-            {"id": "SOL-1-a", "description": "x"},
-            {"id": "SOL-2-b", "description": "y"},
-        ],
-    }, p)
+    yaml_dump(
+        {
+            "solutions": [
+                {"id": "SOL-1-a", "description": "x"},
+                {"id": "SOL-2-b", "description": "y"},
+            ],
+        },
+        p,
+    )
     assert load_solution_ids_from_yaml(p) == {"SOL-1-a", "SOL-2-b"}
 
 
@@ -132,12 +131,15 @@ def project_with_solutions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> P
         "project: testprog\nrepos:\n  - name: biz\n    path: ../biz\n    owner: cpo-agent\n",
         encoding="utf-8",
     )
-    yaml_dump({
-        "solutions": [
-            {"id": "SOL-1-real", "description": "exists"},
-            {"id": "SOL-2-real", "description": "exists"},
-        ],
-    }, biz / "solutions.yaml")
+    yaml_dump(
+        {
+            "solutions": [
+                {"id": "SOL-1-real", "description": "exists"},
+                {"id": "SOL-2-real", "description": "exists"},
+            ],
+        },
+        biz / "solutions.yaml",
+    )
 
     # A separate "specs" subtree under meta with tasks.md
     tasks_dir = meta / "changes" / "my-feature"
@@ -148,12 +150,15 @@ def project_with_solutions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> P
 def test_scan_reports_valid_and_missing(project_with_solutions: Path) -> None:
     meta = project_with_solutions
     tasks_md = meta / "changes" / "my-feature" / "tasks.md"
-    tasks_md.write_text("""\
+    tasks_md.write_text(
+        """\
 # Tasks
 - [ ] 1.1 @solution:SOL-1-real First task
 - [ ] 1.2 @solution:SOL-2-real Second task
 - [ ] 1.3 @solution:SOL-99-ghost Bogus
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
     findings = scan_tasks_md(tasks_md, meta)
     assert findings.total == 3

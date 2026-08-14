@@ -3,13 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import io
 import json
-import sys
-from pathlib import Path
-from unittest.mock import patch
-
-import pytest
 
 from otaman_cli.onboard.state import User, load_users, save_users
 from otaman_cli.onboard.users import (
@@ -49,7 +43,8 @@ class TestParseRoles:
 
     def test_whitespace_trimmed(self):
         assert _parse_roles("  developer ,  approver  ") == [
-            "otaman:developer", "otaman:approver",
+            "otaman:developer",
+            "otaman:approver",
         ]
 
     def test_empty_pieces_skipped(self):
@@ -137,10 +132,13 @@ class TestListUsers:
         assert "no users registered" in out
 
     def test_human_format(self, tmp_path, capsys):
-        save_users([
-            User(email="alice@example.com", display_name="Alice", roles=["otaman:developer"]),
-            User(email="bob@example.com", display_name="Bob", roles=["otaman:viewer"]),
-        ], tmp_path)
+        save_users(
+            [
+                User(email="alice@example.com", display_name="Alice", roles=["otaman:developer"]),
+                User(email="bob@example.com", display_name="Bob", roles=["otaman:viewer"]),
+            ],
+            tmp_path,
+        )
         rc = cmd_list_users(_args(state_dir=str(tmp_path), json=False))
         assert rc == 0
         out = capsys.readouterr().out
@@ -149,9 +147,12 @@ class TestListUsers:
         assert "otaman:developer" in out
 
     def test_json_format(self, tmp_path, capsys):
-        save_users([
-            User(email="alice@example.com", display_name="Alice", roles=["otaman:developer"]),
-        ], tmp_path)
+        save_users(
+            [
+                User(email="alice@example.com", display_name="Alice", roles=["otaman:developer"]),
+            ],
+            tmp_path,
+        )
         rc = cmd_list_users(_args(state_dir=str(tmp_path), json=True))
         assert rc == 0
         out = capsys.readouterr().out
@@ -171,14 +172,17 @@ class TestWhoami:
 
     def test_registered_user_by_unix_user(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setenv("USER", "alice")
-        save_users([
-            User(
-                email="alice@example.com",
-                display_name="Alice",
-                roles=["otaman:developer"],
-                unix_user="alice",
-            ),
-        ], tmp_path)
+        save_users(
+            [
+                User(
+                    email="alice@example.com",
+                    display_name="Alice",
+                    roles=["otaman:developer"],
+                    unix_user="alice",
+                ),
+            ],
+            tmp_path,
+        )
         rc = cmd_whoami(_args(state_dir=str(tmp_path)))
         assert rc == 0
         out = capsys.readouterr().out
@@ -188,9 +192,12 @@ class TestWhoami:
     def test_registered_user_by_email_local_part(self, tmp_path, monkeypatch, capsys):
         """When unix_user isn't set, match falls back to email local part."""
         monkeypatch.setenv("USER", "alice")
-        save_users([
-            User(email="alice@example.com", display_name="Alice", roles=["otaman:developer"]),
-        ], tmp_path)
+        save_users(
+            [
+                User(email="alice@example.com", display_name="Alice", roles=["otaman:developer"]),
+            ],
+            tmp_path,
+        )
         rc = cmd_whoami(_args(state_dir=str(tmp_path)))
         assert rc == 0
         out = capsys.readouterr().out

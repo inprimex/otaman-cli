@@ -41,7 +41,7 @@ def load_routing_rules(root: Path) -> list[dict[str, Any]]:
         return []
     try:
         data = yaml.safe_load(platform.read_text(encoding="utf-8")) or {}
-    except (Exception,):  # yaml.YAMLError + OSError; broad to match bus_server
+    except Exception:  # yaml.YAMLError + OSError; broad to match bus_server
         return []
     bus_cfg = data.get("bus") or {}
     rules = bus_cfg.get("routing_rules") or []
@@ -133,9 +133,7 @@ def compute_effective_cc(
     candidates: list[str] = []
     if explicit_cc:
         candidates.extend(c for c in explicit_cc if isinstance(c, str) and c)
-    candidates.extend(
-        sorted(evaluate_routing_rules(routing_rules, to, priority, msg_type))
-    )
+    candidates.extend(sorted(evaluate_routing_rules(routing_rules, to, priority, msg_type)))
     for name in candidates:
         if name == to or name in seen:
             continue
@@ -158,11 +156,15 @@ def inject_x_cc(content: str) -> str:
         return content  # malformed frontmatter; caller will not reach here
     head, fm_body, tail = m.group(1), m.group(2), m.group(3)
     new_fm = fm_body.rstrip("\n") + "\nx-cc: true"
-    return head + new_fm + tail + content[m.end():]
+    return head + new_fm + tail + content[m.end() :]
 
 
 def cc_copy_filename(
-    *, timestamp: str, from_agent: str, cc_recipient: str, slug: str,
+    *,
+    timestamp: str,
+    from_agent: str,
+    cc_recipient: str,
+    slug: str,
 ) -> str:
     """Build the on-disk stem for a CC copy.
 

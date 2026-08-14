@@ -24,7 +24,6 @@ from otaman_cli.registries.platform_ext import (
     load_program_extensions,
 )
 
-
 # Shared ruamel.yaml instance; round-trip preserves comments + key order.
 _YAML = YAML()
 _YAML.preserve_quotes = True

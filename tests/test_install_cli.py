@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import io
 import os
-import sys
-from pathlib import Path
 
 import pytest
 
 # install_cli is now a package module
 from otaman_cli import install_cli
-
 
 # ---------------------------------------------------------------------------
 # POSIX install (unix + mac + WSL; skip on Windows because symlinks need
@@ -157,8 +154,9 @@ class TestWindowsDryRun:
     def test_prints_what_it_would_do(self, monkeypatch):
         # Force the function to think we're on Windows without relying on
         # os.name: patch the helpers it uses.
-        monkeypatch.setattr(install_cli, "windows_current_user_path",
-                            lambda: "C:\\Windows\\System32;C:\\Windows")
+        monkeypatch.setattr(
+            install_cli, "windows_current_user_path", lambda: "C:\\Windows\\System32;C:\\Windows"
+        )
         out = io.StringIO()
         rc = install_cli.windows_install(apply=False, out=out)
         assert rc == 0
@@ -169,8 +167,9 @@ class TestWindowsDryRun:
 
     def test_already_present_noop(self, monkeypatch):
         existing = str(install_cli.CLI_DIR)
-        monkeypatch.setattr(install_cli, "windows_current_user_path",
-                            lambda: f"C:\\Windows;{existing}")
+        monkeypatch.setattr(
+            install_cli, "windows_current_user_path", lambda: f"C:\\Windows;{existing}"
+        )
         out = io.StringIO()
         rc = install_cli.windows_install(apply=False, out=out)
         assert rc == 0
@@ -180,8 +179,9 @@ class TestWindowsDryRun:
 class TestWindowsUninstall:
     def test_prints_setx_command(self, monkeypatch):
         existing = str(install_cli.CLI_DIR)
-        monkeypatch.setattr(install_cli, "windows_current_user_path",
-                            lambda: f"C:\\Windows;{existing};C:\\bin")
+        monkeypatch.setattr(
+            install_cli, "windows_current_user_path", lambda: f"C:\\Windows;{existing};C:\\bin"
+        )
         out = io.StringIO()
         rc = install_cli.windows_uninstall(apply=False, out=out)
         assert rc == 0
@@ -190,8 +190,7 @@ class TestWindowsUninstall:
         assert existing not in text.split("setx PATH", 1)[1]  # filtered out
 
     def test_nothing_to_do_when_absent(self, monkeypatch):
-        monkeypatch.setattr(install_cli, "windows_current_user_path",
-                            lambda: "C:\\Windows;C:\\bin")
+        monkeypatch.setattr(install_cli, "windows_current_user_path", lambda: "C:\\Windows;C:\\bin")
         out = io.StringIO()
         rc = install_cli.windows_uninstall(apply=False, out=out)
         assert rc == 0
@@ -219,9 +218,13 @@ class TestRun:
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         (bin_dir / "otaman").symlink_to(install_cli.POSIX_LAUNCHER)
-        rc = install_cli.run([
-            "--uninstall", "--bin-dir", str(bin_dir),
-        ])
+        rc = install_cli.run(
+            [
+                "--uninstall",
+                "--bin-dir",
+                str(bin_dir),
+            ]
+        )
         assert rc == 0
         # Dry-run: symlink still there.
         assert (bin_dir / "otaman").is_symlink()

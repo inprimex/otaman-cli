@@ -6,7 +6,6 @@ import argparse
 import getpass
 import os
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 from otaman_cli.onboard.audit import OnboardAudit
@@ -123,7 +122,7 @@ def cmd_list_users(args: argparse.Namespace) -> int:
             ",".join(sorted(u.roles)),
             "yes" if u.enabled else "no",
         )
-        for h, val in zip(headers, row):
+        for h, val in zip(headers, row, strict=False):
             widths[h] = max(widths[h], len(val))
         rows.append(row)
     fmt = "  ".join("{:<" + str(widths[h]) + "}" for h in headers)

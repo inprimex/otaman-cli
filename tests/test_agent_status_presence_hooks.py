@@ -3,16 +3,15 @@
 Tasks 1.6 (ack hook), 1.7 (complete hook), 1.8 (blocked hook),
 1.10 (check fleet integration), 1.12 (lifecycle integration).
 """
+
 from __future__ import annotations
 
 import json
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
-import pytest
 import yaml
 
 
@@ -28,8 +27,9 @@ def _project_root(tmp_path: Path, agent: str = "cli-agent") -> Path:
     return tmp_path
 
 
-def _run_cli(root: Path, *args: str, agent: str = "cli-agent",
-             extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+def _run_cli(
+    root: Path, *args: str, agent: str = "cli-agent", extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
     env = {
         **os.environ,
         "OTAMAN_AGENT": agent,
@@ -40,7 +40,11 @@ def _run_cli(root: Path, *args: str, agent: str = "cli-agent",
         env.update(extra_env)
     return subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", *args],
-        cwd=root, env=env, capture_output=True, text=True, timeout=30,
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
 
 
@@ -51,10 +55,15 @@ def _read_status(root: Path, agent: str = "cli-agent") -> dict | None:
     return yaml.safe_load(p.read_text(encoding="utf-8"))
 
 
-def _plant_task_assignment(root: Path, *, name: str, to: str,
-                           task: str = "1.3 build it",
-                           change: str = "agent-status-presence",
-                           frm: str = "plugin-agent") -> Path:
+def _plant_task_assignment(
+    root: Path,
+    *,
+    name: str,
+    to: str,
+    task: str = "1.3 build it",
+    change: str = "agent-status-presence",
+    frm: str = "plugin-agent",
+) -> Path:
     body = (
         f"---\n"
         f"id: tst-{name}\n"
@@ -80,8 +89,9 @@ def _plant_task_assignment(root: Path, *, name: str, to: str,
 class TestAckHook:
     def test_ack_task_assignment_writes_working(self, tmp_path: Path):
         root = _project_root(tmp_path)
-        msg = _plant_task_assignment(root, name="a1", to="cli-agent",
-                                     task="1.3 build", change="agent-status-presence")
+        msg = _plant_task_assignment(
+            root, name="a1", to="cli-agent", task="1.3 build", change="agent-status-presence"
+        )
         r = _run_cli(root, "ack", msg.stem)
         assert r.returncode == 0, r.stderr
         s = _read_status(root)
@@ -184,8 +194,7 @@ class TestCompleteHook:
     a `tasks.md` and let `_find_tasks_md_for_change` discover it.
     """
 
-    def _stage_specs_sibling(self, tmp_path: Path, change: str,
-                             tasks_md_body: str) -> Path:
+    def _stage_specs_sibling(self, tmp_path: Path, change: str, tasks_md_body: str) -> Path:
         # Project root is tmp_path/<project>; specs at tmp_path/otaman-specs
         proj = tmp_path / "project"
         proj.mkdir()
@@ -198,6 +207,7 @@ class TestCompleteHook:
 
     def test_finds_tasks_md_via_sibling(self, tmp_path: Path):
         from otaman_cli.commands.complete import _find_tasks_md_for_change
+
         proj = self._stage_specs_sibling(tmp_path, "ch1", "# tasks\n- [ ] 1.1\n")
         path = _find_tasks_md_for_change(proj, "ch1")
         assert path is not None
@@ -213,6 +223,7 @@ class TestCompleteHook:
         )
         proj = self._stage_specs_sibling(tmp_path, "ch1", body)
         from otaman_cli.commands.complete import _status_hook_after_complete
+
         _status_hook_after_complete(proj, "cli-agent", "ch1")
         s = _read_status(proj)
         assert s is not None
@@ -229,6 +240,7 @@ class TestCompleteHook:
         )
         proj = self._stage_specs_sibling(tmp_path, "ch2", body)
         from otaman_cli.commands.complete import _status_hook_after_complete
+
         _status_hook_after_complete(proj, "cli-agent", "ch2")
         s = _read_status(proj)
         assert s is not None
@@ -247,6 +259,7 @@ class TestCompleteHook:
         )
         proj = self._stage_specs_sibling(tmp_path, "ch3", body)
         from otaman_cli.commands.complete import _status_hook_after_complete
+
         _status_hook_after_complete(proj, "cli-agent", "ch3")
         s = _read_status(proj)
         assert s is not None
@@ -259,9 +272,14 @@ class TestCheckFleetIntegration:
         sdir = root / ".agents" / "status"
         sdir.mkdir(parents=True, exist_ok=True)
         body = {
-            "agent": agent, "state": state, "task": None, "change": None,
-            "outcome": None, "blocked_by": None,
-            "since": "2026-06-09T10:00:00Z", "updated_at": "2026-06-09T10:00:00Z",
+            "agent": agent,
+            "state": state,
+            "task": None,
+            "change": None,
+            "outcome": None,
+            "blocked_by": None,
+            "since": "2026-06-09T10:00:00Z",
+            "updated_at": "2026-06-09T10:00:00Z",
             **fields,
         }
         (sdir / f"{agent}.yaml").write_text(yaml.safe_dump(body), encoding="utf-8")
@@ -331,8 +349,9 @@ class TestLifecycleIntegration:
         assert s["state"] == "idle"
 
         # Step 2: ack task-assignment → working
-        msg = _plant_task_assignment(proj, name="lc1", to="cli-agent",
-                                     task="1.1 build it", change="lifecycle-test")
+        msg = _plant_task_assignment(
+            proj, name="lc1", to="cli-agent", task="1.1 build it", change="lifecycle-test"
+        )
         r = _run_cli(proj, "ack", msg.stem)
         assert r.returncode == 0
         s = _read_status(proj)
@@ -348,6 +367,7 @@ class TestLifecycleIntegration:
         # Trigger the complete hook directly (cmd_complete also calls
         # actualize-tasks.py which we don't want to run in tests)
         from otaman_cli.commands.complete import _status_hook_after_complete
+
         _status_hook_after_complete(proj, "cli-agent", "lifecycle-test")
         s = _read_status(proj)
         assert s["state"] == "idle"
@@ -357,8 +377,7 @@ class TestLifecycleIntegration:
         root = _project_root(tmp_path)
         _run_cli(root, "set-status", "working", "--task", "t1")
         # block
-        r = _run_cli(root, "blocked", "spec-clarification-needed",
-                     "--blocked-by", "spec-agent")
+        r = _run_cli(root, "blocked", "spec-clarification-needed", "--blocked-by", "spec-agent")
         assert r.returncode == 0
         s = _read_status(root)
         assert s["state"] == "blocked"
@@ -375,8 +394,16 @@ class TestLifecycleIntegration:
         assert "generated_at" in data
         assert isinstance(data["agents"], list)
         a = data["agents"][0]
-        for key in ("agent", "state", "task", "change", "outcome",
-                    "blocked_by", "since", "updated_at"):
+        for key in (
+            "agent",
+            "state",
+            "task",
+            "change",
+            "outcome",
+            "blocked_by",
+            "since",
+            "updated_at",
+        ):
             assert key in a, f"missing field: {key}"
 
     def test_disabled_suppresses_all(self, tmp_path: Path):

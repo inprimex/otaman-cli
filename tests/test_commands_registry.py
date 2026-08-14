@@ -21,6 +21,7 @@ def registry():
     rather than mutate-and-leave.
     """
     from otaman_cli import commands as c
+
     saved = dict(c._REGISTRY)
     c._REGISTRY.clear()
     try:
@@ -31,7 +32,6 @@ def registry():
 
 
 class TestCommandSpec:
-
     def test_register_and_get(self, registry) -> None:
         handler = lambda args: 0  # noqa: E731
         spec = registry.CommandSpec(name="frobnicate", handler=handler, help="does a thing")
@@ -58,7 +58,6 @@ class TestCommandSpec:
 
 
 class TestDispatch:
-
     def test_dispatch_calls_registered_handler_with_args(self, registry) -> None:
         received = []
 
@@ -83,15 +82,62 @@ class TestDispatch:
 # tuple as each new F020 migration PR lands -- it's the single source of
 # truth both tests below check against.
 MIGRATED_COMMANDS = (
-    "outcome", "solution", "persona", "hitl", "project", "pm", "git-host", "upgrade",
-    "blocked", "scan", "check", "approve", "complete", "doctor", "migrate",
-    "notify-change", "watchdog", "models", "accounts", "routing", "ping", "afk",
-    "bridge", "mcp-config", "session", "install-cli", "onboard", "login", "logout", "token",
-    "owner-paths", "review", "validate", "validate-messages", "compliance",
-    "discovery", "handoff", "audit-knowledge", "gate", "presale", "retrospective",
-    "propose", "team", "send", "read", "ack", "assign",
-    "status", "set-status", "whoami", "iam", "cleanup",
-    "clone", "launcher", "set-agent", "init",
+    "outcome",
+    "solution",
+    "persona",
+    "hitl",
+    "project",
+    "pm",
+    "git-host",
+    "upgrade",
+    "blocked",
+    "scan",
+    "check",
+    "approve",
+    "complete",
+    "doctor",
+    "migrate",
+    "notify-change",
+    "watchdog",
+    "models",
+    "accounts",
+    "routing",
+    "ping",
+    "afk",
+    "bridge",
+    "mcp-config",
+    "session",
+    "install-cli",
+    "onboard",
+    "login",
+    "logout",
+    "token",
+    "owner-paths",
+    "review",
+    "validate",
+    "validate-messages",
+    "compliance",
+    "discovery",
+    "handoff",
+    "audit-knowledge",
+    "gate",
+    "presale",
+    "retrospective",
+    "propose",
+    "team",
+    "send",
+    "read",
+    "ack",
+    "assign",
+    "status",
+    "set-status",
+    "whoami",
+    "iam",
+    "cleanup",
+    "clone",
+    "launcher",
+    "set-agent",
+    "init",
 )
 
 
@@ -104,6 +150,7 @@ class TestMigratedCommands:
 
     def test_migrated_commands_are_registered(self) -> None:
         from otaman_cli import commands as c
+
         for name in MIGRATED_COMMANDS:
             assert name in c.registered_names(), f"'{name}' did not register on import"
 
@@ -117,7 +164,9 @@ class TestMigratedCommands:
 
         main_src = Path(__file__).resolve().parent.parent / "src" / "otaman_cli" / "main.py"
         src = main_src.read_text(encoding="utf-8")
-        dispatcher_pattern = re.compile(r'^\s*"(?P<name>[a-z][a-z0-9-]*)"\s*:\s*lambda\b', re.MULTILINE)
+        dispatcher_pattern = re.compile(
+            r'^\s*"(?P<name>[a-z][a-z0-9-]*)"\s*:\s*lambda\b', re.MULTILINE
+        )
         dict_names = set(dispatcher_pattern.findall(src))
         for name in MIGRATED_COMMANDS:
             assert name not in dict_names, f"'{name}' is still a dict entry in main.py"

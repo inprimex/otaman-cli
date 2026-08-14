@@ -21,7 +21,6 @@ from otaman_cli.hitl.mode_annotations import (
     resolve_tasks_md,
 )
 
-
 # ---------------------------------------------------------------------------
 # resolve_task_mode
 
@@ -33,7 +32,9 @@ def test_headless_explicit():
 
 
 def test_interactive_explicit():
-    mode, explicit, _ = resolve_task_mode("- [ ] 1.1 @otaman-cli [interactive] Review the help text")
+    mode, explicit, _ = resolve_task_mode(
+        "- [ ] 1.1 @otaman-cli [interactive] Review the help text"
+    )
     assert mode == "interactive"
     assert explicit is True
 

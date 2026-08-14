@@ -3,15 +3,13 @@
 Ported helpers match bus_server.py:157-283 behavior; cmd_send writes per-CC
 copies after the primary file.
 """
+
 from __future__ import annotations
 
 import os
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
-
-import pytest
 
 from otaman_cli.cc_fanout import (
     cc_copy_filename,
@@ -27,8 +25,7 @@ def _stage_project(tmp_path: Path, platform_yaml_extra: str = "") -> Path:
     (tmp_path / ".agents" / "current-agent").write_text("cli-agent", encoding="utf-8")
     (tmp_path / "platform.yaml").write_text(
         "project: tst\nversion: '1.0'\n"
-        "repos:\n  - {name: tst, path: ., owner: cli-agent}\n"
-        + platform_yaml_extra,
+        "repos:\n  - {name: tst, path: ., owner: cli-agent}\n" + platform_yaml_extra,
         encoding="utf-8",
     )
     return tmp_path
@@ -44,11 +41,12 @@ class TestLoadRoutingRules:
         assert load_routing_rules(tmp_path) == []
 
     def test_loads_rules_when_present(self, tmp_path: Path):
-        _stage_project(tmp_path, platform_yaml_extra=(
-            "bus:\n"
-            "  routing_rules:\n"
-            "    - {when: {to: human}, cc: [spec-agent]}\n"
-        ))
+        _stage_project(
+            tmp_path,
+            platform_yaml_extra=(
+                "bus:\n  routing_rules:\n    - {when: {to: human}, cc: [spec-agent]}\n"
+            ),
+        )
         rules = load_routing_rules(tmp_path)
         assert len(rules) == 1
         assert rules[0]["when"]["to"] == "human"
@@ -60,12 +58,15 @@ class TestLoadRoutingRules:
         assert load_routing_rules(tmp_path) == []
 
     def test_non_dict_rules_filtered_out(self, tmp_path: Path):
-        _stage_project(tmp_path, platform_yaml_extra=(
-            "bus:\n"
-            "  routing_rules:\n"
-            "    - {when: {to: human}, cc: [spec-agent]}\n"
-            "    - garbage-string\n"
-        ))
+        _stage_project(
+            tmp_path,
+            platform_yaml_extra=(
+                "bus:\n"
+                "  routing_rules:\n"
+                "    - {when: {to: human}, cc: [spec-agent]}\n"
+                "    - garbage-string\n"
+            ),
+        )
         rules = load_routing_rules(tmp_path)
         assert len(rules) == 1
 
@@ -88,22 +89,29 @@ class TestEvaluateRoutingRules:
         assert evaluate_routing_rules(rules, "human", "high") == {"spec-agent", "cpo-agent"}
 
     def test_priority_list_OR_semantics(self):
-        rules = [{
-            "when": {"to": "human", "priority": ["high", "urgent"]},
-            "cc": ["cpo-agent"],
-        }]
+        rules = [
+            {
+                "when": {"to": "human", "priority": ["high", "urgent"]},
+                "cc": ["cpo-agent"],
+            }
+        ]
         assert evaluate_routing_rules(rules, "human", "high") == {"cpo-agent"}
         assert evaluate_routing_rules(rules, "human", "urgent") == {"cpo-agent"}
         assert evaluate_routing_rules(rules, "human", "normal") == set()
 
     def test_type_match_outcome_proposal_routing(self):
         """outcome-proposal-routing 1.1: when.type aware matching."""
-        rules = [{
-            "when": {"type": "outcome-proposal"},
-            "cc": ["cpo-agent", "cofounder-agent"],
-        }]
+        rules = [
+            {
+                "when": {"type": "outcome-proposal"},
+                "cc": ["cpo-agent", "cofounder-agent"],
+            }
+        ]
         result = evaluate_routing_rules(
-            rules, "human", "normal", msg_type="outcome-proposal",
+            rules,
+            "human",
+            "normal",
+            msg_type="outcome-proposal",
         )
         assert result == {"cpo-agent", "cofounder-agent"}
 
@@ -123,7 +131,10 @@ class TestComputeEffectiveCC:
 
     def test_explicit_cc_only(self):
         assert compute_effective_cc(
-            "human", "normal", ["a", "b"], [],
+            "human",
+            "normal",
+            ["a", "b"],
+            [],
         ) == ["a", "b"]
 
     def test_routing_rule_fires(self):
@@ -150,7 +161,11 @@ class TestComputeEffectiveCC:
     def test_type_aware_rule_in_compute(self):
         rules = [{"when": {"type": "outcome-proposal"}, "cc": ["cpo-agent"]}]
         result = compute_effective_cc(
-            "human", "normal", None, rules, msg_type="outcome-proposal",
+            "human",
+            "normal",
+            None,
+            rules,
+            msg_type="outcome-proposal",
         )
         assert result == ["cpo-agent"]
 
@@ -181,14 +196,19 @@ class TestInjectXCC:
 class TestCcCopyFilename:
     def test_canonical_shape(self):
         f = cc_copy_filename(
-            timestamp="20260626T120000", from_agent="cli-agent",
-            cc_recipient="plugin-agent", slug="some-subject",
+            timestamp="20260626T120000",
+            from_agent="cli-agent",
+            cc_recipient="plugin-agent",
+            slug="some-subject",
         )
         assert f == "20260626T120000-cli-agent-to-plugin-agent-some-subject.md"
 
     def test_slashes_in_recipient_sanitized(self):
         f = cc_copy_filename(
-            timestamp="t", from_agent="a", cc_recipient="ns/agent", slug="s",
+            timestamp="t",
+            from_agent="a",
+            cc_recipient="ns/agent",
+            slug="s",
         )
         assert "/" not in f
 
@@ -206,13 +226,22 @@ class TestCmdSendFanout:
         }
         return subprocess.run(
             [
-                sys.executable, "-m", "otaman_cli.main",
-                "send", "plugin-agent",
-                "--subject", "ping",
-                "--body", "body",
+                sys.executable,
+                "-m",
+                "otaman_cli.main",
+                "send",
+                "plugin-agent",
+                "--subject",
+                "ping",
+                "--body",
+                "body",
                 *extra,
             ],
-            cwd=root, env=env, capture_output=True, text=True, timeout=30,
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
 
     # 1.6 (a) — no-cc: no extra files written
@@ -241,11 +270,12 @@ class TestCmdSendFanout:
 
     # 1.6 (c) — routing-rule-fire: implicit CC from platform.yaml routing_rules
     def test_routing_rule_implicit_cc(self, tmp_path: Path):
-        _stage_project(tmp_path, platform_yaml_extra=(
-            "bus:\n"
-            "  routing_rules:\n"
-            "    - {when: {to: plugin-agent}, cc: [spec-agent]}\n"
-        ))
+        _stage_project(
+            tmp_path,
+            platform_yaml_extra=(
+                "bus:\n  routing_rules:\n    - {when: {to: plugin-agent}, cc: [spec-agent]}\n"
+            ),
+        )
         r = self._run_send(tmp_path)  # no --cc; rule should add spec-agent
         assert r.returncode == 0
         msgs = list((tmp_path / ".agents" / "bus" / "active").glob("*.md"))
@@ -258,15 +288,17 @@ class TestCmdSendFanout:
 
     # 1.6 (d) — union+dedup: explicit + rule with overlap → unique recipients
     def test_union_with_dedup_single_copy_per_recipient(self, tmp_path: Path):
-        _stage_project(tmp_path, platform_yaml_extra=(
-            "bus:\n"
-            "  routing_rules:\n"
-            "    - {when: {to: plugin-agent}, cc: [spec-agent]}\n"
-        ))
+        _stage_project(
+            tmp_path,
+            platform_yaml_extra=(
+                "bus:\n  routing_rules:\n    - {when: {to: plugin-agent}, cc: [spec-agent]}\n"
+            ),
+        )
         r = self._run_send(tmp_path, "--cc", "spec-agent")
         assert r.returncode == 0
         cc_copies = [
-            m for m in (tmp_path / ".agents" / "bus" / "active").glob("*.md")
+            m
+            for m in (tmp_path / ".agents" / "bus" / "active").glob("*.md")
             if "x-cc: true" in m.read_text()
         ]
         # Even though spec-agent appears in both --cc AND the rule, only one copy
@@ -275,29 +307,34 @@ class TestCmdSendFanout:
     # 1.6 (e) — primary-excluded: --cc primary_to is dropped
     def test_primary_recipient_excluded_from_cc_copies(self, tmp_path: Path):
         _stage_project(tmp_path)
-        r = self._run_send(tmp_path, "--cc", "plugin-agent", "--cc", "spec-agent")
+        self._run_send(tmp_path, "--cc", "plugin-agent", "--cc", "spec-agent")
         # plugin-agent is the primary; should NOT get a CC copy
         cc_copies = [
-            m for m in (tmp_path / ".agents" / "bus" / "active").glob("*.md")
+            m
+            for m in (tmp_path / ".agents" / "bus" / "active").glob("*.md")
             if "x-cc: true" in m.read_text()
         ]
         # Only spec-agent CC copy
         assert len(cc_copies) == 1
         assert "to-spec-agent" in cc_copies[0].name
-        assert not any("to-plugin-agent" in m.name and "x-cc: true" in m.read_text()
-                       for m in (tmp_path / ".agents" / "bus" / "active").glob("*.md"))
+        assert not any(
+            "to-plugin-agent" in m.name and "x-cc: true" in m.read_text()
+            for m in (tmp_path / ".agents" / "bus" / "active").glob("*.md")
+        )
 
     # 1.6 (f) — type-aware-rule: --type matches when.type
     def test_type_aware_rule_fires(self, tmp_path: Path):
-        _stage_project(tmp_path, platform_yaml_extra=(
-            "bus:\n"
-            "  routing_rules:\n"
-            "    - {when: {type: outcome-proposal}, cc: [cpo-agent]}\n"
-        ))
+        _stage_project(
+            tmp_path,
+            platform_yaml_extra=(
+                "bus:\n  routing_rules:\n    - {when: {type: outcome-proposal}, cc: [cpo-agent]}\n"
+            ),
+        )
         r = self._run_send(tmp_path, "--type", "outcome-proposal")
         assert r.returncode == 0, (r.stdout, r.stderr)
         cc_copies = [
-            m for m in (tmp_path / ".agents" / "bus" / "active").glob("*.md")
+            m
+            for m in (tmp_path / ".agents" / "bus" / "active").glob("*.md")
             if "x-cc: true" in m.read_text()
         ]
         assert len(cc_copies) == 1
@@ -318,17 +355,31 @@ class TestCmdSendFanout:
         for m in (tmp_path / ".agents" / "bus" / "active").glob("*.md"):
             m.unlink()
         env = {
-            **os.environ, "OTAMAN_AGENT": "cli-agent",
+            **os.environ,
+            "OTAMAN_AGENT": "cli-agent",
             "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
             "NO_COLOR": "1",
         }
-        r = subprocess.run([
-            sys.executable, "-m", "otaman_cli.main",
-            "send", "spec-agent",   # primary
-            "--cc", "plugin-agent",  # CC
-            "--subject", "drift report",
-            "--body", "see analysis",
-        ], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30)
+        r = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "otaman_cli.main",
+                "send",
+                "spec-agent",  # primary
+                "--cc",
+                "plugin-agent",  # CC
+                "--subject",
+                "drift report",
+                "--body",
+                "see analysis",
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         assert r.returncode == 0
 
         # 1 primary (to: spec-agent) + 1 CC copy (for plugin-agent)

@@ -10,6 +10,7 @@ line actually reads `<!-- ## Blocked: ...`), so the entire file — including
 already-cleared entries — was treated as one active block and kept nagging
 "waiting for human approval" forever.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -25,7 +26,8 @@ def project(tmp_path: Path) -> Path:
     (tmp_path / ".agents" / "blocked").mkdir(parents=True)
     (tmp_path / ".agents" / "current-agent").write_text("cli-agent\n")
     (tmp_path / "platform.yaml").write_text(
-        "project: p\nrepos: []\n", encoding="utf-8",
+        "project: p\nrepos: []\n",
+        encoding="utf-8",
     )
     return tmp_path
 
@@ -33,7 +35,9 @@ def project(tmp_path: Path) -> Path:
 def _run_check(project_root: Path, agent: str = "cli-agent") -> str:
     result = subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "check", agent],
-        capture_output=True, text=True, cwd=str(project_root),
+        capture_output=True,
+        text=True,
+        cwd=str(project_root),
     )
     return result.stdout + result.stderr
 
@@ -53,17 +57,21 @@ cleared 2026-07-04 — manually-cleared -->
 cleared 2026-07-04 — manually-cleared -->
 """
 
-MIXED = TOMBSTONED_ONLY + """\
+MIXED = (
+    TOMBSTONED_ONLY
+    + """\
 ## Blocked: Still-active-change
 - **Proposal**: 20260705T000000-cli-agent-to-human-spec-change-request
 - **Blocked since**: 2026-07-05T00:00:00Z
 - **Depends on**: spec-change-approved + spec-change notification
 """
+)
 
 
 def test_all_tombstoned_entries_produce_no_blocked_section(project: Path) -> None:
     (project / ".agents" / "blocked" / "cli-agent.md").write_text(
-        TOMBSTONED_ONLY, encoding="utf-8",
+        TOMBSTONED_ONLY,
+        encoding="utf-8",
     )
     out = _run_check(project)
     assert "BLOCKED TASKS" not in out
@@ -73,7 +81,8 @@ def test_all_tombstoned_entries_produce_no_blocked_section(project: Path) -> Non
 
 def test_active_entry_still_shown_alongside_tombstoned(project: Path) -> None:
     (project / ".agents" / "blocked" / "cli-agent.md").write_text(
-        MIXED, encoding="utf-8",
+        MIXED,
+        encoding="utf-8",
     )
     out = _run_check(project)
     assert "BLOCKED TASKS" in out

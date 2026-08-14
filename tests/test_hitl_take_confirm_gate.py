@@ -9,6 +9,7 @@ non-interactive-stdin-is-refused case; these tests exercise the TTY-true
 success path and the wrong-shape-input edge case at the unit level, mocking
 `builtins.input` directly, mirroring test_approve_human_confirm_gate.py).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -52,8 +53,10 @@ class TestHitlTakeConfirmGate:
     def test_non_tty_refuses_and_writes_nothing(self, project: Path):
         stem = "20260709T000000-bridge-agent-to-human-request-human-review-x"
         _stage_request(project, stem)
-        with mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=False), \
-             mock.patch("builtins.input", side_effect=AssertionError("must not prompt")):
+        with (
+            mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=False),
+            mock.patch("builtins.input", side_effect=AssertionError("must not prompt")),
+        ):
             rc = cmd_take({"id": stem})
         assert rc != 0
         active = project / ".agents" / "bus" / "active"
@@ -63,8 +66,10 @@ class TestHitlTakeConfirmGate:
     def test_tty_succeeds_and_records_decision(self, project: Path):
         stem = "20260709T000000-bridge-agent-to-human-request-human-review-x"
         _stage_request(project, stem)
-        with mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=True), \
-             mock.patch("builtins.input", side_effect=["approve", "", "", ""]):
+        with (
+            mock.patch("otaman_cli.safety.sys.stdin.isatty", return_value=True),
+            mock.patch("builtins.input", side_effect=["approve", "", "", ""]),
+        ):
             rc = cmd_take({"id": stem})
         assert rc == 0
         active = project / ".agents" / "bus" / "active"
@@ -81,6 +86,8 @@ class TestHitlTakeConfirmGate:
     def test_no_matching_request_bails_before_tty_check(self, project: Path):
         """Missing target should error from the lookup, without even
         reaching (or needing) the TTY gate."""
-        with mock.patch("otaman_cli.safety.sys.stdin.isatty", side_effect=AssertionError("must not check tty")):
+        with mock.patch(
+            "otaman_cli.safety.sys.stdin.isatty", side_effect=AssertionError("must not check tty")
+        ):
             rc = cmd_take({"id": "no-such-stem"})
         assert rc != 0

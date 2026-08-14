@@ -14,7 +14,6 @@ from typing import Any
 
 from otaman_cli.identity import find_project_root
 from otaman_cli.main import UI
-from otaman_cli.registries import bus_messages
 from otaman_cli.registries.loader import (
     resolve_registry_path,
     yaml_dump,
@@ -73,6 +72,7 @@ def _ctx(root: Path):
         platform = load_program_extensions(root / "platform.yaml")
     except Exception:
         from otaman_cli.registries.platform_ext import ProgramExtensions
+
         platform = ProgramExtensions()
     roles = resolve_roles(actor, platform)
     return actor, roles, platform
@@ -92,9 +92,7 @@ def cmd_add(args: dict[str, Any]) -> int:
 
     valid_kinds = {k.value for k in PersonaKind}
     if args["kind"] not in valid_kinds:
-        return _bail(
-            f"Invalid kind: {args['kind']!r}. Must be one of: {sorted(valid_kinds)}"
-        )
+        return _bail(f"Invalid kind: {args['kind']!r}. Must be one of: {sorted(valid_kinds)}")
 
     loaded = _load(root)
     if loaded is None:

@@ -58,6 +58,7 @@ def _dispatcher_commands() -> set[str]:
     matches = set(_DISPATCHER_PATTERN.findall(src))
 
     from otaman_cli import commands as _registry
+
     matches |= set(_registry.registered_names())
 
     return matches
@@ -72,11 +73,13 @@ def _help_output() -> str:
         env={
             **os.environ,
             "NO_COLOR": "1",
-            "PYTHONPATH": os.pathsep.join([
-                str(REPO_ROOT / "src"),
-                str(REPO_ROOT.parent / "otaman-core" / "src"),
-                os.environ.get("PYTHONPATH", ""),
-            ]),
+            "PYTHONPATH": os.pathsep.join(
+                [
+                    str(REPO_ROOT / "src"),
+                    str(REPO_ROOT.parent / "otaman-core" / "src"),
+                    os.environ.get("PYTHONPATH", ""),
+                ]
+            ),
         },
     )
     assert result.returncode == 0, result.stderr
@@ -119,8 +122,9 @@ def test_help_contains_no_bare_maestro() -> None:
     cmd_help() or any output emitted before cmd_help() returns.
     """
     import re
+
     output = _help_output()
-    matches = re.findall(r'\bmaestro\b', output, re.IGNORECASE)
+    matches = re.findall(r"\bmaestro\b", output, re.IGNORECASE)
     assert not matches, (
         f"User-visible help output contains {len(matches)} bare-word 'maestro' occurrence(s): "
         f"{matches[:5]!r}\n"
@@ -179,15 +183,50 @@ def test_help_doesnt_list_obviously_phantom_commands() -> None:
     # at the start of help lines but aren't commands.
     KNOWN_NON_COMMANDS = {
         # English / prose
-        "the", "a", "an", "if", "and", "or", "not", "is",
+        "the",
+        "a",
+        "an",
+        "if",
+        "and",
+        "or",
+        "not",
+        "is",
         # Help structure / category nouns
-        "messages", "old", "each", "use", "all", "works", "checks", "subcommand",
+        "messages",
+        "old",
+        "each",
+        "use",
+        "all",
+        "works",
+        "checks",
+        "subcommand",
         # Argument placeholders
-        "msg", "stem", "list", "add", "remove", "register", "run", "show",
-        "set", "set-default", "set-repo", "set-agent", "install", "uninstall",
-        "on", "off", "status", "approve", "reject", "detect", "check", "pr",
+        "msg",
+        "stem",
+        "list",
+        "add",
+        "remove",
+        "register",
+        "run",
+        "show",
+        "set",
+        "set-default",
+        "set-repo",
+        "set-agent",
+        "install",
+        "uninstall",
+        "on",
+        "off",
+        "status",
+        "approve",
+        "reject",
+        "detect",
+        "check",
+        "pr",
         # onboard sub-subcommand names (otaman onboard <sub>)
-        "add-user", "list-users", "program-init",
+        "add-user",
+        "list-users",
+        "program-init",
         "post-review",
         # "otaman" appears as the top-level binary name in Quick start examples.
         "otaman",

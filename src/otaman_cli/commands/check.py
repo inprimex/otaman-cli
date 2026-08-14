@@ -15,7 +15,7 @@ from pathlib import Path
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.commands.status_cluster import cmd_fleet_status
 from otaman_cli.identity import find_project_root, resolve_agent_identity
-from otaman_cli.main import C, UI, _get_agent_ack_status, _resolve_bus_paths
+from otaman_cli.main import UI, C, _get_agent_ack_status, _resolve_bus_paths
 
 
 def cmd_check(args: list[str]) -> int:
@@ -28,7 +28,10 @@ def cmd_check(args: list[str]) -> int:
             try:
                 hide_broadcast_hours = int(args[i + 1])
             except ValueError:
-                UI.warn(f"--hide-broadcast-older-than expects an integer (hours); ignoring '{args[i+1]}'")
+                UI.warn(
+                    f"--hide-broadcast-older-than expects an integer (hours); "
+                    f"ignoring '{args[i + 1]}'"
+                )
             i += 2
         else:
             positional.append(args[i])
@@ -43,8 +46,14 @@ def cmd_check(args: list[str]) -> int:
     agent = resolve_agent_identity(root, explicit=positional[0] if positional else None)
     if not agent:
         UI.error("No agent specified and identity could not be resolved.")
-        UI.muted("  Sources tried: OTAMAN_AGENT env, .otaman agent: field (CWD walk), .agents/current-agent")
-        UI.muted("  Fix: set OTAMAN_AGENT env var, or run 'otaman init --update' to write per-repo .otaman files")
+        UI.muted(
+            "  Sources tried: OTAMAN_AGENT env, .otaman agent: field (CWD walk), "
+            ".agents/current-agent"
+        )
+        UI.muted(
+            "  Fix: set OTAMAN_AGENT env var, or run 'otaman init --update' "
+            "to write per-repo .otaman files"
+        )
         UI.muted("Usage: otaman check <agent-name>")
         return 1
 
@@ -57,7 +66,7 @@ def cmd_check(args: list[str]) -> int:
     active_dir, acks_dir = _resolve_bus_paths(root)
 
     if not active_dir.is_dir():
-        print(f"No messages - bus directory doesn't exist yet.")
+        print("No messages - bus directory doesn't exist yet.")
         return 0
 
     UI.header(f"Messages for: {agent}")
@@ -98,25 +107,27 @@ def cmd_check(args: list[str]) -> int:
                     subject = line.strip().replace("## Subject:", "").strip()
                     break
 
-            messages.append({
-                "id": fm.get("id", "?"),
-                "from": fm.get("from", "?"),
-                "to": str(fm.get("to", "")),
-                "priority": fm.get("priority", "normal"),
-                "type": fm.get("type", "?"),
-                "status": status,
-                "timestamp": str(fm.get("timestamp", "")),
-                "subject": subject,
-                "file": f.name,
-                "stem": f.stem,
-                # inter-agent-request-response-contract (tasks 2.1, 2.2)
-                "expects_response": bool(fm.get("expects-response")),
-                "response_effort": fm.get("response-effort"),
-                "response_deadline": fm.get("response-deadline"),
-                "reply_to": fm.get("reply-to"),
-                # bus-cc-routing task 2.2 — `x-cc: true` marks a CC copy
-                "is_cc": bool(fm.get("x-cc")),
-            })
+            messages.append(
+                {
+                    "id": fm.get("id", "?"),
+                    "from": fm.get("from", "?"),
+                    "to": str(fm.get("to", "")),
+                    "priority": fm.get("priority", "normal"),
+                    "type": fm.get("type", "?"),
+                    "status": status,
+                    "timestamp": str(fm.get("timestamp", "")),
+                    "subject": subject,
+                    "file": f.name,
+                    "stem": f.stem,
+                    # inter-agent-request-response-contract (tasks 2.1, 2.2)
+                    "expects_response": bool(fm.get("expects-response")),
+                    "response_effort": fm.get("response-effort"),
+                    "response_deadline": fm.get("response-deadline"),
+                    "reply_to": fm.get("reply-to"),
+                    # bus-cc-routing task 2.2 — `x-cc: true` marks a CC copy
+                    "is_cc": bool(fm.get("x-cc")),
+                }
+            )
         except (OSError, yaml.YAMLError):
             continue
 
@@ -134,8 +145,10 @@ def cmd_check(args: list[str]) -> int:
 
     # Apply --hide-broadcast-older-than filter (D4)
     if hide_broadcast_hours is not None and hide_broadcast_hours > 0:
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
+
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hide_broadcast_hours)
+
         def _is_old_broadcast(m: dict) -> bool:
             if m.get("to") != "all":
                 return False
@@ -147,14 +160,18 @@ def cmd_check(args: list[str]) -> int:
                 return ts < cutoff
             except ValueError:
                 return False
+
         pending = [m for m in pending if not _is_old_broadcast(m)]
 
     # Task 2.1: tiebreaker sort within priority band — expects-response,
     # response-effort, timestamp. See response_contract.make_sort_key.
     from otaman_cli.response_contract import (
         deadline_is_imminent as _deadline_imminent,
+    )
+    from otaman_cli.response_contract import (
         make_sort_key as _sort_key,
     )
+
     pending.sort(key=_sort_key)
 
     if pending:
@@ -212,7 +229,10 @@ def cmd_check(args: list[str]) -> int:
         # ..."), so the whole file — including already-cleared entries — is
         # treated as one active block and nagged forever.
         blocked_content = re.sub(
-            r"<!--.*?-->", "", blocked_content, flags=re.DOTALL,
+            r"<!--.*?-->",
+            "",
+            blocked_content,
+            flags=re.DOTALL,
         ).strip()
         if blocked_content:
             print()
@@ -233,7 +253,9 @@ def cmd_check(args: list[str]) -> int:
 
                 # Check if approval + spec-change arrived
                 has_approval = any(
-                    m["type"] == "spec-change-approved" and proposal_stem and proposal_stem in m.get("subject", "")
+                    m["type"] == "spec-change-approved"
+                    and proposal_stem
+                    and proposal_stem in m.get("subject", "")
                     for m in messages
                 )
                 has_spec_change = any(m["type"] == "spec-change" for m in messages)
@@ -246,7 +268,9 @@ def cmd_check(args: list[str]) -> int:
                 else:
                     # Check for rejection
                     has_rejection = any(
-                        m["type"] == "spec-change-rejected" and proposal_stem and proposal_stem in m.get("subject", "")
+                        m["type"] == "spec-change-rejected"
+                        and proposal_stem
+                        and proposal_stem in m.get("subject", "")
                         for m in messages
                     )
                     if has_rejection:
@@ -256,7 +280,11 @@ def cmd_check(args: list[str]) -> int:
                 if proposal_stem:
                     UI.muted(f"Proposal: {proposal_stem}")
 
-    UI.kv("Summary", f"{total.get('pending', 0)} pending | {total.get('read', 0)} read | {total.get('resolved', 0)} resolved")
+    UI.kv(
+        "Summary",
+        f"{total.get('pending', 0)} pending | {total.get('read', 0)} read | "
+        f"{total.get('resolved', 0)} resolved",
+    )
     if pending:
         UI.muted("Use `otaman read <msg-stem>` to read a message")
         UI.muted("Use `otaman ack <msg-stem>` to acknowledge a message")
@@ -307,8 +335,10 @@ def _check_render_fleet(root: Path) -> None:
     UI.muted(f"Fleet: {' · '.join(parts)}")
 
 
-register(CommandSpec(
-    name="check",
-    handler=cmd_check,
-    help="Check pending messages for an agent (auto-detects from cwd)",
-))
+register(
+    CommandSpec(
+        name="check",
+        handler=cmd_check,
+        help="Check pending messages for an agent (auto-detects from cwd)",
+    )
+)

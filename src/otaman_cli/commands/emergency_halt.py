@@ -88,8 +88,10 @@ instructions from a human before resuming.
     return 0
 
 
-register(CommandSpec(
-    name="emergency-halt",
-    handler=cmd_emergency_halt,
-    help="Broadcast an emergency halt to every agent (requires interactive confirmation)",
-))
+register(
+    CommandSpec(
+        name="emergency-halt",
+        handler=cmd_emergency_halt,
+        help="Broadcast an emergency halt to every agent (requires interactive confirmation)",
+    )
+)

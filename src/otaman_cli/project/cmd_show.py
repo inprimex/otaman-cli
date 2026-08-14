@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from otaman_cli.identity import find_project_root
 from otaman_cli.main import UI
 from otaman_cli.project._platform import find_repo, is_git_repo, load_platform_yaml
@@ -58,7 +56,7 @@ def cmd_project_show(name: str) -> int:
                 kind = "file" if otaman_marker.is_file() else "dir"
                 print(f"  .otaman:     present ({kind})")
             else:
-                print(f"  .otaman:     not yet (run `otaman init --update` to write)")
+                print("  .otaman:     not yet (run `otaman init --update` to write)")
     return 0
 
 

@@ -14,10 +14,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_PATH = str(REPO_ROOT / "src")
@@ -34,7 +31,10 @@ if CORE_PATH not in sys.path:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_platform_yaml(tmp_path: Path, with_pm_sync: bool = True, with_project_map: bool = False) -> Path:
+
+def _make_platform_yaml(
+    tmp_path: Path, with_pm_sync: bool = True, with_project_map: bool = False
+) -> Path:
     """Write a minimal platform.yaml with optional pm-sync block."""
     pm_block = ""
     if with_pm_sync:
@@ -64,7 +64,9 @@ def _make_otaman_marker(tmp_path: Path, platform_yaml: Path) -> Path:
     return marker
 
 
-def _run_main(args: list[str], cwd: Path, env_extra: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+def _run_main(
+    args: list[str], cwd: Path, env_extra: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
     """Run otaman_cli.main via subprocess with a clean PYTHONPATH."""
     env = {
         **os.environ,
@@ -75,13 +77,17 @@ def _run_main(args: list[str], cwd: Path, env_extra: dict[str, str] | None = Non
         env.update(env_extra)
     return subprocess.run(
         [sys.executable, "-m", "otaman_cli.main"] + args,
-        capture_output=True, text=True, cwd=str(cwd), env=env,
+        capture_output=True,
+        text=True,
+        cwd=str(cwd),
+        env=env,
     )
 
 
 # ---------------------------------------------------------------------------
 # Unit tests: cmd_pm_init
 # ---------------------------------------------------------------------------
+
 
 class TestCmdPmInit:
     """Tests for cmd_pm_init()."""
@@ -99,7 +105,7 @@ class TestCmdPmInit:
 
     def test_dry_run_no_http_calls(self, tmp_path: Path, capsys) -> None:
         """--dry-run must produce output and return 0 without any HTTP."""
-        platform_yaml = _make_platform_yaml(tmp_path, with_pm_sync=True)
+        _make_platform_yaml(tmp_path, with_pm_sync=True)
 
         # Stub load_pm_sync_config to return a simple config object
         mock_config = MagicMock()
@@ -114,7 +120,10 @@ class TestCmdPmInit:
             patch.object(mod, "load_pm_sync_config", return_value=mock_config),
             patch.object(mod, "find_project_root", return_value=tmp_path),
             # Ensure no real HTTP adapter is instantiated
-            patch.dict("sys.modules", {"otaman_adapters": MagicMock(), "otaman_adapters.easy8": MagicMock()}),
+            patch.dict(
+                "sys.modules",
+                {"otaman_adapters": MagicMock(), "otaman_adapters.easy8": MagicMock()},
+            ),
         ):
             rc = mod.cmd_pm_init(["easy8", "--dry-run", "--no-webhooks"])
 
@@ -137,7 +146,10 @@ class TestCmdPmInit:
         with (
             patch.object(mod, "load_pm_sync_config", return_value=mock_config),
             patch.object(mod, "find_project_root", return_value=tmp_path),
-            patch.dict("sys.modules", {"otaman_adapters": MagicMock(), "otaman_adapters.easy8": MagicMock()}),
+            patch.dict(
+                "sys.modules",
+                {"otaman_adapters": MagicMock(), "otaman_adapters.easy8": MagicMock()},
+            ),
         ):
             rc = mod.cmd_pm_init(["easy8", "--dry-run", "--no-webhooks"])
 
@@ -166,6 +178,7 @@ class TestCmdPmInit:
         _make_platform_yaml(tmp_path, with_pm_sync=True)
 
         import otaman_cli.pm.cmd_init as mod
+
         original = mod.load_pm_sync_config
         try:
             mod.load_pm_sync_config = None  # type: ignore[assignment]
@@ -180,6 +193,7 @@ class TestCmdPmInit:
 # ---------------------------------------------------------------------------
 # Task 6.3 — JTBD-37 pm-sync-adapter strict acceptance tests
 # ---------------------------------------------------------------------------
+
 
 class TestPmInitTask63:
     """4 strict assertions called out in pm-sync-adapter task 6.3:
@@ -207,6 +221,7 @@ class TestPmInitTask63:
 
         urlopen_calls: list = []
         original_urlopen = __import__("urllib.request", fromlist=["urlopen"]).urlopen
+
         def _spy_urlopen(*args, **kwargs):
             urlopen_calls.append((args, kwargs))
             return original_urlopen(*args, **kwargs)
@@ -214,10 +229,13 @@ class TestPmInitTask63:
         with (
             patch.object(mod, "load_pm_sync_config", return_value=mock_config),
             patch.object(mod, "find_project_root", return_value=tmp_path),
-            patch.dict("sys.modules", {
-                "otaman_adapters": MagicMock(),
-                "otaman_adapters.easy8": MagicMock(),
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "otaman_adapters": MagicMock(),
+                    "otaman_adapters.easy8": MagicMock(),
+                },
+            ),
             patch("urllib.request.urlopen", _spy_urlopen),
         ):
             rc = mod.cmd_pm_init(["easy8", "--dry-run", "--no-webhooks"])
@@ -240,13 +258,17 @@ class TestPmInitTask63:
         mock_config.webhook_url = None
 
         import otaman_cli.pm.cmd_init as mod
+
         with (
             patch.object(mod, "load_pm_sync_config", return_value=mock_config),
             patch.object(mod, "find_project_root", return_value=tmp_path),
-            patch.dict("sys.modules", {
-                "otaman_adapters": MagicMock(),
-                "otaman_adapters.easy8": MagicMock(),
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "otaman_adapters": MagicMock(),
+                    "otaman_adapters.easy8": MagicMock(),
+                },
+            ),
         ):
             rc = mod.cmd_pm_init(["easy8", "--dry-run", "--no-webhooks"])
         assert rc == 0
@@ -263,9 +285,7 @@ class TestPmInitTask63:
                 kw in stripped for kw in ("would ", "creating ", "posting ", "calling ")
             )
             if looks_like_action:
-                assert "[dry-run]" in line, (
-                    f"action line missing [dry-run] marker: {line!r}"
-                )
+                assert "[dry-run]" in line, f"action line missing [dry-run] marker: {line!r}"
 
     # ----- (b) idempotency: re-run skips creates -----
     def test_idempotent_rerun_returns_existing_project(self, tmp_path: Path) -> None:
@@ -298,17 +318,22 @@ class TestPmInitTask63:
         mock_easy8_mod = MagicMock()
         mock_easy8_mod.Easy8Adapter = MagicMock(return_value=mock_adapter)
         mock_easy8_mod.EASY8_CAPABILITIES = MagicMock(
-            agent_identity_user=True, agent_identity_group=True,
+            agent_identity_user=True,
+            agent_identity_group=True,
         )
 
         import otaman_cli.pm.cmd_init as mod
+
         with (
             patch.object(mod, "load_pm_sync_config", return_value=mock_config),
             patch.object(mod, "find_project_root", return_value=tmp_path),
-            patch.dict("sys.modules", {
-                "otaman_adapters": MagicMock(),
-                "otaman_adapters.easy8": mock_easy8_mod,
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "otaman_adapters": MagicMock(),
+                    "otaman_adapters.easy8": mock_easy8_mod,
+                },
+            ),
             patch.dict(os.environ, {"OTAMAN_PM_EASY8_API_KEY": "test-key"}),
         ):
             rc1 = mod.cmd_pm_init(["easy8", "--no-webhooks"])
@@ -337,18 +362,22 @@ class TestPmInitTask63:
         # Adapter capabilities REJECT identity-mode=user
         mock_easy8_mod = MagicMock()
         mock_easy8_mod.EASY8_CAPABILITIES = MagicMock(
-            agent_identity_user=False,    # ← mismatch
+            agent_identity_user=False,  # ← mismatch
             agent_identity_group=True,
         )
 
         import otaman_cli.pm.cmd_init as mod
+
         with (
             patch.object(mod, "load_pm_sync_config", return_value=mock_config),
             patch.object(mod, "find_project_root", return_value=tmp_path),
-            patch.dict("sys.modules", {
-                "otaman_adapters": MagicMock(),
-                "otaman_adapters.easy8": mock_easy8_mod,
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "otaman_adapters": MagicMock(),
+                    "otaman_adapters.easy8": mock_easy8_mod,
+                },
+            ),
         ):
             rc = mod.cmd_pm_init(["easy8", "--dry-run", "--no-webhooks"])
         assert rc == 1, "capability mismatch must exit 1"
@@ -368,17 +397,22 @@ class TestPmInitTask63:
 
         mock_easy8_mod = MagicMock()
         mock_easy8_mod.EASY8_CAPABILITIES = MagicMock(
-            agent_identity_user=True, agent_identity_group=False,  # ← mismatch
+            agent_identity_user=True,
+            agent_identity_group=False,  # ← mismatch
         )
 
         import otaman_cli.pm.cmd_init as mod
+
         with (
             patch.object(mod, "load_pm_sync_config", return_value=mock_config),
             patch.object(mod, "find_project_root", return_value=tmp_path),
-            patch.dict("sys.modules", {
-                "otaman_adapters": MagicMock(),
-                "otaman_adapters.easy8": mock_easy8_mod,
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "otaman_adapters": MagicMock(),
+                    "otaman_adapters.easy8": mock_easy8_mod,
+                },
+            ),
         ):
             rc = mod.cmd_pm_init(["easy8", "--dry-run", "--no-webhooks"])
         assert rc == 1
@@ -402,23 +436,30 @@ class TestPmInitTask63:
 
         mock_adapter = MagicMock()
         mock_adapter.provision_project.return_value = MagicMock(
-            id=1, name="Otaman", identifier="otaman",
+            id=1,
+            name="Otaman",
+            identifier="otaman",
         )
 
         mock_easy8_mod = MagicMock()
         mock_easy8_mod.Easy8Adapter = MagicMock(return_value=mock_adapter)
         mock_easy8_mod.EASY8_CAPABILITIES = MagicMock(
-            agent_identity_user=True, agent_identity_group=True,
+            agent_identity_user=True,
+            agent_identity_group=True,
         )
 
         import otaman_cli.pm.cmd_init as mod
+
         with (
             patch.object(mod, "load_pm_sync_config", return_value=mock_config),
             patch.object(mod, "find_project_root", return_value=tmp_path),
-            patch.dict("sys.modules", {
-                "otaman_adapters": MagicMock(),
-                "otaman_adapters.easy8": mock_easy8_mod,
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "otaman_adapters": MagicMock(),
+                    "otaman_adapters.easy8": mock_easy8_mod,
+                },
+            ),
         ):
             mod.cmd_pm_init(["easy8", "--no-webhooks", "--admin-key", secret])
 
@@ -429,7 +470,7 @@ class TestPmInitTask63:
 
     def test_admin_key_not_written_to_dotenv(self, tmp_path: Path) -> None:
         """No .env file is created, and any existing one isn't touched with the key."""
-        platform_yaml = _make_platform_yaml(tmp_path, with_pm_sync=True)
+        _make_platform_yaml(tmp_path, with_pm_sync=True)
         secret = "super-secret-admin-key-987"
 
         # Stage an existing .env to ensure init doesn't tamper with it
@@ -448,23 +489,30 @@ class TestPmInitTask63:
 
         mock_adapter = MagicMock()
         mock_adapter.provision_project.return_value = MagicMock(
-            id=1, name="Otaman", identifier="otaman",
+            id=1,
+            name="Otaman",
+            identifier="otaman",
         )
 
         mock_easy8_mod = MagicMock()
         mock_easy8_mod.Easy8Adapter = MagicMock(return_value=mock_adapter)
         mock_easy8_mod.EASY8_CAPABILITIES = MagicMock(
-            agent_identity_user=True, agent_identity_group=True,
+            agent_identity_user=True,
+            agent_identity_group=True,
         )
 
         import otaman_cli.pm.cmd_init as mod
+
         with (
             patch.object(mod, "load_pm_sync_config", return_value=mock_config),
             patch.object(mod, "find_project_root", return_value=tmp_path),
-            patch.dict("sys.modules", {
-                "otaman_adapters": MagicMock(),
-                "otaman_adapters.easy8": mock_easy8_mod,
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "otaman_adapters": MagicMock(),
+                    "otaman_adapters.easy8": mock_easy8_mod,
+                },
+            ),
         ):
             mod.cmd_pm_init(["easy8", "--no-webhooks", "--admin-key", secret])
 
@@ -491,31 +539,36 @@ class TestPmInitTask63:
 
         mock_adapter = MagicMock()
         mock_adapter.provision_project.return_value = MagicMock(
-            id=1, name="Otaman", identifier="otaman",
+            id=1,
+            name="Otaman",
+            identifier="otaman",
         )
 
         mock_easy8_mod = MagicMock()
         mock_easy8_mod.Easy8Adapter = MagicMock(return_value=mock_adapter)
         mock_easy8_mod.EASY8_CAPABILITIES = MagicMock(
-            agent_identity_user=True, agent_identity_group=True,
+            agent_identity_user=True,
+            agent_identity_group=True,
         )
 
         import otaman_cli.pm.cmd_init as mod
+
         with (
             patch.object(mod, "load_pm_sync_config", return_value=mock_config),
             patch.object(mod, "find_project_root", return_value=tmp_path),
-            patch.dict("sys.modules", {
-                "otaman_adapters": MagicMock(),
-                "otaman_adapters.easy8": mock_easy8_mod,
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "otaman_adapters": MagicMock(),
+                    "otaman_adapters.easy8": mock_easy8_mod,
+                },
+            ),
             patch.dict(os.environ, {"OTAMAN_PM_ADMIN_KEY": "leftover-from-shell"}),
         ):
             mod.cmd_pm_init(["easy8", "--no-webhooks"])
         out = capsys.readouterr().out.lower()
         # 5.7 — warning surfaces the admin-key env var name + rotation/unset hint
-        assert "otaman_pm_admin_key" in out, (
-            f"expected env var name in output, got:\n{out}"
-        )
+        assert "otaman_pm_admin_key" in out, f"expected env var name in output, got:\n{out}"
         assert any(kw in out for kw in ("rotate", "unset", "still set")), (
             f"expected rotation/unset hint, got:\n{out}"
         )
@@ -524,6 +577,7 @@ class TestPmInitTask63:
 # ---------------------------------------------------------------------------
 # Unit tests: cmd_pm_status
 # ---------------------------------------------------------------------------
+
 
 class TestCmdPmStatus:
     """Tests for cmd_pm_status()."""
@@ -570,6 +624,7 @@ class TestCmdPmStatus:
 # Dispatch tests: unknown subcommand + integration
 # ---------------------------------------------------------------------------
 
+
 class TestPmDispatch:
     """Tests for the pm subcommand router in main.py."""
 
@@ -598,8 +653,8 @@ class TestMainPmIntegration:
         """main(['pm', 'init', 'easy8', '--dry-run']) in a project with pm-sync exits 0."""
         _make_platform_yaml(tmp_path, with_pm_sync=True)
 
-        from otaman_cli.main import main as otaman_main
         import otaman_cli.pm.cmd_init as mod
+        from otaman_cli.main import main as otaman_main
 
         mock_config = MagicMock()
         mock_config.base_url = "http://pm.example.com"
@@ -610,7 +665,10 @@ class TestMainPmIntegration:
         with (
             patch.object(mod, "load_pm_sync_config", return_value=mock_config),
             patch.object(mod, "find_project_root", return_value=tmp_path),
-            patch.dict("sys.modules", {"otaman_adapters": MagicMock(), "otaman_adapters.easy8": MagicMock()}),
+            patch.dict(
+                "sys.modules",
+                {"otaman_adapters": MagicMock(), "otaman_adapters.easy8": MagicMock()},
+            ),
             patch("sys.argv", ["otaman", "pm", "init", "easy8", "--dry-run"]),
         ):
             rc = otaman_main()

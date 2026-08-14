@@ -1,9 +1,7 @@
 """Tests for checkpoint.py — failure recovery (tasks.md 2.3)."""
+
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
 import yaml
 
 from otaman_cli.onboard.program_init.checkpoint import Checkpoint

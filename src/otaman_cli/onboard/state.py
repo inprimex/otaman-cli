@@ -17,12 +17,14 @@ from typing import Any
 import yaml
 
 # Known role names. Adding a role here is an explicit API change.
-KNOWN_ROLES = frozenset({
-    "otaman:admin",
-    "otaman:approver",
-    "otaman:developer",
-    "otaman:viewer",
-})
+KNOWN_ROLES = frozenset(
+    {
+        "otaman:admin",
+        "otaman:approver",
+        "otaman:developer",
+        "otaman:viewer",
+    }
+)
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -39,7 +41,7 @@ class User:
     unix_user: str | None = None
     unix_groups: list[str] = field(default_factory=list)
     telegram_id: int | None = None
-    user_id: str | None = None        # Zitadel sub claim — None in v0 MVP
+    user_id: str | None = None  # Zitadel sub claim — None in v0 MVP
     created_at: str = ""
     last_seen: str | None = None
     enabled: bool = True
@@ -60,7 +62,7 @@ class User:
         return out
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "User":
+    def from_dict(cls, d: dict[str, Any]) -> User:
         if "email" not in d:
             raise StateError("user record missing required field: email")
         if "roles" not in d:
@@ -89,9 +91,7 @@ def validate_roles(roles: list[str]) -> None:
         raise StateError("roles list must not be empty")
     for r in roles:
         if r not in KNOWN_ROLES:
-            raise StateError(
-                f"unknown role: {r!r}. Known roles: {sorted(KNOWN_ROLES)}"
-            )
+            raise StateError(f"unknown role: {r!r}. Known roles: {sorted(KNOWN_ROLES)}")
 
 
 def default_state_dir() -> Path:

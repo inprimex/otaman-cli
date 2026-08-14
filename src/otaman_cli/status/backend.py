@@ -15,11 +15,11 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 import yaml
 
-from otaman_cli.status.models import AgentStatus, State
+from otaman_cli.status.models import AgentStatus
 
 
 # ---------------------------------------------------------------- feature switch
@@ -104,7 +104,9 @@ class FileStatusBackend:
         data = status.to_dict()
         # Atomic write: tmpfile in the same dir + os.replace
         fd, tmp_path = tempfile.mkstemp(
-            prefix=f".{status.agent}.", suffix=".yaml.tmp", dir=str(self._dir),
+            prefix=f".{status.agent}.",
+            suffix=".yaml.tmp",
+            dir=str(self._dir),
         )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:

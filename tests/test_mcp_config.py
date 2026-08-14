@@ -2,24 +2,23 @@
 
 from __future__ import annotations
 
-import io
 import json
 import time
-from contextlib import redirect_stdout
 from pathlib import Path
 
-import pytest
-
 from otaman_cli import mcp_config
-
 
 # ---- Helpers ----------------------------------------------------------
 
 
 def _write_token(path: Path, *, access_token="tok-abc", expires_at=None):
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = {"access_token": access_token, "expires_at": expires_at or 0,
-            "issuer": "https://x", "client_id": "c"}
+    data = {
+        "access_token": access_token,
+        "expires_at": expires_at or 0,
+        "issuer": "https://x",
+        "client_id": "c",
+    }
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
@@ -79,13 +78,17 @@ class TestBuildConfig:
 
     def test_bridge_url_trailing_slash_stripped(self):
         cfg = mcp_config.build_config(
-            bridge_url="http://localhost:8090/", token="t", server_name="s",
+            bridge_url="http://localhost:8090/",
+            token="t",
+            server_name="s",
         )
         assert cfg["mcpServers"]["s"]["url"] == "http://localhost:8090/mcp"
 
     def test_custom_server_name(self):
         cfg = mcp_config.build_config(
-            bridge_url="http://x", token="t", server_name="my-name",
+            bridge_url="http://x",
+            token="t",
+            server_name="my-name",
         )
         assert "my-name" in cfg["mcpServers"]
 
@@ -95,10 +98,14 @@ class TestBuildConfig:
 
 class TestMain:
     def test_no_token_returns_1(self, tmp_path, capsys):
-        rc = mcp_config.main([
-            "--bridge-url", "http://localhost:8090",
-            "--token-cache", str(tmp_path / "missing"),
-        ])
+        rc = mcp_config.main(
+            [
+                "--bridge-url",
+                "http://localhost:8090",
+                "--token-cache",
+                str(tmp_path / "missing"),
+            ]
+        )
         assert rc == 1
         err = capsys.readouterr().err
         assert "otaman login" in err
@@ -106,10 +113,14 @@ class TestMain:
     def test_expired_token_returns_1_without_allow_expired(self, tmp_path, capsys):
         cache = tmp_path / "token.cache"
         _write_token(cache, expires_at=int(time.time()) - 100)
-        rc = mcp_config.main([
-            "--bridge-url", "http://localhost:8090",
-            "--token-cache", str(cache),
-        ])
+        rc = mcp_config.main(
+            [
+                "--bridge-url",
+                "http://localhost:8090",
+                "--token-cache",
+                str(cache),
+            ]
+        )
         assert rc == 1
         err = capsys.readouterr().err
         assert "expired" in err
@@ -117,11 +128,15 @@ class TestMain:
     def test_allow_expired_emits_config(self, tmp_path, capsys):
         cache = tmp_path / "token.cache"
         _write_token(cache, expires_at=int(time.time()) - 100, access_token="stale")
-        rc = mcp_config.main([
-            "--bridge-url", "http://localhost:8090",
-            "--token-cache", str(cache),
-            "--allow-expired",
-        ])
+        rc = mcp_config.main(
+            [
+                "--bridge-url",
+                "http://localhost:8090",
+                "--token-cache",
+                str(cache),
+                "--allow-expired",
+            ]
+        )
         assert rc == 0
         out = capsys.readouterr().out
         cfg = json.loads(out)
@@ -130,10 +145,14 @@ class TestMain:
     def test_valid_token_stdout_emits_pretty_json(self, tmp_path, capsys):
         cache = tmp_path / "token.cache"
         _write_token(cache, access_token="abc", expires_at=int(time.time()) + 3600)
-        rc = mcp_config.main([
-            "--bridge-url", "http://localhost:8090",
-            "--token-cache", str(cache),
-        ])
+        rc = mcp_config.main(
+            [
+                "--bridge-url",
+                "http://localhost:8090",
+                "--token-cache",
+                str(cache),
+            ]
+        )
         assert rc == 0
         out = capsys.readouterr().out
         assert "\n" in out  # indented
@@ -144,11 +163,16 @@ class TestMain:
         cache = tmp_path / "token.cache"
         _write_token(cache, access_token="abc", expires_at=int(time.time()) + 3600)
         out_file = tmp_path / "out" / ".mcp.json"
-        rc = mcp_config.main([
-            "--bridge-url", "http://localhost:8090",
-            "--token-cache", str(cache),
-            "--output", str(out_file),
-        ])
+        rc = mcp_config.main(
+            [
+                "--bridge-url",
+                "http://localhost:8090",
+                "--token-cache",
+                str(cache),
+                "--output",
+                str(out_file),
+            ]
+        )
         assert rc == 0
         assert out_file.is_file()
         cfg = json.loads(out_file.read_text())
@@ -157,11 +181,16 @@ class TestMain:
     def test_custom_server_name_arg(self, tmp_path, capsys):
         cache = tmp_path / "token.cache"
         _write_token(cache, access_token="t", expires_at=int(time.time()) + 3600)
-        mcp_config.main([
-            "--bridge-url", "http://localhost:8090",
-            "--token-cache", str(cache),
-            "--server-name", "custom-name",
-        ])
+        mcp_config.main(
+            [
+                "--bridge-url",
+                "http://localhost:8090",
+                "--token-cache",
+                str(cache),
+                "--server-name",
+                "custom-name",
+            ]
+        )
         out = capsys.readouterr().out
         cfg = json.loads(out)
         assert "custom-name" in cfg["mcpServers"]
@@ -169,11 +198,16 @@ class TestMain:
     def test_indent_zero_emits_single_line(self, tmp_path, capsys):
         cache = tmp_path / "token.cache"
         _write_token(cache, access_token="t", expires_at=int(time.time()) + 3600)
-        mcp_config.main([
-            "--bridge-url", "http://localhost:8090",
-            "--token-cache", str(cache),
-            "--indent", "0",
-        ])
+        mcp_config.main(
+            [
+                "--bridge-url",
+                "http://localhost:8090",
+                "--token-cache",
+                str(cache),
+                "--indent",
+                "0",
+            ]
+        )
         out = capsys.readouterr().out.strip()
         assert "\n" not in out  # single line
         json.loads(out)  # still valid JSON

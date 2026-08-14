@@ -20,7 +20,6 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-
 _OUTCOME_ID_RE = re.compile(r"^JTBD-\d+-[a-z0-9-]+$")
 
 
@@ -142,6 +141,7 @@ class Outcome(BaseModel):
     @classmethod
     def _product_notes_null_to_empty(cls, v: Any) -> str:
         return "" if v is None else v
+
     created: date
     updated: date
     transitions: list[Transition] = Field(default_factory=list)
@@ -182,8 +182,7 @@ class Outcome(BaseModel):
                 expected = promote_target(OutcomeStatus(t.from_))
                 if expected is None or OutcomeStatus(t.to) != expected:
                     raise ValueError(
-                        f"outcome {self.id}: transition[{i}] illegal promote "
-                        f"{t.from_}->{t.to}"
+                        f"outcome {self.id}: transition[{i}] illegal promote {t.from_}->{t.to}"
                     )
                 current = OutcomeStatus(t.to)
             elif t.action == "demote":
@@ -194,8 +193,7 @@ class Outcome(BaseModel):
                 expected = demote_target(OutcomeStatus(t.from_))
                 if expected is None or OutcomeStatus(t.to) != expected:
                     raise ValueError(
-                        f"outcome {self.id}: transition[{i}] illegal demote "
-                        f"{t.from_}->{t.to}"
+                        f"outcome {self.id}: transition[{i}] illegal demote {t.from_}->{t.to}"
                     )
                 current = OutcomeStatus(t.to)
             elif t.action == "accept-cost":

@@ -14,7 +14,6 @@ from otaman_cli.project._platform import (
     update_repo,
 )
 
-
 _UPDATABLE_FIELDS = ("owner", "path", "url", "description")
 
 
@@ -32,12 +31,20 @@ def cmd_project_update(
     # Build fields dict; map user-facing --url flag onto the schema-accepted
     # `remote:` key on the platform.yaml repo entry.
     fields: dict[str, Any] = {
-        k: v for k, v in {
-            "owner": owner, "path": path, "remote": url, "description": description,
-        }.items() if v is not None
+        k: v
+        for k, v in {
+            "owner": owner,
+            "path": path,
+            "remote": url,
+            "description": description,
+        }.items()
+        if v is not None
     }
     if not fields:
-        UI.error("No field flags provided. At least one of --owner / --path / --url / --description required.")
+        UI.error(
+            "No field flags provided. "
+            "At least one of --owner / --path / --url / --description required."
+        )
         return 1
     root = find_project_root()
     if root is None:
@@ -63,7 +70,8 @@ def cmd_project_update(
     UI.ok(f"Updated {name}: {field_list}")
 
     rc, out = git_commit_platform_yaml(
-        root, f"chore(platform): update repo {name} fields ({field_list})",
+        root,
+        f"chore(platform): update repo {name} fields ({field_list})",
     )
     if rc != 0:
         UI.warn(f"git commit failed (file written): {out.strip()[:120]}")

@@ -43,7 +43,10 @@ def _run(meta: Path, *cli_args: str) -> subprocess.CompletedProcess:
     env = {**os.environ, "OTAMAN_AGENT": "human"}
     return subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", *cli_args],
-        capture_output=True, text=True, cwd=str(meta), env=env,
+        capture_output=True,
+        text=True,
+        cwd=str(meta),
+        env=env,
     )
 
 
@@ -78,13 +81,22 @@ def _active_bus_messages(meta: Path, msg_type: str | None = None) -> list[Path]:
 
 def test_outcome_add_writes_yaml(project: Path) -> None:
     rc = _run(
-        project, "outcome", "add", "JTBD-1-create-account",
-        "--as-a", "new user",
-        "--i-want-to", "create an account",
-        "--incremental-outcome", "have verified account",
-        "--so-i-can", "use TaskFlow",
-        "--priority", "P0",
-        "--impact", "L",
+        project,
+        "outcome",
+        "add",
+        "JTBD-1-create-account",
+        "--as-a",
+        "new user",
+        "--i-want-to",
+        "create an account",
+        "--incremental-outcome",
+        "have verified account",
+        "--so-i-can",
+        "use TaskFlow",
+        "--priority",
+        "P0",
+        "--impact",
+        "L",
     )
     assert rc.returncode == 0, rc.stderr or rc.stdout
 
@@ -108,9 +120,18 @@ def test_outcome_add_missing_required_field_errors(project: Path) -> None:
 
 def test_outcome_add_invalid_id_format_fails_validation(project: Path) -> None:
     rc = _run(
-        project, "outcome", "add", "not-a-jtbd-id",
-        "--as-a", "u", "--i-want-to", "t",
-        "--incremental-outcome", "x", "--so-i-can", "y",
+        project,
+        "outcome",
+        "add",
+        "not-a-jtbd-id",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
     )
     assert rc.returncode == 2, rc.stdout + rc.stderr
     # Pydantic message includes the regex pattern
@@ -123,9 +144,18 @@ def test_outcome_add_invalid_id_format_fails_validation(project: Path) -> None:
 
 def test_outcome_list_and_show(project: Path) -> None:
     _run(
-        project, "outcome", "add", "JTBD-1-x",
-        "--as-a", "u", "--i-want-to", "t",
-        "--incremental-outcome", "x", "--so-i-can", "y",
+        project,
+        "outcome",
+        "add",
+        "JTBD-1-x",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
     )
     rc = _run(project, "outcome", "list")
     assert rc.returncode == 0
@@ -139,9 +169,18 @@ def test_outcome_list_and_show(project: Path) -> None:
 
 def test_outcome_history(project: Path) -> None:
     _run(
-        project, "outcome", "add", "JTBD-1-x",
-        "--as-a", "u", "--i-want-to", "t",
-        "--incremental-outcome", "x", "--so-i-can", "y",
+        project,
+        "outcome",
+        "add",
+        "JTBD-1-x",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
     )
     rc = _run(project, "outcome", "history", "JTBD-1-x")
     assert rc.returncode == 0
@@ -154,9 +193,18 @@ def test_outcome_history(project: Path) -> None:
 
 def test_outcome_promote_emits_bus_message(project: Path) -> None:
     _run(
-        project, "outcome", "add", "JTBD-1-x",
-        "--as-a", "u", "--i-want-to", "t",
-        "--incremental-outcome", "x", "--so-i-can", "y",
+        project,
+        "outcome",
+        "add",
+        "JTBD-1-x",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
     )
     rc = _run(project, "outcome", "promote", "JTBD-1-x")
     assert rc.returncode == 0, rc.stderr or rc.stdout
@@ -171,9 +219,18 @@ def test_outcome_promote_emits_bus_message(project: Path) -> None:
 
 def test_outcome_cannot_promote_terminal_state(project: Path) -> None:
     _run(
-        project, "outcome", "add", "JTBD-1-x",
-        "--as-a", "u", "--i-want-to", "t",
-        "--incremental-outcome", "x", "--so-i-can", "y",
+        project,
+        "outcome",
+        "add",
+        "JTBD-1-x",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
     )
     # Drafting → Backlog → Approved → In-Progress → Done
     for _ in range(4):
@@ -190,9 +247,18 @@ def test_outcome_cannot_promote_terminal_state(project: Path) -> None:
 
 def test_outcome_request_estimate_emits_bus_message(project: Path) -> None:
     _run(
-        project, "outcome", "add", "JTBD-1-x",
-        "--as-a", "u", "--i-want-to", "t",
-        "--incremental-outcome", "x", "--so-i-can", "y",
+        project,
+        "outcome",
+        "add",
+        "JTBD-1-x",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
     )
     rc = _run(project, "outcome", "request-estimate", "JTBD-1-x")
     assert rc.returncode == 0
@@ -208,18 +274,36 @@ def test_outcome_request_estimate_emits_bus_message(project: Path) -> None:
 
 def test_solution_add_writes_yaml(project: Path) -> None:
     _run(
-        project, "outcome", "add", "JTBD-1-x",
-        "--as-a", "u", "--i-want-to", "t",
-        "--incremental-outcome", "x", "--so-i-can", "y",
+        project,
+        "outcome",
+        "add",
+        "JTBD-1-x",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
     )
     rc = _run(
-        project, "solution", "add", "SOL-1-foo",
-        "--outcome", "JTBD-1-x",
-        "--description", "Solve it with X",
-        "--t-shirt", "Small",
-        "--pro", "Fast",
-        "--con", "Limited",
-        "--depends-on", "external:Email provider",
+        project,
+        "solution",
+        "add",
+        "SOL-1-foo",
+        "--outcome",
+        "JTBD-1-x",
+        "--description",
+        "Solve it with X",
+        "--t-shirt",
+        "Small",
+        "--pro",
+        "Fast",
+        "--con",
+        "Limited",
+        "--depends-on",
+        "external:Email provider",
     )
     assert rc.returncode == 0, rc.stderr or rc.stdout
 
@@ -238,15 +322,30 @@ def test_solution_add_writes_yaml(project: Path) -> None:
 
 def test_solution_add_rejects_self_reference(project: Path) -> None:
     _run(
-        project, "outcome", "add", "JTBD-1-x",
-        "--as-a", "u", "--i-want-to", "t",
-        "--incremental-outcome", "x", "--so-i-can", "y",
+        project,
+        "outcome",
+        "add",
+        "JTBD-1-x",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
     )
     rc = _run(
-        project, "solution", "add", "SOL-1-foo",
-        "--outcome", "JTBD-1-x",
-        "--description", "x",
-        "--depends-on", "solution:SOL-1-foo",
+        project,
+        "solution",
+        "add",
+        "SOL-1-foo",
+        "--outcome",
+        "JTBD-1-x",
+        "--description",
+        "x",
+        "--depends-on",
+        "solution:SOL-1-foo",
     )
     assert rc.returncode == 2
     assert "self-reference" in (rc.stdout + rc.stderr)
@@ -258,15 +357,30 @@ def test_solution_add_rejects_self_reference(project: Path) -> None:
 
 def test_solution_propose_emits_bus_message(project: Path) -> None:
     _run(
-        project, "outcome", "add", "JTBD-1-x",
-        "--as-a", "u", "--i-want-to", "t",
-        "--incremental-outcome", "x", "--so-i-can", "y",
+        project,
+        "outcome",
+        "add",
+        "JTBD-1-x",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
     )
     _run(
-        project, "solution", "add", "SOL-1-foo",
-        "--outcome", "JTBD-1-x",
-        "--description", "x",
-        "--t-shirt", "Small",
+        project,
+        "solution",
+        "add",
+        "SOL-1-foo",
+        "--outcome",
+        "JTBD-1-x",
+        "--description",
+        "x",
+        "--t-shirt",
+        "Small",
     )
     rc = _run(project, "solution", "propose", "SOL-1-foo")
     assert rc.returncode == 0, rc.stderr or rc.stdout
@@ -282,22 +396,44 @@ def test_solution_propose_emits_bus_message(project: Path) -> None:
 
 def test_full_acceptcost_flow_emits_3_bus_messages(project: Path) -> None:
     _run(
-        project, "outcome", "add", "JTBD-1-x",
-        "--as-a", "u", "--i-want-to", "t",
-        "--incremental-outcome", "x", "--so-i-can", "y",
-        "--priority", "P0", "--impact", "L",
+        project,
+        "outcome",
+        "add",
+        "JTBD-1-x",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
+        "--priority",
+        "P0",
+        "--impact",
+        "L",
     )
     _run(project, "outcome", "promote", "JTBD-1-x")  # → Backlog
     _run(project, "outcome", "request-estimate", "JTBD-1-x")
     _run(
-        project, "solution", "add", "SOL-1-foo",
-        "--outcome", "JTBD-1-x",
-        "--description", "x",
-        "--t-shirt", "Small",
+        project,
+        "solution",
+        "add",
+        "SOL-1-foo",
+        "--outcome",
+        "JTBD-1-x",
+        "--description",
+        "x",
+        "--t-shirt",
+        "Small",
     )
     rc = _run(
-        project, "outcome", "accept-cost", "JTBD-1-x",
-        "--solution", "SOL-1-foo",
+        project,
+        "outcome",
+        "accept-cost",
+        "JTBD-1-x",
+        "--solution",
+        "SOL-1-foo",
     )
     assert rc.returncode == 0, rc.stderr or rc.stdout
 
@@ -324,9 +460,18 @@ def test_full_acceptcost_flow_emits_3_bus_messages(project: Path) -> None:
 
 def test_outcome_reject_cost_emits_bus_message(project: Path) -> None:
     _run(
-        project, "outcome", "add", "JTBD-1-x",
-        "--as-a", "u", "--i-want-to", "t",
-        "--incremental-outcome", "x", "--so-i-can", "y",
+        project,
+        "outcome",
+        "add",
+        "JTBD-1-x",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
     )
     rc = _run(project, "outcome", "reject-cost", "JTBD-1-x", "--reason", "too expensive")
     assert rc.returncode == 0
@@ -342,9 +487,18 @@ def test_outcome_reject_cost_emits_bus_message(project: Path) -> None:
 
 def test_outcome_retire_emits_bus_message(project: Path) -> None:
     _run(
-        project, "outcome", "add", "JTBD-1-x",
-        "--as-a", "u", "--i-want-to", "t",
-        "--incremental-outcome", "x", "--so-i-can", "y",
+        project,
+        "outcome",
+        "add",
+        "JTBD-1-x",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
     )
     rc = _run(project, "outcome", "retire", "JTBD-1-x", "--reason", "deprioritised")
     assert rc.returncode == 0
@@ -360,13 +514,28 @@ def test_outcome_retire_emits_bus_message(project: Path) -> None:
 
 def test_solution_discard_emits_bus_message(project: Path) -> None:
     _run(
-        project, "outcome", "add", "JTBD-1-x",
-        "--as-a", "u", "--i-want-to", "t",
-        "--incremental-outcome", "x", "--so-i-can", "y",
+        project,
+        "outcome",
+        "add",
+        "JTBD-1-x",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
     )
     _run(
-        project, "solution", "add", "SOL-1-foo",
-        "--outcome", "JTBD-1-x", "--description", "x",
+        project,
+        "solution",
+        "add",
+        "SOL-1-foo",
+        "--outcome",
+        "JTBD-1-x",
+        "--description",
+        "x",
     )
     rc = _run(project, "solution", "discard", "SOL-1-foo", "--reason", "rejected approach")
     assert rc.returncode == 0
@@ -382,10 +551,16 @@ def test_solution_discard_emits_bus_message(project: Path) -> None:
 
 def test_persona_add_and_show(project: Path) -> None:
     rc = _run(
-        project, "persona", "add", "persona-end-user",
-        "--name", "End user",
-        "--description", "A user using TaskFlow",
-        "--kind", "end-user",
+        project,
+        "persona",
+        "add",
+        "persona-end-user",
+        "--name",
+        "End user",
+        "--description",
+        "A user using TaskFlow",
+        "--kind",
+        "end-user",
     )
     assert rc.returncode == 0
     data = yaml_load(_personas_path(project))
@@ -399,8 +574,16 @@ def test_persona_add_and_show(project: Path) -> None:
 
 def test_persona_retire_sets_status(project: Path) -> None:
     _run(
-        project, "persona", "add", "persona-end-user",
-        "--name", "X", "--description", "Y", "--kind", "end-user",
+        project,
+        "persona",
+        "add",
+        "persona-end-user",
+        "--name",
+        "X",
+        "--description",
+        "Y",
+        "--kind",
+        "end-user",
     )
     rc = _run(project, "persona", "retire", "persona-end-user", "--reason", "consolidated")
     assert rc.returncode == 0
@@ -410,8 +593,16 @@ def test_persona_retire_sets_status(project: Path) -> None:
 
 def test_persona_invalid_kind_rejected(project: Path) -> None:
     rc = _run(
-        project, "persona", "add", "persona-robot",
-        "--name", "Bot", "--description", "X", "--kind", "robot",
+        project,
+        "persona",
+        "add",
+        "persona-robot",
+        "--name",
+        "Bot",
+        "--description",
+        "X",
+        "--kind",
+        "robot",
     )
     assert rc.returncode != 0
     assert "Invalid kind" in (rc.stdout + rc.stderr)
@@ -425,16 +616,32 @@ def test_solution_add_with_impact_emits_recommendation(project: Path) -> None:
     """Task 7.2: when parent outcome has impact, `solution add` emits
     a solution-recommendation bus message via auto-triage."""
     _run(
-        project, "outcome", "add", "JTBD-1-x",
-        "--as-a", "u", "--i-want-to", "t",
-        "--incremental-outcome", "x", "--so-i-can", "y",
-        "--impact", "L",
+        project,
+        "outcome",
+        "add",
+        "JTBD-1-x",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
+        "--impact",
+        "L",
     )
     rc = _run(
-        project, "solution", "add", "SOL-1-foo",
-        "--outcome", "JTBD-1-x",
-        "--description", "x",
-        "--t-shirt", "Small",  # → 3 effort-days
+        project,
+        "solution",
+        "add",
+        "SOL-1-foo",
+        "--outcome",
+        "JTBD-1-x",
+        "--description",
+        "x",
+        "--t-shirt",
+        "Small",  # → 3 effort-days
     )
     assert rc.returncode == 0, rc.stderr or rc.stdout
     assert "Triage: recommended SOL-1-foo" in rc.stdout
@@ -451,14 +658,31 @@ def test_solution_add_with_impact_emits_recommendation(project: Path) -> None:
 def test_solution_add_without_impact_skips_triage(project: Path) -> None:
     """G.3: outcome.impact null → no recommendation emitted."""
     _run(
-        project, "outcome", "add", "JTBD-1-x",
-        "--as-a", "u", "--i-want-to", "t",
-        "--incremental-outcome", "x", "--so-i-can", "y",
+        project,
+        "outcome",
+        "add",
+        "JTBD-1-x",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
         # no --impact set
     )
     rc = _run(
-        project, "solution", "add", "SOL-1-foo",
-        "--outcome", "JTBD-1-x", "--description", "x", "--t-shirt", "Small",
+        project,
+        "solution",
+        "add",
+        "SOL-1-foo",
+        "--outcome",
+        "JTBD-1-x",
+        "--description",
+        "x",
+        "--t-shirt",
+        "Small",
     )
     assert rc.returncode == 0
     msgs = _active_bus_messages(project, "solution-recommendation")
@@ -468,18 +692,44 @@ def test_solution_add_without_impact_skips_triage(project: Path) -> None:
 def test_solution_add_recommendation_picks_cheapest(project: Path) -> None:
     """Two candidates with different effort — triage picks cheapest."""
     _run(
-        project, "outcome", "add", "JTBD-1-x",
-        "--as-a", "u", "--i-want-to", "t",
-        "--incremental-outcome", "x", "--so-i-can", "y",
-        "--impact", "M",
+        project,
+        "outcome",
+        "add",
+        "JTBD-1-x",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
+        "--impact",
+        "M",
     )
     _run(
-        project, "solution", "add", "SOL-1-expensive",
-        "--outcome", "JTBD-1-x", "--description", "x", "--t-shirt", "Large",  # 15d
+        project,
+        "solution",
+        "add",
+        "SOL-1-expensive",
+        "--outcome",
+        "JTBD-1-x",
+        "--description",
+        "x",
+        "--t-shirt",
+        "Large",  # 15d
     )
     rc = _run(
-        project, "solution", "add", "SOL-2-cheap",
-        "--outcome", "JTBD-1-x", "--description", "y", "--t-shirt", "Small",  # 3d
+        project,
+        "solution",
+        "add",
+        "SOL-2-cheap",
+        "--outcome",
+        "JTBD-1-x",
+        "--description",
+        "y",
+        "--t-shirt",
+        "Small",  # 3d
     )
     assert rc.returncode == 0
     # SOL-2-cheap has the higher score (3/3=1.0 vs 3/15=0.2) → recommended now
@@ -490,11 +740,26 @@ def test_unauthorized_actor_emits_warning_but_proceeds(project: Path, monkeypatc
     # role-assignments has cpo:human, but actor is "stranger" (no cpo role)
     env = {**os.environ, "OTAMAN_AGENT": "stranger"}
     rc = subprocess.run(
-        [sys.executable, "-m", "otaman_cli.main",
-         "outcome", "add", "JTBD-1-x",
-         "--as-a", "u", "--i-want-to", "t",
-         "--incremental-outcome", "x", "--so-i-can", "y"],
-        capture_output=True, text=True, cwd=str(project), env=env,
+        [
+            sys.executable,
+            "-m",
+            "otaman_cli.main",
+            "outcome",
+            "add",
+            "JTBD-1-x",
+            "--as-a",
+            "u",
+            "--i-want-to",
+            "t",
+            "--incremental-outcome",
+            "x",
+            "--so-i-can",
+            "y",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(project),
+        env=env,
     )
     # v1 advisory-only: command succeeds despite role mismatch
     assert rc.returncode == 0

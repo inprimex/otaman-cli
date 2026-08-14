@@ -15,7 +15,7 @@ import subprocess
 from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.main import C, UI, run_script
+from otaman_cli.main import UI, C, run_script
 
 
 def _find_existing_otaman_project(scan_root: Path) -> Path | None:
@@ -34,7 +34,9 @@ def _find_existing_otaman_project(scan_root: Path) -> Path | None:
         for child in scan_root.iterdir():
             if not child.is_dir():
                 continue
-            if child.name.endswith("-otaman") or child.name.endswith("-maestro"):  # legacy: -maestro suffix until otaman-core 1.0
+            if child.name.endswith("-otaman") or child.name.endswith(
+                "-maestro"  # legacy: -maestro suffix until otaman-core 1.0
+            ):
                 if (child / "platform.yaml").is_file():
                     return child
     if (scan_root / ".agents").is_dir():
@@ -54,7 +56,10 @@ def cmd_scan(args: list[str]) -> int:
         if args[i] == "--update":
             update = True
             i += 1
-        elif args[i] in ("--maestro-dir", "--otaman-dir", "--target") and i + 1 < len(args):  # legacy: backward-compat arg
+        elif (
+            args[i] in ("--maestro-dir", "--otaman-dir", "--target")  # legacy: backward-compat
+            and i + 1 < len(args)
+        ):
             maestro_dir = args[i + 1]
             i += 2
         elif args[i] == "--dry-run":
@@ -93,12 +98,19 @@ def cmd_scan(args: list[str]) -> int:
         if existing:
             UI.warn(f"This directory already looks like an otaman project: {existing}")
             UI.muted("Existing platform.yaml found. Options:")
-            UI.muted(f"  otaman scan {scan_path} --update --otaman-dir {existing}    # re-scan + merge")
+            UI.muted(
+                f"  otaman scan {scan_path} --update --otaman-dir {existing}    # re-scan + merge"
+            )
             if dry_run:
-                UI.muted("Continuing in dry-run mode for inspection only — no changes will be written.")
+                UI.muted(
+                    "Continuing in dry-run mode for inspection only — no changes will be written."
+                )
                 print()
             else:
-                UI.muted("  otaman scan {0} --update --dry-run --otaman-dir {1}    # preview a merge".format(scan_path, existing))
+                UI.muted(
+                    f"  otaman scan {scan_path} --update --dry-run "
+                    f"--otaman-dir {existing}    # preview a merge"
+                )
                 return 1
 
     # Determine otaman folder
@@ -108,10 +120,14 @@ def cmd_scan(args: list[str]) -> int:
         # Project name: --name override, else sanitised scan-folder basename
         if project_name_override:
             project_name = project_name_override.lower().replace(" ", "-").replace("_", "-")
-            project_name = "".join(c for c in project_name if c.isalnum() or c == "-") or "my-platform"
+            project_name = (
+                "".join(c for c in project_name if c.isalnum() or c == "-") or "my-platform"
+            )
         else:
             project_name = resolved.name.lower().replace(" ", "-").replace("_", "-")
-            project_name = "".join(c for c in project_name if c.isalnum() or c == "-") or "my-platform"
+            project_name = (
+                "".join(c for c in project_name if c.isalnum() or c == "-") or "my-platform"
+            )
         # Default folder name: {project}-otaman/ (legacy: was {project}-maestro/ pre-rebrand;
         # back-compat handled by 2B.1-B existing-project detection).
         maestro_path = resolved / f"{project_name}-otaman"
@@ -128,7 +144,10 @@ def cmd_scan(args: list[str]) -> int:
             if not (maestro_path / ".git").exists():
                 UI.muted(f"  [dry-run] would `git init` in {maestro_path.name}/")
             if not (maestro_path / ".gitignore").exists():
-                UI.muted(f"  [dry-run] would create .gitignore (.agents/bus,blocked,queue,sessions,current-agent)")
+                UI.muted(
+                    "  [dry-run] would create .gitignore "
+                    "(.agents/bus,blocked,queue,sessions,current-agent)"
+                )
             print()
         else:
             # Create otaman folder + git init
@@ -165,6 +184,7 @@ def cmd_scan(args: list[str]) -> int:
     # returns rc=1 for no-repos (legitimate empty result), and we want to
     # surface friendly hints rather than the raw JSON dump.
     import json
+
     try:
         report = json.loads(result.stdout)
     except (json.JSONDecodeError, ValueError):
@@ -215,11 +235,18 @@ def cmd_scan(args: list[str]) -> int:
     monorepo_repos = [r for r in repos if r.get("is_monorepo")]
     if monorepo_repos:
         print()
-        UI.warn(f"{len(monorepo_repos)} repo(s) detected as monorepos (multiple package.json/pyproject at nested depths).")
+        UI.warn(
+            f"{len(monorepo_repos)} repo(s) detected as monorepos "
+            f"(multiple package.json/pyproject at nested depths)."
+        )
         UI.muted("  Options for monorepos:")
         UI.muted("  - Treat each as one otaman repo with multiple tech tags (current default).")
-        UI.muted("  - OR split into separate sub-repos before running otaman init (cleaner ownership).")
-        UI.muted("  - See: https://github.com/inprimex/otaman-meta (polyrepo-structure.md) for guidance.")
+        UI.muted(
+            "  - OR split into separate sub-repos before running otaman init (cleaner ownership)."
+        )
+        UI.muted(
+            "  - See: https://github.com/inprimex/otaman-meta (polyrepo-structure.md) for guidance."
+        )
 
     # OpenSpec detection
     openspec = report.get("openspec")
@@ -252,7 +279,11 @@ def cmd_scan(args: list[str]) -> int:
                 UI.bullet(f"{item['name']} (updated: {fields})", icon="~", color=C.YELLOW)
         if changes.get("removed"):
             for name in changes["removed"]:
-                UI.bullet(f"{name} (in config but not found on disk - kept, verify manually)", icon="?", color=C.RED)
+                UI.bullet(
+                    f"{name} (in config but not found on disk - kept, verify manually)",
+                    icon="?",
+                    color=C.RED,
+                )
         if changes.get("unchanged"):
             count = len(changes["unchanged"])
             UI.muted(f"{count} repo(s) unchanged")
@@ -274,11 +305,14 @@ def cmd_scan(args: list[str]) -> int:
             # specs repo, missing launcher block, no OpenSpec scaffold.
             try:
                 from otaman_cli.onboard.post_scan import run as _post_scan_run
+
                 draft_path = Path(draft)
                 m_dir_str = report.get("maestro_dir", "")
                 otaman_dir_for_post = Path(m_dir_str) if m_dir_str else draft_path.parent
                 program_slug_for_post = (
-                    otaman_dir_for_post.name.removesuffix("-otaman").removesuffix("-maestro")  # legacy: -maestro suffix until otaman-core 1.0
+                    otaman_dir_for_post.name.removesuffix("-otaman").removesuffix(
+                        "-maestro"  # legacy: -maestro suffix until otaman-core 1.0
+                    )
                     or resolved.name
                 )
                 _ps_result = _post_scan_run(
@@ -315,8 +349,10 @@ def cmd_scan(args: list[str]) -> int:
     return 0
 
 
-register(CommandSpec(
-    name="scan",
-    handler=cmd_scan,
-    help="Scan repos, create otaman folder with draft config",
-))
+register(
+    CommandSpec(
+        name="scan",
+        handler=cmd_scan,
+        help="Scan repos, create otaman folder with draft config",
+    )
+)

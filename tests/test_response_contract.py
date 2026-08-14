@@ -19,16 +19,12 @@ from pathlib import Path
 import pytest
 
 from otaman_cli.response_contract import (
-    DEADLINE_WINDOW,
-    EFFORT_ORDER,
-    PRIORITY_ORDER,
     TYPE_DEFAULT_EFFORT,
     deadline_is_imminent,
     has_outbound_reply,
     make_sort_key,
     resolve_response_effort,
 )
-
 
 # ---------------------------------------------------------------------------
 # resolve_response_effort (Q4 type-defaults)
@@ -90,8 +86,12 @@ def test_default_table_matches_design_md_Q4():
 def test_priority_dominates():
     """Urgent always before high regardless of other fields."""
     urgent = {"priority": "urgent", "type": "info", "timestamp": "9"}
-    high = {"priority": "high", "type": "task-assignment",
-            "expects_response": True, "timestamp": "1"}
+    high = {
+        "priority": "high",
+        "type": "task-assignment",
+        "expects_response": True,
+        "timestamp": "1",
+    }
     assert make_sort_key(urgent) < make_sort_key(high)
 
 
@@ -104,18 +104,25 @@ def test_expects_response_true_before_false_same_priority():
 
 def test_effort_ascending_within_band():
     """Same priority + expects-response: XS sorts before XL."""
-    xs = {"priority": "normal", "type": "info", "expects_response": False}        # XS
-    l_ = {"priority": "normal", "type": "spec-change-request",
-          "expects_response": False}  # L
+    xs = {"priority": "normal", "type": "info", "expects_response": False}  # XS
+    l_ = {"priority": "normal", "type": "spec-change-request", "expects_response": False}  # L
     assert make_sort_key(xs) < make_sort_key(l_)
 
 
 def test_timestamp_ascending_as_final_tiebreaker():
     """Identical priority + expects + effort → older timestamp wins."""
-    earlier = {"priority": "normal", "type": "question",
-               "expects_response": True, "timestamp": "2026-06-01T00:00:00Z"}
-    later = {"priority": "normal", "type": "question",
-             "expects_response": True, "timestamp": "2026-06-04T00:00:00Z"}
+    earlier = {
+        "priority": "normal",
+        "type": "question",
+        "expects_response": True,
+        "timestamp": "2026-06-01T00:00:00Z",
+    }
+    later = {
+        "priority": "normal",
+        "type": "question",
+        "expects_response": True,
+        "timestamp": "2026-06-04T00:00:00Z",
+    }
     assert make_sort_key(earlier) < make_sort_key(later)
 
 
@@ -123,13 +130,55 @@ def test_full_sort_mixed_inbox():
     """Realistic mixed inbox sorts correctly end-to-end."""
     msgs = [
         # priority, type, expects_response, response_effort, timestamp
-        {"id": "low-info",       "priority": "low",    "type": "info",                  "expects_response": False, "timestamp": "t1"},
-        {"id": "high-question",  "priority": "high",   "type": "question",              "expects_response": True,  "timestamp": "t2"},
-        {"id": "normal-task",    "priority": "normal", "type": "task-assignment",       "expects_response": True,  "timestamp": "t3"},
-        {"id": "urgent-info",    "priority": "urgent", "type": "info",                  "expects_response": False, "timestamp": "t4"},
-        {"id": "normal-info",    "priority": "normal", "type": "info",                  "expects_response": False, "timestamp": "t5"},
-        {"id": "normal-q-late",  "priority": "normal", "type": "question",              "expects_response": True,  "timestamp": "t6"},
-        {"id": "normal-q-early", "priority": "normal", "type": "question",              "expects_response": True,  "timestamp": "t0"},
+        {
+            "id": "low-info",
+            "priority": "low",
+            "type": "info",
+            "expects_response": False,
+            "timestamp": "t1",
+        },
+        {
+            "id": "high-question",
+            "priority": "high",
+            "type": "question",
+            "expects_response": True,
+            "timestamp": "t2",
+        },
+        {
+            "id": "normal-task",
+            "priority": "normal",
+            "type": "task-assignment",
+            "expects_response": True,
+            "timestamp": "t3",
+        },
+        {
+            "id": "urgent-info",
+            "priority": "urgent",
+            "type": "info",
+            "expects_response": False,
+            "timestamp": "t4",
+        },
+        {
+            "id": "normal-info",
+            "priority": "normal",
+            "type": "info",
+            "expects_response": False,
+            "timestamp": "t5",
+        },
+        {
+            "id": "normal-q-late",
+            "priority": "normal",
+            "type": "question",
+            "expects_response": True,
+            "timestamp": "t6",
+        },
+        {
+            "id": "normal-q-early",
+            "priority": "normal",
+            "type": "question",
+            "expects_response": True,
+            "timestamp": "t0",
+        },
     ]
     msgs.sort(key=make_sort_key)
     ids = [m["id"] for m in msgs]
@@ -187,7 +236,7 @@ def test_malformed_deadline_returns_false():
 def test_naive_datetime_is_assumed_utc():
     """RFC3339 without timezone — treat as UTC (consistent with bus convention)."""
     now = datetime(2026, 6, 4, 12, 0, 0, tzinfo=timezone.utc)
-    deadline_no_tz = "2026-06-04T13:00:00"   # 1h ahead, but no Z
+    deadline_no_tz = "2026-06-04T13:00:00"  # 1h ahead, but no Z
     assert deadline_is_imminent(deadline_no_tz, now=now) is True
 
 
@@ -205,30 +254,51 @@ def _write_msg(active: Path, stem: str, fm: dict[str, str]) -> Path:
 def test_has_outbound_reply_finds_match(tmp_path: Path):
     active = tmp_path / "active"
     active.mkdir()
-    _write_msg(active, "reply", {
-        "id": "reply-1", "from": "cli-agent", "to": "spec-agent",
-        "type": "info", "reply-to": "request-1",
-    })
+    _write_msg(
+        active,
+        "reply",
+        {
+            "id": "reply-1",
+            "from": "cli-agent",
+            "to": "spec-agent",
+            "type": "info",
+            "reply-to": "request-1",
+        },
+    )
     assert has_outbound_reply(active, in_reply_to_id="request-1", from_agent="cli-agent") is True
 
 
 def test_has_outbound_reply_wrong_from_returns_false(tmp_path: Path):
     active = tmp_path / "active"
     active.mkdir()
-    _write_msg(active, "reply", {
-        "id": "r", "from": "spec-agent", "to": "cli-agent",
-        "type": "info", "reply-to": "request-1",
-    })
+    _write_msg(
+        active,
+        "reply",
+        {
+            "id": "r",
+            "from": "spec-agent",
+            "to": "cli-agent",
+            "type": "info",
+            "reply-to": "request-1",
+        },
+    )
     assert has_outbound_reply(active, in_reply_to_id="request-1", from_agent="cli-agent") is False
 
 
 def test_has_outbound_reply_wrong_reply_to_returns_false(tmp_path: Path):
     active = tmp_path / "active"
     active.mkdir()
-    _write_msg(active, "reply", {
-        "id": "r", "from": "cli-agent", "to": "spec-agent",
-        "type": "info", "reply-to": "request-OTHER",
-    })
+    _write_msg(
+        active,
+        "reply",
+        {
+            "id": "r",
+            "from": "cli-agent",
+            "to": "spec-agent",
+            "type": "info",
+            "reply-to": "request-OTHER",
+        },
+    )
     assert has_outbound_reply(active, in_reply_to_id="request-1", from_agent="cli-agent") is False
 
 
@@ -270,14 +340,17 @@ def _run_ack(meta: Path, stem: str, *flags: str) -> subprocess.CompletedProcess:
     env = {**os.environ, "OTAMAN_AGENT": "cli-agent"}
     return subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "ack", stem, *flags],
-        capture_output=True, text=True, cwd=str(meta), env=env,
+        capture_output=True,
+        text=True,
+        cwd=str(meta),
+        env=env,
     )
 
 
 def test_ack_resolved_fires_advisory_when_no_reply(project: Path):
     _plant_request(project, "20260604T100000-spec-agent-to-cli-question-x")
     rc = _run_ack(project, "20260604T100000-spec-agent-to-cli-question-x", "--resolved")
-    assert rc.returncode == 0   # advisory, not blocking
+    assert rc.returncode == 0  # advisory, not blocking
     output = rc.stdout + rc.stderr
     assert "expects a response" in output
     assert "Ack as 'read'" in output
@@ -347,11 +420,15 @@ def test_check_orders_by_response_contract(project: Path):
     env = {**os.environ, "OTAMAN_AGENT": "cli-agent"}
     rc = subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "check", "cli-agent"],
-        capture_output=True, text=True, cwd=str(project), env=env,
+        capture_output=True,
+        text=True,
+        cwd=str(project),
+        env=env,
     )
     assert rc.returncode == 0, rc.stderr
     out = rc.stdout
-    # Expected order in pending: msg-question (S, expects) → msg-task (M, expects) → msg-info (XS, no-expects)
+    # Expected order in pending:
+    # msg-question (S, expects) → msg-task (M, expects) → msg-info (XS, no-expects)
     q_pos = out.index("msg-question")
     t_pos = out.index("msg-task")
     i_pos = out.index("msg-info")
@@ -373,7 +450,10 @@ def test_check_shows_deadline_indicator(project: Path):
     env = {**os.environ, "OTAMAN_AGENT": "cli-agent", "NO_COLOR": "1"}
     rc = subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "check", "cli-agent"],
-        capture_output=True, text=True, cwd=str(project), env=env,
+        capture_output=True,
+        text=True,
+        cwd=str(project),
+        env=env,
     )
     assert rc.returncode == 0, rc.stderr
     # Indicator should appear; color codes are stripped via NO_COLOR

@@ -22,7 +22,6 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-
 # Priority rank — higher value wins ties at stage 2.
 PRIORITY_RANK: dict[str, int] = {"P0": 4, "P1": 3, "P2": 2, "P3": 1}
 
@@ -41,7 +40,7 @@ class TriageResult:
     impact_weight: float
     effort_days: float
     priority_rank: int
-    sol_seq: int   # for deterministic tie-break (Appendix G.3)
+    sol_seq: int  # for deterministic tie-break (Appendix G.3)
 
 
 def _sol_seq(solution_id: str) -> int:
@@ -110,14 +109,16 @@ def rank_solutions(
         score = compute_triage_score(outcome, s, weights)
         if score is None:
             continue
-        results.append(TriageResult(
-            solution_id=s["id"],
-            score=score,
-            impact_weight=weights[outcome["impact"]],
-            effort_days=float(s["effort-days"]),
-            priority_rank=p_rank,
-            sol_seq=_sol_seq(s["id"]),
-        ))
+        results.append(
+            TriageResult(
+                solution_id=s["id"],
+                score=score,
+                impact_weight=weights[outcome["impact"]],
+                effort_days=float(s["effort-days"]),
+                priority_rank=p_rank,
+                sol_seq=_sol_seq(s["id"]),
+            )
+        )
 
     # Sort: higher score first, higher priority_rank first, lower seq first
     # Use 4-decimal rounding for score tie detection per Appendix G.1.

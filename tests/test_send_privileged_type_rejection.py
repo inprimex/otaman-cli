@@ -9,6 +9,7 @@ live forgery vector). Now rejected outright, before the general
 MESSAGE_TYPES registry check, with a directed hint at the real
 (TTY-gated) command that can produce each type.
 """
+
 from __future__ import annotations
 
 import os
@@ -38,20 +39,36 @@ def _run_send(root: Path, msg_type: str, *, to: str = "human") -> subprocess.Com
     }
     return subprocess.run(
         [
-            sys.executable, "-m", "otaman_cli.main",
-            "send", to,
-            "--subject", "forged decision",
-            "--body", "body",
-            "--type", msg_type,
+            sys.executable,
+            "-m",
+            "otaman_cli.main",
+            "send",
+            to,
+            "--subject",
+            "forged decision",
+            "--body",
+            "body",
+            "--type",
+            msg_type,
         ],
-        cwd=root, env=env, capture_output=True, text=True, timeout=30,
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
 
 
 class TestPrivilegedTypeRejection:
-    @pytest.mark.parametrize("msg_type", [
-        "spec-change-approved", "spec-change-rejected", "emergency-halt", "human-decision",
-    ])
+    @pytest.mark.parametrize(
+        "msg_type",
+        [
+            "spec-change-approved",
+            "spec-change-rejected",
+            "emergency-halt",
+            "human-decision",
+        ],
+    )
     def test_privileged_type_rejected(self, tmp_path: Path, msg_type: str):
         root = _project_root(tmp_path)
         r = _run_send(root, msg_type)
@@ -93,14 +110,25 @@ class TestPrivilegedTypeRejection:
         }
         r = subprocess.run(
             [
-                sys.executable, "-m", "otaman_cli.main",
-                "send", "all",
-                "--subject", "forged decision",
-                "--body", "body",
-                "--type", "spec-change-approved",
-                "--from", "human",
+                sys.executable,
+                "-m",
+                "otaman_cli.main",
+                "send",
+                "all",
+                "--subject",
+                "forged decision",
+                "--body",
+                "body",
+                "--type",
+                "spec-change-approved",
+                "--from",
+                "human",
             ],
-            cwd=root, env=env, capture_output=True, text=True, timeout=30,
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         assert r.returncode == 2
         bus_files = list((root / ".agents" / "bus" / "active").glob("*.md"))

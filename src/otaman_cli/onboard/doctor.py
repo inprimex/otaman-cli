@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,7 +21,7 @@ from otaman_cli.onboard.state import (
 @dataclass
 class CheckResult:
     name: str
-    status: str          # "OK" | "WARN" | "FAIL"
+    status: str  # "OK" | "WARN" | "FAIL"
     detail: str = ""
 
 
@@ -69,26 +68,32 @@ def _check_each_user_valid(state_dir: Path) -> list[CheckResult]:
         try:
             validate_email(u.email)
         except StateError as exc:
-            out.append(CheckResult(
-                name=f"user {u.email!r} email",
-                status="FAIL",
-                detail=str(exc),
-            ))
+            out.append(
+                CheckResult(
+                    name=f"user {u.email!r} email",
+                    status="FAIL",
+                    detail=str(exc),
+                )
+            )
             continue
         try:
             validate_roles(u.roles)
         except StateError as exc:
-            out.append(CheckResult(
-                name=f"user {u.email!r} roles",
-                status="FAIL",
-                detail=str(exc),
-            ))
+            out.append(
+                CheckResult(
+                    name=f"user {u.email!r} roles",
+                    status="FAIL",
+                    detail=str(exc),
+                )
+            )
             continue
-        out.append(CheckResult(
-            name=f"user {u.email!r}",
-            status="OK",
-            detail=f"roles={','.join(sorted(u.roles))}",
-        ))
+        out.append(
+            CheckResult(
+                name=f"user {u.email!r}",
+                status="OK",
+                detail=f"roles={','.join(sorted(u.roles))}",
+            )
+        )
     return out
 
 
@@ -118,7 +123,9 @@ def _check_duplicate_emails(state_dir: Path) -> CheckResult:
     try:
         users = load_users(state_dir)
     except StateError:
-        return CheckResult(name="duplicate emails", status="WARN", detail="(skipped — users.yaml unreadable)")
+        return CheckResult(
+            name="duplicate emails", status="WARN", detail="(skipped — users.yaml unreadable)"
+        )
     seen = set()
     dupes = []
     for u in users:
@@ -157,7 +164,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         marker = {"OK": "  OK  ", "WARN": " WARN ", "FAIL": " FAIL "}.get(r.status, "      ")
         print(f"[{marker}] {r.name:<{name_width}}  {r.detail}")
     print()
-    print(f"summary: {fail_count} fail, {warn_count} warn, {len(results) - fail_count - warn_count} ok")
+    print(
+        f"summary: {fail_count} fail, {warn_count} warn, "
+        f"{len(results) - fail_count - warn_count} ok"
+    )
 
     # Audit the run
     audit = OnboardAudit(state_dir / "audit")

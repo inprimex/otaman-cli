@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import subprocess
 import sys
@@ -10,21 +9,21 @@ from pathlib import Path
 
 import pytest
 
-
 # doctor is now an importable package module — no path-based loading needed
 from otaman_cli import doctor
 
 
 def _git(path: Path, *args: str) -> None:
     env = os.environ.copy()
-    env.update({
-        "GIT_AUTHOR_NAME": "Test",
-        "GIT_AUTHOR_EMAIL": "test@example.com",
-        "GIT_COMMITTER_NAME": "Test",
-        "GIT_COMMITTER_EMAIL": "test@example.com",
-    })
-    subprocess.run(["git", "-C", str(path), *args], check=True, env=env,
-                   capture_output=True)
+    env.update(
+        {
+            "GIT_AUTHOR_NAME": "Test",
+            "GIT_AUTHOR_EMAIL": "test@example.com",
+            "GIT_COMMITTER_NAME": "Test",
+            "GIT_COMMITTER_EMAIL": "test@example.com",
+        }
+    )
+    subprocess.run(["git", "-C", str(path), *args], check=True, env=env, capture_output=True)
 
 
 @pytest.fixture
@@ -47,10 +46,7 @@ class TestGitignoreCheck:
         root.mkdir()
         result = doctor.check_secrets_leaks(root)
         assert result["status"] in ("warn", "fail")
-        assert any(
-            "gitignore" in i["issue"].lower()
-            for i in result.get("issues", [])
-        )
+        assert any("gitignore" in i["issue"].lower() for i in result.get("issues", []))
 
     def test_gitignore_without_entry_flagged(self, tmp_path):
         root = tmp_path / "partial-gi"
@@ -73,10 +69,12 @@ class TestGitHistoryCheck:
     def test_untracked_secrets_env_ok(self, maestro_git_repo):
         """secrets.env not in git at all → no leak issue."""
         (maestro_git_repo / ".otaman" / "secrets.env").write_text(
-            "SECRET=value\n", encoding="utf-8",
+            "SECRET=value\n",
+            encoding="utf-8",
         )
         (maestro_git_repo / ".gitignore").write_text(
-            ".otaman/secrets.env\n", encoding="utf-8",
+            ".otaman/secrets.env\n",
+            encoding="utf-8",
         )
         result = doctor.check_secrets_leaks(maestro_git_repo)
         for i in result.get("issues", []):
@@ -110,8 +108,7 @@ class TestGitHistoryCheck:
         result = doctor.check_secrets_leaks(maestro_git_repo)
         assert result["status"] == "fail"
         assert any(
-            "past commit" in i["issue"] and i["severity"] == "critical"
-            for i in result["issues"]
+            "past commit" in i["issue"] and i["severity"] == "critical" for i in result["issues"]
         )
 
 
@@ -155,7 +152,8 @@ class TestPermissionsCheck:
 class TestStatusAggregation:
     def test_clean_repo_returns_ok(self, maestro_git_repo):
         (maestro_git_repo / ".gitignore").write_text(
-            ".otaman/secrets.env\n", encoding="utf-8",
+            ".otaman/secrets.env\n",
+            encoding="utf-8",
         )
         result = doctor.check_secrets_leaks(maestro_git_repo)
         assert result["status"] == "ok"

@@ -16,12 +16,11 @@ cross-check amended 2026-07-08):
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
-from otaman_cli.identity import resolve_agent_identity, _read_otaman_agent_field
+from otaman_cli.identity import _read_otaman_agent_field, resolve_agent_identity
 
 
 @pytest.fixture
@@ -67,7 +66,9 @@ def test_env_var_wins_over_dotoman_field(project: Path, monkeypatch) -> None:
     assert resolve_agent_identity(project, project.parent / "svc-api") == "api-agent"
 
 
-def test_env_var_disagreeing_with_cwd_owner_is_overridden(project: Path, monkeypatch, capsys) -> None:
+def test_env_var_disagreeing_with_cwd_owner_is_overridden(
+    project: Path, monkeypatch, capsys
+) -> None:
     """R3 (2026-07-08, greenbin incident): a stale/leaked OTAMAN_AGENT must
     not silently override the real repo owner resolved from cwd -- the
     cwd-resolved owner wins, with a warning explaining why."""
@@ -163,7 +164,9 @@ def test_current_agent_fallback_returns_value(project: Path, monkeypatch, capsys
     assert result == "legacy-agent"
 
 
-def test_current_agent_fallback_emits_deprecated_warning(project: Path, monkeypatch, capsys) -> None:
+def test_current_agent_fallback_emits_deprecated_warning(
+    project: Path, monkeypatch, capsys
+) -> None:
     monkeypatch.delenv("OTAMAN_AGENT", raising=False)
     (project / ".agents" / "current-agent").write_text("legacy-agent\n")
     resolve_agent_identity(project, project)
@@ -176,8 +179,7 @@ def test_current_agent_deprecation_marker_lines_skipped(project: Path, monkeypat
     """Lines starting with # in current-agent are skipped (deprecation markers)."""
     monkeypatch.delenv("OTAMAN_AGENT", raising=False)
     (project / ".agents" / "current-agent").write_text(
-        "# DEPRECATED: identity now stored in .otaman agent: field\n"
-        "real-agent\n"
+        "# DEPRECATED: identity now stored in .otaman agent: field\nreal-agent\n"
     )
     result = resolve_agent_identity(project, project)
     assert result == "real-agent"

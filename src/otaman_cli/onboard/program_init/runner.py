@@ -21,6 +21,7 @@ Failure recovery (task 2.3):
     - Checkpoint is written after every step (via on_step_complete callback)
     - On re-run the checkpoint is loaded and completed steps are skipped
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,11 +33,19 @@ from typing import Any
 from otaman_cli.onboard.program_init.agents_init import init_agents_structure
 from otaman_cli.onboard.program_init.checkpoint import Checkpoint
 from otaman_cli.onboard.program_init.edition import detect_edition, detect_mode
-from otaman_cli.onboard.program_init.git_init import create_gitignore, ensure_git_repo, initial_commit
+from otaman_cli.onboard.program_init.git_init import (
+    create_gitignore,
+    ensure_git_repo,
+    initial_commit,
+)
 from otaman_cli.onboard.program_init.guidance import print_guidance
 from otaman_cli.onboard.program_init.platform_gen import update_platform_yaml, write_platform_yaml
-from otaman_cli.onboard.program_init.scaffold import ScaffoldResult, compute_companion_repos, scaffold_companion_repos
-from otaman_cli.onboard.scaffold_ce import scaffold_companion_repos_ce, ScaffoldError
+from otaman_cli.onboard.program_init.scaffold import (
+    ScaffoldResult,
+    compute_companion_repos,
+    scaffold_companion_repos,
+)
+from otaman_cli.onboard.scaffold_ce import ScaffoldError, scaffold_companion_repos_ce
 
 # Default question YAML search path (relative to otaman-meta sibling checkout)
 _DEFAULT_QUESTIONS_REL = "../otaman-meta/onboarding/program-init-questions.yaml"
@@ -60,6 +69,7 @@ def _find_questions_yaml(override: str | None = None) -> Path | None:
 def _load_questions(questions_yaml: Path | None) -> list[dict[str, Any]]:
     if questions_yaml:
         from otaman_cli.onboard.program_init.questions import load_questions
+
         return load_questions(questions_yaml)
     # Fall back to the built-in minimal question set (ensures tests always work)
     return _builtin_questions()
@@ -75,19 +85,26 @@ def _builtin_questions() -> list[dict[str, Any]]:
     return [
         # ── step: identity ──────────────────────────────────────────────────
         {
-            "id": "program_name", "step": "identity", "type": "text",
+            "id": "program_name",
+            "step": "identity",
+            "type": "text",
             "label": "Program name (kebab-slug)",
-            "default": "my-program", "validate": "kebab_slug",
+            "default": "my-program",
+            "validate": "kebab_slug",
             "output_mapping": "project",
         },
         {
-            "id": "description", "step": "identity", "type": "text",
+            "id": "description",
+            "step": "identity",
+            "type": "text",
             "label": "Short description",
             "default": "",
             "output_mapping": "description",
         },
         {
-            "id": "primary_repo", "step": "identity", "type": "text",
+            "id": "primary_repo",
+            "step": "identity",
+            "type": "text",
             "label": "Path to the primary repo (where platform.yaml + .agents/ live)",
             "help": (
                 "Filesystem path — absolute, relative to current dir, or '.' for "
@@ -103,7 +120,9 @@ def _builtin_questions() -> list[dict[str, Any]]:
         # Empty answer → field omitted from platform.yaml → launcher
         # falls back to $CLAUDE_CONFIG_DIR shell env / ~/.claude default.
         {
-            "id": "claude_config_dir", "step": "identity", "type": "text",
+            "id": "claude_config_dir",
+            "step": "identity",
+            "type": "text",
             "label": "Claude profile path (CLAUDE_CONFIG_DIR; preserves OAuth session)",
             "help": (
                 "Optional. Leave empty to defer to $CLAUDE_CONFIG_DIR or ~/.claude. "
@@ -113,19 +132,30 @@ def _builtin_questions() -> list[dict[str, Any]]:
             "output_mapping": "program.claude.config_dir",
         },
         {
-            "id": "domains", "step": "identity", "type": "checkbox",
+            "id": "domains",
+            "step": "identity",
+            "type": "checkbox",
             "label": "Target domain(s)",
             "options": [
-                "software-development", "tech-startup", "fintech",
-                "healthcare", "e-commerce", "gaming", "ai-ml",
-                "drones-uav", "embedded-iot", "other",
+                "software-development",
+                "tech-startup",
+                "fintech",
+                "healthcare",
+                "e-commerce",
+                "gaming",
+                "ai-ml",
+                "drones-uav",
+                "embedded-iot",
+                "other",
             ],
             "default": [],
             "output_mapping": "domains",
         },
         # ── step: roles ──────────────────────────────────────────────────────
         {
-            "id": "roles", "step": "roles", "type": "checkbox",
+            "id": "roles",
+            "step": "roles",
+            "type": "checkbox",
             "label": "Active roles in this program",
             "options": ["CEO", "CPO", "CTO", "BA", "cofounder", "engineer", "designer", "legal"],
             "default": [],
@@ -137,7 +167,9 @@ def _builtin_questions() -> list[dict[str, Any]]:
         # plays the cofounder role, and asked one question fewer than
         # production — shifting every later answer by one position.
         {
-            "id": "role_cofounder", "step": "roles", "type": "text",
+            "id": "role_cofounder",
+            "step": "roles",
+            "type": "text",
             "label": "Who plays the cofounder role?",
             "default": "",
             "condition": "'cofounder' in answers.get('roles', [])",
@@ -145,18 +177,28 @@ def _builtin_questions() -> list[dict[str, Any]]:
         },
         # ── step: processes ──────────────────────────────────────────────────
         {
-            "id": "processes", "step": "processes", "type": "checkbox",
+            "id": "processes",
+            "step": "processes",
+            "type": "checkbox",
             "label": "Which processes do you want to enable?",
             "options": [
-                "outcomes", "solutions", "personas", "vocabulary",
-                "flows", "processes", "risks", "assumptions",
+                "outcomes",
+                "solutions",
+                "personas",
+                "vocabulary",
+                "flows",
+                "processes",
+                "risks",
+                "assumptions",
             ],
             "default": [],
             "output_mapping": "processes",
         },
         # strategy offered only when cofounder role is active (spec §Q order §4)
         {
-            "id": "strategy_opt_in", "step": "processes", "type": "confirm",
+            "id": "strategy_opt_in",
+            "step": "processes",
+            "type": "confirm",
             "label": "Enable strategy process (pitch deck + business plan + GTM + financials)?",
             "default": False,
             "condition": "'cofounder' in answers.get('roles', [])",
@@ -164,33 +206,43 @@ def _builtin_questions() -> list[dict[str, Any]]:
         },
         # ── step: currency ───────────────────────────────────────────────────
         {
-            "id": "currency_code", "step": "currency", "type": "text",
+            "id": "currency_code",
+            "step": "currency",
+            "type": "text",
             "label": "Currency code (ISO 4217)",
             "default": "USD",
             "output_mapping": "currency.code",
         },
         {
-            "id": "currency_symbol", "step": "currency", "type": "text",
+            "id": "currency_symbol",
+            "step": "currency",
+            "type": "text",
             "label": "Currency symbol",
             "default": "$",
             "output_mapping": "currency.symbol",
         },
         {
-            "id": "currency_decimals", "step": "currency", "type": "number",
+            "id": "currency_decimals",
+            "step": "currency",
+            "type": "number",
             "label": "Decimal places",
             "default": 2,
             "output_mapping": "currency.decimal_places",
         },
         # ── step: scales ─────────────────────────────────────────────────────
         {
-            "id": "probability_scale", "step": "scales", "type": "select",
+            "id": "probability_scale",
+            "step": "scales",
+            "type": "select",
             "label": "Risk probability scale",
             "options": ["t-shirt", "fibonacci", "percentage", "custom"],
             "default": "t-shirt",
             "output_mapping": "triage.probability_scale",
         },
         {
-            "id": "impact_scale", "step": "scales", "type": "select",
+            "id": "impact_scale",
+            "step": "scales",
+            "type": "select",
             "label": "Risk impact scale",
             "options": ["t-shirt", "fibonacci", "numeric", "custom"],
             "default": "t-shirt",
@@ -198,7 +250,9 @@ def _builtin_questions() -> list[dict[str, Any]]:
         },
         # ── step: releases (outcomes-gated per spec §Q §7) ───────────────────
         {
-            "id": "releases", "step": "releases", "type": "text",
+            "id": "releases",
+            "step": "releases",
+            "type": "text",
             "label": "Release sequence (comma-separated, e.g. MVP,post-MVP)",
             "default": "MVP",
             "condition": "'outcomes' in answers.get('processes', [])",
@@ -206,7 +260,9 @@ def _builtin_questions() -> list[dict[str, Any]]:
         },
         # ── step: skills ─────────────────────────────────────────────────────
         {
-            "id": "skill_profile", "step": "skills", "type": "select",
+            "id": "skill_profile",
+            "step": "skills",
+            "type": "select",
             "label": "Skill profile",
             "options": [
                 "software-development-default",
@@ -221,7 +277,9 @@ def _builtin_questions() -> list[dict[str, Any]]:
         },
         # ── step: git_platform ───────────────────────────────────────────────
         {
-            "id": "git_platform", "step": "git_platform", "type": "select",
+            "id": "git_platform",
+            "step": "git_platform",
+            "type": "select",
             "label": "Git platform",
             "options": ["local", "github", "gitlab", "bitbucket"],
             "default": "local",
@@ -230,7 +288,9 @@ def _builtin_questions() -> list[dict[str, Any]]:
         },
         # ── step: secrets (CE: env-file/os-keyring; EE: full list) ─────────
         {
-            "id": "secret_backend", "step": "secrets", "type": "select",
+            "id": "secret_backend",
+            "step": "secrets",
+            "type": "select",
             "label": "Secret backend",
             "options": ["env-file", "os-keyring"],
             "default": "env-file",
@@ -238,12 +298,20 @@ def _builtin_questions() -> list[dict[str, Any]]:
             "output_mapping": "secrets.backend",
         },
         {
-            "id": "secret_backend_ee", "step": "secrets", "type": "select",
+            "id": "secret_backend_ee",
+            "step": "secrets",
+            "type": "select",
             "label": "Secret backend",
             "options": [
-                "env-file", "os-keyring", "vault", "aws-secrets-manager",
-                "gcp-secret-manager", "azure-key-vault", "1password-connect",
-                "doppler", "infisical",
+                "env-file",
+                "os-keyring",
+                "vault",
+                "aws-secrets-manager",
+                "gcp-secret-manager",
+                "azure-key-vault",
+                "1password-connect",
+                "doppler",
+                "infisical",
             ],
             "default": "env-file",
             "condition": "edition == 'ee'",
@@ -252,7 +320,9 @@ def _builtin_questions() -> list[dict[str, Any]]:
         },
         # ── step: zitadel (EE + Mode 2+ only) ───────────────────────────────
         {
-            "id": "organisation_name", "step": "zitadel", "type": "text",
+            "id": "organisation_name",
+            "step": "zitadel",
+            "type": "text",
             "label": "Zitadel organisation name",
             "default": "",
             "edition_min": "ee",
@@ -268,9 +338,7 @@ def _detect_existing_platform_yaml(program_name: str, primary_repo: str | None) 
     if primary_repo:
         candidates.append(Path(primary_repo).expanduser() / "platform.yaml")
     # Convention: ~/otaman/<program>/<program>-specs/platform.yaml
-    candidates.append(
-        Path.home() / program_name / f"{program_name}-specs" / "platform.yaml"
-    )
+    candidates.append(Path.home() / program_name / f"{program_name}-specs" / "platform.yaml")
     for c in candidates:
         if c.is_file():
             return c
@@ -354,7 +422,7 @@ def _prompt_human_roster(answers: dict[str, Any], *, dry_run: bool) -> None:
             break
         try:
             email = input("    Email: ").strip()
-            roles_raw = input(f"    Roles (comma-separated; e.g. cofounder,cto): ").strip()
+            roles_raw = input("    Roles (comma-separated; e.g. cofounder,cto): ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             break
@@ -487,7 +555,7 @@ def run_program_init(args: argparse.Namespace) -> int:
             checkpoint = None
             _note("Starting fresh.")
         else:
-            _note(f"Resuming from last checkpoint.")
+            _note("Resuming from last checkpoint.")
 
     # ── 4. existing platform.yaml (UPDATE mode) ───────────────────────────────
     existing_yaml: Path | None = None
@@ -521,6 +589,7 @@ def run_program_init(args: argparse.Namespace) -> int:
         _note(f"Step '{step_id}' complete — checkpoint saved.")
 
     from otaman_cli.onboard.program_init.questions import run_questions
+
     try:
         answers = run_questions(
             questions,
@@ -638,6 +707,7 @@ def run_program_init(args: argparse.Namespace) -> int:
         if edition == "ee":
             try:
                 import otaman_bridge.scaffold as _bridge_scaffold  # noqa: F401
+
                 use_bridge = True
             except ImportError:
                 _note("EE bridge module not available; falling back to CE scaffolder.")
@@ -679,6 +749,7 @@ def run_program_init(args: argparse.Namespace) -> int:
     if not getattr(args, "dry_run", False):
         try:
             from otaman_cli.commands.init import _scaffold_launcher_after_init
+
             _scaffold_launcher_after_init(platform_out, yes=True)
         except Exception as _launcher_exc:
             _note(f"Launcher scaffold skipped: {_launcher_exc}")
@@ -696,6 +767,7 @@ def run_program_init(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------- helpers
+
 
 def _note(msg: str) -> None:
     print(f"  [i] {msg}")
@@ -734,6 +806,7 @@ def _ask_program_name_early(questions: list[dict[str, Any]]) -> str:
     for q in questions:
         if q.get("id") == "program_name":
             from otaman_cli.onboard.program_init.questions import ask_question
+
             ans = ask_question(q, {})
             if ans:
                 return str(ans)
@@ -780,10 +853,14 @@ def _emit_audit_message(
     try:
         subprocess.run(
             [
-                "otaman", "send",
-                "--to", "cli-agent",
-                "--subject", f"program-init-completed: {program_name}",
-                "--body", body,
+                "otaman",
+                "send",
+                "--to",
+                "cli-agent",
+                "--subject",
+                f"program-init-completed: {program_name}",
+                "--body",
+                body,
             ],
             capture_output=True,
             timeout=10,

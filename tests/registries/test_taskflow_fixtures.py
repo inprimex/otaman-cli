@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from otaman_cli.registries.outcomes import OutcomeStatus, load_outcomes
+from otaman_cli.registries.outcomes import load_outcomes
 from otaman_cli.registries.personas import load_personas
 from otaman_cli.registries.platform_ext import (
     ProgramExtensions,
@@ -29,7 +29,6 @@ from otaman_cli.registries.solutions import (
     SolutionStatus,
     load_solutions,
 )
-
 
 # Fixtures live in the sibling otaman-specs repo.
 FIXTURE_DIR = (
@@ -77,21 +76,22 @@ def test_cross_refs_resolve_cleanly(fixture_dir: Path) -> None:
     personas = load_personas(fixture_dir / "personas.yaml")
     # No platform.yaml fixture for the demo; build a permissive ProgramExtensions
     # whose releases and t-shirt-scale match what the demo uses.
-    platform = ProgramExtensions.model_validate({
-        "releases": [
-            {"id": "Sprint-1", "description": "First sprint"},
-            {"id": "Sprint-2", "description": "Second sprint"},
-            {"id": "Sprint-3", "description": "Third sprint"},
-            {"id": "Sprint-4", "description": "Fourth sprint"},
-            {"id": "MVP", "description": "Initial public launch"},
-            {"id": "post-MVP", "description": "After launch"},
-        ],
-        # default t-shirt-scale already covers the demo's tags
-    })
+    platform = ProgramExtensions.model_validate(
+        {
+            "releases": [
+                {"id": "Sprint-1", "description": "First sprint"},
+                {"id": "Sprint-2", "description": "Second sprint"},
+                {"id": "Sprint-3", "description": "Third sprint"},
+                {"id": "Sprint-4", "description": "Fourth sprint"},
+                {"id": "MVP", "description": "Initial public launch"},
+                {"id": "post-MVP", "description": "After launch"},
+            ],
+            # default t-shirt-scale already covers the demo's tags
+        }
+    )
     issues = validate_cross_refs(outcomes, solutions, personas, platform)
-    assert issues == [], (
-        "Cross-ref issues in taskflow fixtures:\n"
-        + "\n".join(f"  [{i.kind}] {i.file} {i.entity_id}: {i.detail}" for i in issues)
+    assert issues == [], "Cross-ref issues in taskflow fixtures:\n" + "\n".join(
+        f"  [{i.kind}] {i.file} {i.entity_id}: {i.detail}" for i in issues
     )
 
 

@@ -4,20 +4,16 @@ Spec mirrors `otaman-plugin/scripts/spec-change-hook.sh`.  Recipient
 derivation, message body shape, and graceful map-tasks.py fallback are
 the load-bearing behaviors.
 """
+
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
 
-import pytest
-import yaml
-
 from otaman_cli.notify_change import (
-    cmd_notify_change,
     derive_recipients,
     notify_change,
 )
@@ -74,12 +70,16 @@ class TestDeriveRecipients:
 
     def test_tasks_md_with_annotations_resolves_to_owners(self, tmp_path: Path):
         project, specs = _stage_workspace(tmp_path)
-        _stage_change(specs, "ch1", textwrap.dedent("""
+        _stage_change(
+            specs,
+            "ch1",
+            textwrap.dedent("""
             # tasks
             - [ ] 1.1 @otaman-cli first task
             - [ ] 1.2 @otaman-core second task
             - [ ] 1.3 @otaman-cli back to cli (dedup)
-        """))
+        """),
+        )
         recipients = derive_recipients(specs, "ch1", project / "platform.yaml")
         assert recipients == ["cli-agent", "core-agent"]
 
@@ -161,7 +161,9 @@ class TestNotifyChangeBusMessage:
         _stage_change(specs, "ch1", "- [ ] @otaman-cli\n- [ ] @otaman-core\n")
         rc, summary = notify_change(project, "ch1")
         assert rc == 0
-        body = (project / ".agents" / "bus" / "active" / Path(summary["message_path"]).name).read_text()
+        body = (
+            project / ".agents" / "bus" / "active" / Path(summary["message_path"]).name
+        ).read_text()
         assert "to: cli-agent, core-agent" in body
 
     def test_fallback_to_spec_agent_when_no_tasks_md(self, tmp_path: Path):
@@ -173,7 +175,7 @@ class TestNotifyChangeBusMessage:
         assert "to: spec-agent" in body
 
 
-# ---------------------------------------------------------------- task 1.4 — map-tasks.py graceful degradation
+# ----------------------------------------------------- task 1.4 — map-tasks.py graceful degradation
 class TestMapTasksFallback:
     def test_map_tasks_absent_does_not_fail(self, tmp_path: Path, monkeypatch):
         """When map-tasks.py is nowhere to be found, summary records absence + rc=0."""
@@ -181,7 +183,8 @@ class TestMapTasksFallback:
         _stage_change(specs, "ch1", "- [ ] @otaman-cli\n")
         # Force the finder to return None
         monkeypatch.setattr(
-            "otaman_cli.notify_change._find_map_tasks_py", lambda: None,
+            "otaman_cli.notify_change._find_map_tasks_py",
+            lambda: None,
         )
         rc, summary = notify_change(project, "ch1")
         assert rc == 0
@@ -196,7 +199,8 @@ class TestMapTasksFallback:
         stub = tmp_path / "stub-map-tasks.py"
         stub.write_text("import sys; sys.exit(0)\n", encoding="utf-8")
         monkeypatch.setattr(
-            "otaman_cli.notify_change._find_map_tasks_py", lambda: stub,
+            "otaman_cli.notify_change._find_map_tasks_py",
+            lambda: stub,
         )
         rc, summary = notify_change(project, "ch1")
         assert rc == 0
@@ -210,7 +214,8 @@ class TestMapTasksFallback:
         crash = tmp_path / "crash-map-tasks.py"
         crash.write_text("import sys; sys.exit(99)\n", encoding="utf-8")
         monkeypatch.setattr(
-            "otaman_cli.notify_change._find_map_tasks_py", lambda: crash,
+            "otaman_cli.notify_change._find_map_tasks_py",
+            lambda: crash,
         )
         rc, summary = notify_change(project, "ch1")
         assert rc == 0  # notify itself doesn't fail
@@ -236,7 +241,8 @@ class TestExitCodes:
         project, specs = _stage_workspace(tmp_path)
         _stage_change(specs, "ch1", "- [ ] @otaman-cli\n")
         monkeypatch.setattr(
-            "otaman_cli.notify_change._find_map_tasks_py", lambda: None,
+            "otaman_cli.notify_change._find_map_tasks_py",
+            lambda: None,
         )
         rc, _ = notify_change(project, "ch1")
         assert rc == 0
@@ -253,7 +259,11 @@ class TestCmdNotifyChange:
         }
         return subprocess.run(
             [sys.executable, "-m", "otaman_cli.main", *args],
-            cwd=project, env=env, capture_output=True, text=True, timeout=30,
+            cwd=project,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
 
     def test_no_args_exits_2_with_usage(self, tmp_path: Path):

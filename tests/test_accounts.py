@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
@@ -316,10 +315,13 @@ class TestResolveRcPath:
 class TestRenderAliasesBlock:
     def _records(self):
         return [
-            {"name": "personal", "config_dir": "~/.claude-personal",
-             "label": "Personal", "used_by": []},
-            {"name": "riseapps", "config_dir": "~/.claude-riseapps",
-             "label": "", "used_by": []},
+            {
+                "name": "personal",
+                "config_dir": "~/.claude-personal",
+                "label": "Personal",
+                "used_by": [],
+            },
+            {"name": "riseapps", "config_dir": "~/.claude-riseapps", "label": "", "used_by": []},
         ]
 
     def test_bash_functions(self):
@@ -361,8 +363,7 @@ class TestRenderAliasesBlock:
 
     def test_single_quote_in_config_dir_escaped(self):
         records = [
-            {"name": "weird", "config_dir": "~/it's-weird",
-             "label": "", "used_by": []},
+            {"name": "weird", "config_dir": "~/it's-weird", "label": "", "used_by": []},
         ]
         out = render_aliases_block(records, "bash")
         # POSIX quote-escape sequence
@@ -418,9 +419,7 @@ class TestInstallShellAliases:
     def test_preserves_user_content_around_block(self, populated_settings, tmp_path):
         target = tmp_path / "bashrc"
         target.write_text(
-            "# Top of rc\n"
-            f"{_MARKER_BEGIN}\nold junk\n{_MARKER_END}\n"
-            "# Bottom of rc\n",
+            f"# Top of rc\n{_MARKER_BEGIN}\nold junk\n{_MARKER_END}\n# Bottom of rc\n",
             encoding="utf-8",
         )
         install_shell_aliases(populated_settings, "bash", target=target)
@@ -466,7 +465,8 @@ class TestConfigureTelegram:
     def test_adds_full_transport_config(self, settings_file):
         self._make_base(settings_file)
         configure_telegram(
-            settings_file, "personal",
+            settings_file,
+            "personal",
             group_id=-1001234567890,
             allowed_user_ids=[123, 456],
         )
@@ -486,8 +486,10 @@ class TestConfigureTelegram:
     def test_default_bot_token_env_from_account_name(self, settings_file):
         self._make_base(settings_file)
         configure_telegram(
-            settings_file, "personal",
-            group_id=-1001111, allowed_user_ids=[1],
+            settings_file,
+            "personal",
+            group_id=-1001111,
+            allowed_user_ids=[1],
         )
         data = load_settings(settings_file)
         env_source = data["accounts"]["personal"]["transport_config"]["bot_token"]["sources"][0]
@@ -496,14 +498,16 @@ class TestConfigureTelegram:
     def test_custom_bot_token_env(self, settings_file):
         self._make_base(settings_file)
         configure_telegram(
-            settings_file, "personal",
-            group_id=-1001111, allowed_user_ids=[1],
+            settings_file,
+            "personal",
+            group_id=-1001111,
+            allowed_user_ids=[1],
             bot_token_env="MY_CUSTOM_TOKEN",
         )
         data = load_settings(settings_file)
         envs = [
-            s for s in data["accounts"]["personal"]["transport_config"]
-                        ["bot_token"]["sources"]
+            s
+            for s in data["accounts"]["personal"]["transport_config"]["bot_token"]["sources"]
             if s["type"] == "env"
         ]
         assert envs[0]["name"] == "MY_CUSTOM_TOKEN"
@@ -511,8 +515,10 @@ class TestConfigureTelegram:
     def test_default_topic_id_persisted(self, settings_file):
         self._make_base(settings_file)
         configure_telegram(
-            settings_file, "personal",
-            group_id=-1001111, allowed_user_ids=[1],
+            settings_file,
+            "personal",
+            group_id=-1001111,
+            allowed_user_ids=[1],
             default_topic_id=42,
         )
         data = load_settings(settings_file)
@@ -521,8 +527,10 @@ class TestConfigureTelegram:
     def test_auto_create_topics_can_be_disabled(self, settings_file):
         self._make_base(settings_file)
         configure_telegram(
-            settings_file, "personal",
-            group_id=-1001111, allowed_user_ids=[1],
+            settings_file,
+            "personal",
+            group_id=-1001111,
+            allowed_user_ids=[1],
             auto_create_topics=False,
         )
         data = load_settings(settings_file)
@@ -532,8 +540,10 @@ class TestConfigureTelegram:
         """Re-running configure-telegram must not wipe config_dir / label."""
         self._make_base(settings_file)
         configure_telegram(
-            settings_file, "personal",
-            group_id=-1001111, allowed_user_ids=[1],
+            settings_file,
+            "personal",
+            group_id=-1001111,
+            allowed_user_ids=[1],
         )
         data = load_settings(settings_file)
         assert data["accounts"]["personal"]["config_dir"] == "~/.claude-personal"
@@ -543,12 +553,16 @@ class TestConfigureTelegram:
         """Running twice with different values replaces in place."""
         self._make_base(settings_file)
         configure_telegram(
-            settings_file, "personal",
-            group_id=-1001111, allowed_user_ids=[1],
+            settings_file,
+            "personal",
+            group_id=-1001111,
+            allowed_user_ids=[1],
         )
         configure_telegram(
-            settings_file, "personal",
-            group_id=-1002222, allowed_user_ids=[2, 3],
+            settings_file,
+            "personal",
+            group_id=-1002222,
+            allowed_user_ids=[2, 3],
             default_topic_id=99,
         )
         data = load_settings(settings_file)
@@ -565,8 +579,10 @@ class TestConfigureTelegram:
         self._make_base(settings_file)
         add_account(settings_file, "riseapps", "~/.claude-riseapps")
         configure_telegram(
-            settings_file, "personal",
-            group_id=-1001111, allowed_user_ids=[1],
+            settings_file,
+            "personal",
+            group_id=-1001111,
+            allowed_user_ids=[1],
         )
         data = load_settings(settings_file)
         assert "riseapps" in data["accounts"]
@@ -590,8 +606,10 @@ class TestConfigureTelegram:
             encoding="utf-8",
         )
         configure_telegram(
-            settings_file, "personal",
-            group_id=-1001111, allowed_user_ids=[1],
+            settings_file,
+            "personal",
+            group_id=-1001111,
+            allowed_user_ids=[1],
         )
         content = settings_file.read_text(encoding="utf-8")
         assert "# Connection setup" in content
@@ -612,8 +630,10 @@ class TestConfigureTelegram:
             encoding="utf-8",
         )
         configure_telegram(
-            settings_file, "personal",
-            group_id=-1002222, allowed_user_ids=[42],
+            settings_file,
+            "personal",
+            group_id=-1002222,
+            allowed_user_ids=[42],
         )
         content = settings_file.read_text(encoding="utf-8")
         # Old short form gone
@@ -628,8 +648,10 @@ class TestConfigureTelegram:
     def test_missing_file_raises(self, settings_file):
         with pytest.raises(FileNotFoundError):
             configure_telegram(
-                settings_file, "personal",
-                group_id=-1, allowed_user_ids=[1],
+                settings_file,
+                "personal",
+                group_id=-1,
+                allowed_user_ids=[1],
             )
 
     def test_missing_account_raises(self, settings_file):
@@ -639,16 +661,20 @@ class TestConfigureTelegram:
         )
         with pytest.raises(KeyError, match="not defined"):
             configure_telegram(
-                settings_file, "missing",
-                group_id=-1, allowed_user_ids=[1],
+                settings_file,
+                "missing",
+                group_id=-1,
+                allowed_user_ids=[1],
             )
 
     def test_emits_next_steps(self, settings_file):
         """Status messages include a user-facing 'what to do next' list."""
         self._make_base(settings_file)
         msgs = configure_telegram(
-            settings_file, "personal",
-            group_id=-1001111, allowed_user_ids=[1],
+            settings_file,
+            "personal",
+            group_id=-1001111,
+            allowed_user_ids=[1],
         )
         full = "\n".join(msgs).lower()
         assert "next steps" in full

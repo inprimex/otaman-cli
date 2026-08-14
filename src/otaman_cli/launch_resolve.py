@@ -48,6 +48,7 @@ except ImportError:
 # Imports from sibling otaman packages
 from otaman_core._resolve import expand_config_dir, find_maestro_root
 from otaman_core._secrets import load_dotenv
+
 from otaman_cli._models_resolve import resolve_tier
 
 
@@ -62,9 +63,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return data or {}
 
 
-def _resolve_extends(
-    connections: dict[str, Any], name: str, depth: int = 0
-) -> dict[str, Any]:
+def _resolve_extends(connections: dict[str, Any], name: str, depth: int = 0) -> dict[str, Any]:
     """Resolve an ``extends:`` chain. Child fields override parent."""
     if depth > 10:
         raise ValueError(f"extends: cycle at connection '{name}'")
@@ -110,9 +109,7 @@ def resolve(
 
     effective_conn_name = connection_name or active_from_file or ""
     if effective_conn_name and connections and effective_conn_name not in connections:
-        warnings.append(
-            f"connection '{effective_conn_name}' not found in launch-settings.yaml"
-        )
+        warnings.append(f"connection '{effective_conn_name}' not found in launch-settings.yaml")
         effective_conn_name = ""
 
     conn_resolved: dict[str, Any] = {}
@@ -130,8 +127,7 @@ def resolve(
     if account_name:
         if account_name not in accounts:
             warnings.append(
-                f"connection '{effective_conn_name}' references unknown account "
-                f"'{account_name}'"
+                f"connection '{effective_conn_name}' references unknown account '{account_name}'"
             )
         else:
             acct = accounts[account_name] or {}
@@ -163,7 +159,9 @@ def resolve(
         program_block = platform.get("program") or {}
         claude_block = program_block.get("claude") if isinstance(program_block, dict) else None
         if isinstance(claude_block, dict):
-            program_claude_dir = claude_block.get("config_dir") or claude_block.get("config-dir") or ""
+            program_claude_dir = (
+                claude_block.get("config_dir") or claude_block.get("config-dir") or ""
+            )
             if program_claude_dir:
                 config_dir_raw = program_claude_dir
                 config_dir_expanded = expand_config_dir(program_claude_dir, shell)
@@ -208,8 +206,10 @@ def resolve_for_repo(
     """
     tier = resolve_tier(
         maestro_root,
-        repo=repo, agent=agent,
-        cli_model=cli_model, cli_effort=cli_effort,
+        repo=repo,
+        agent=agent,
+        cli_model=cli_model,
+        cli_effort=cli_effort,
     )
     return tier.to_dict()
 
@@ -228,9 +228,7 @@ def emit_exports(state: dict[str, Any]) -> str:
     if state.get("effort"):
         lines.append(f"export CLAUDE_CODE_EFFORT_LEVEL={_bash_single_quote(state['effort'])}")
     if state["config_dir_expanded"]:
-        lines.append(
-            f"export CLAUDE_CONFIG_DIR={_bash_single_quote(state['config_dir_expanded'])}"
-        )
+        lines.append(f"export CLAUDE_CONFIG_DIR={_bash_single_quote(state['config_dir_expanded'])}")
     for k, v in state["secrets"].items():
         lines.append(f"export {k}={_bash_single_quote(v)}")
     lines.append(f"# repos: {','.join(state['repos'])}")
@@ -291,8 +289,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.repo or args.agent or args.model or args.effort:
         tier = resolve_tier(
             root,
-            repo=args.repo, agent=args.agent,
-            cli_model=args.model, cli_effort=args.effort,
+            repo=args.repo,
+            agent=args.agent,
+            cli_model=args.model,
+            cli_effort=args.effort,
         )
         state["model"] = tier.model
         state["effort"] = tier.effort

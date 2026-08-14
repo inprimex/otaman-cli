@@ -14,7 +14,6 @@ guards via the `--force` flag in cmd_init.
 
 from __future__ import annotations
 
-import io
 import os
 import shutil
 import stat
@@ -25,7 +24,6 @@ import yaml
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from otaman_cli.init.schema import LaunchSettings
-
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 

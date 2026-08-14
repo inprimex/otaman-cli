@@ -1,9 +1,8 @@
 """Integration tests for runner.py — end-to-end program-init flow (tasks.md 2.1-2.3)."""
+
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -33,12 +32,14 @@ class TestRunnerEndToEnd:
     def _disable_questionary(self):
         """Context manager that disables questionary in the questions module."""
         import otaman_cli.onboard.program_init.questions as qmod
+
         orig = qmod._Q_AVAILABLE
         qmod._Q_AVAILABLE = False
         return orig
 
     def _restore_questionary(self, orig):
         import otaman_cli.onboard.program_init.questions as qmod
+
         qmod._Q_AVAILABLE = orig
 
     def test_full_flow_ce_mode1(self, tmp_path, monkeypatch):
@@ -50,24 +51,26 @@ class TestRunnerEndToEnd:
         )
         orig = self._disable_questionary()
 
-        responses = iter([
-            "test-app",        # program_name
-            "Test application",  # description
-            str(tmp_path / "test-app" / "test-app-specs"),  # primary_repo
-            "",                # claude_config_dir (optional; blank = absent)
-            "",                # domains (blank = defaults)
-            "",                # roles
-            "",                # processes
-            "USD",             # currency_code
-            "$",               # currency_symbol
-            "2",               # currency_decimals
-            "t-shirt",         # probability_scale (select → blank = default)
-            "t-shirt",         # impact_scale
-            "MVP",             # releases
-            "",                # skill_profile (select → blank = default)
-            "",                # git_platform (select → blank = default)
-            "",                # secret_backend (select → blank = default)
-        ])
+        responses = iter(
+            [
+                "test-app",  # program_name
+                "Test application",  # description
+                str(tmp_path / "test-app" / "test-app-specs"),  # primary_repo
+                "",  # claude_config_dir (optional; blank = absent)
+                "",  # domains (blank = defaults)
+                "",  # roles
+                "",  # processes
+                "USD",  # currency_code
+                "$",  # currency_symbol
+                "2",  # currency_decimals
+                "t-shirt",  # probability_scale (select → blank = default)
+                "t-shirt",  # impact_scale
+                "MVP",  # releases
+                "",  # skill_profile (select → blank = default)
+                "",  # git_platform (select → blank = default)
+                "",  # secret_backend (select → blank = default)
+            ]
+        )
         monkeypatch.setattr("builtins.input", lambda _: next(responses, ""))
 
         try:
@@ -108,29 +111,34 @@ class TestRunnerEndToEnd:
 
         # Plant a checkpoint
         ckpt = Checkpoint.new("resume-app")
-        ckpt.mark_step("identity", {
-            "program_name": "resume-app",
-            "description": "From checkpoint",
-            "primary_repo": str(tmp_path / "resume-app" / "specs"),
-            "domains": [],
-        })
+        ckpt.mark_step(
+            "identity",
+            {
+                "program_name": "resume-app",
+                "description": "From checkpoint",
+                "primary_repo": str(tmp_path / "resume-app" / "specs"),
+                "domains": [],
+            },
+        )
 
         orig = self._disable_questionary()
         # "y" to resume from checkpoint, then remaining questions
-        responses = iter([
-            "y",   # resume from checkpoint?
-            "",    # roles
-            "",    # processes
-            "EUR", # currency_code
-            "€",   # currency_symbol
-            "2",   # currency_decimals
-            "",    # probability scale
-            "",    # impact scale
-            "MVP", # releases
-            "",    # skill profile
-            "",    # git platform
-            "",    # secret backend
-        ])
+        responses = iter(
+            [
+                "y",  # resume from checkpoint?
+                "",  # roles
+                "",  # processes
+                "EUR",  # currency_code
+                "€",  # currency_symbol
+                "2",  # currency_decimals
+                "",  # probability scale
+                "",  # impact scale
+                "MVP",  # releases
+                "",  # skill profile
+                "",  # git platform
+                "",  # secret backend
+            ]
+        )
         monkeypatch.setattr("builtins.input", lambda _: next(responses, ""))
 
         try:
@@ -156,10 +164,12 @@ class TestRunnerEndToEnd:
         )
 
         import otaman_cli.onboard.program_init.questions as qmod
+
         orig_qa = qmod._Q_AVAILABLE
         qmod._Q_AVAILABLE = False
 
         call_count = {"n": 0}
+
         def _input_interrupt(prompt):
             call_count["n"] += 1
             if call_count["n"] > 2:
@@ -187,28 +197,31 @@ class TestStrategyOptIn:
             tmp_path / "state",
         )
         import otaman_cli.onboard.program_init.questions as qmod
+
         orig = qmod._Q_AVAILABLE
         qmod._Q_AVAILABLE = False
 
-        responses = iter([
-            "strat-app",          # program_name
-            "Strategy test",      # description
-            str(tmp_path / "strat-app" / "strat-app-specs"),  # primary_repo
-            "",                   # claude_config_dir (optional; blank = absent)
-            "",                   # domains
-            "5",                  # roles → cofounder (5th option in list: CEO CPO CTO BA cofounder)
-            "",                   # role_cofounder (blank)
-            "",                   # processes (no outcomes etc.)
-            "y",                  # strategy_opt_in → Yes (cofounder is present)
-            "USD",                # currency_code
-            "$",                  # currency_symbol
-            "2",                  # currency_decimals
-            # scales not shown (no risks/outcomes)
-            # releases not shown (no outcomes)
-            "",                   # skill_profile
-            "",                   # git_platform
-            "",                   # secret_backend
-        ])
+        responses = iter(
+            [
+                "strat-app",  # program_name
+                "Strategy test",  # description
+                str(tmp_path / "strat-app" / "strat-app-specs"),  # primary_repo
+                "",  # claude_config_dir (optional; blank = absent)
+                "",  # domains
+                "5",  # roles → cofounder (5th option in list: CEO CPO CTO BA cofounder)
+                "",  # role_cofounder (blank)
+                "",  # processes (no outcomes etc.)
+                "y",  # strategy_opt_in → Yes (cofounder is present)
+                "USD",  # currency_code
+                "$",  # currency_symbol
+                "2",  # currency_decimals
+                # scales not shown (no risks/outcomes)
+                # releases not shown (no outcomes)
+                "",  # skill_profile
+                "",  # git_platform
+                "",  # secret_backend
+            ]
+        )
         monkeypatch.setattr("builtins.input", lambda _: next(responses, ""))
 
         try:
@@ -223,7 +236,9 @@ class TestStrategyOptIn:
         content = platform.read_text()
         assert "strategy" in content
 
-    def test_strategy_opt_in_true_adds_to_processes_via_builtin_fallback(self, tmp_path, monkeypatch):
+    def test_strategy_opt_in_true_adds_to_processes_via_builtin_fallback(
+        self, tmp_path, monkeypatch
+    ):
         """Same scenario as above, but with `_find_questions_yaml` forced to
         return None so `_builtin_questions()` is exercised regardless of
         whether a sibling `otaman-meta` checkout happens to be present.
@@ -246,29 +261,33 @@ class TestStrategyOptIn:
             tmp_path / "state",
         )
         from otaman_cli.onboard.program_init import runner as runner_mod
+
         monkeypatch.setattr(runner_mod, "_find_questions_yaml", lambda override=None: None)
 
         import otaman_cli.onboard.program_init.questions as qmod
+
         orig = qmod._Q_AVAILABLE
         qmod._Q_AVAILABLE = False
 
-        responses = iter([
-            "strat-app",          # program_name
-            "Strategy test",      # description
-            str(tmp_path / "strat-app" / "strat-app-specs"),  # primary_repo
-            "",                   # claude_config_dir (optional; blank = absent)
-            "",                   # domains
-            "5",                  # roles → cofounder (5th option in list: CEO CPO CTO BA cofounder)
-            "",                   # role_cofounder (blank)
-            "",                   # processes (no outcomes etc.)
-            "y",                  # strategy_opt_in → Yes (cofounder is present)
-            "USD",                # currency_code
-            "$",                  # currency_symbol
-            "2",                  # currency_decimals
-            "",                   # skill_profile
-            "",                   # git_platform
-            "",                   # secret_backend
-        ])
+        responses = iter(
+            [
+                "strat-app",  # program_name
+                "Strategy test",  # description
+                str(tmp_path / "strat-app" / "strat-app-specs"),  # primary_repo
+                "",  # claude_config_dir (optional; blank = absent)
+                "",  # domains
+                "5",  # roles → cofounder (5th option in list: CEO CPO CTO BA cofounder)
+                "",  # role_cofounder (blank)
+                "",  # processes (no outcomes etc.)
+                "y",  # strategy_opt_in → Yes (cofounder is present)
+                "USD",  # currency_code
+                "$",  # currency_symbol
+                "2",  # currency_decimals
+                "",  # skill_profile
+                "",  # git_platform
+                "",  # secret_backend
+            ]
+        )
         monkeypatch.setattr("builtins.input", lambda _: next(responses, ""))
 
         try:
@@ -289,6 +308,7 @@ class TestCliWiring:
 
     def test_program_init_in_help(self, capsys):
         from otaman_cli.onboard.cli import main as onboard_main
+
         with pytest.raises(SystemExit):
             onboard_main(["--help"])
         out = capsys.readouterr().out
@@ -296,6 +316,7 @@ class TestCliWiring:
 
     def test_program_init_help(self, capsys):
         from otaman_cli.onboard.cli import main as onboard_main
+
         with pytest.raises(SystemExit):
             onboard_main(["program-init", "--help"])
         out = capsys.readouterr().out

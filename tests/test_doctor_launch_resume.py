@@ -35,35 +35,45 @@ class TestNoLaunchCommands:
 
 class TestCommandWithResume:
     def test_short_flag_no_warn(self):
-        result = check_launch_commands_resume([
-            _repo("api", "claude -c --plugin-dir /opt/p ."),
-        ])
+        result = check_launch_commands_resume(
+            [
+                _repo("api", "claude -c --plugin-dir /opt/p ."),
+            ]
+        )
         assert result["status"] == "ok"
 
     def test_continue_no_warn(self):
-        result = check_launch_commands_resume([
-            _repo("api", "claude --continue --plugin-dir /opt/p ."),
-        ])
+        result = check_launch_commands_resume(
+            [
+                _repo("api", "claude --continue --plugin-dir /opt/p ."),
+            ]
+        )
         assert result["status"] == "ok"
 
     def test_resume_no_warn(self):
-        result = check_launch_commands_resume([
-            _repo("api", "claude --resume --plugin-dir /opt/p ."),
-        ])
+        result = check_launch_commands_resume(
+            [
+                _repo("api", "claude --resume --plugin-dir /opt/p ."),
+            ]
+        )
         assert result["status"] == "ok"
 
     def test_list_of_commands_with_one_having_c(self):
-        result = check_launch_commands_resume([
-            _repo("api", ["claude -c .", "some-other-cmd"]),
-        ])
+        result = check_launch_commands_resume(
+            [
+                _repo("api", ["claude -c .", "some-other-cmd"]),
+            ]
+        )
         assert result["status"] == "ok"
 
 
 class TestCommandMissingResume:
     def test_warn_when_missing_c(self):
-        result = check_launch_commands_resume([
-            _repo("api", "claude --plugin-dir /opt/p ."),
-        ])
+        result = check_launch_commands_resume(
+            [
+                _repo("api", "claude --plugin-dir /opt/p ."),
+            ]
+        )
         assert result["status"] == "warn"
         assert len(result["issues"]) == 1
         issue = result["issues"][0]
@@ -72,39 +82,49 @@ class TestCommandMissingResume:
         assert issue["severity"] == "low"
 
     def test_warn_includes_fix(self):
-        result = check_launch_commands_resume([
-            _repo("web", "claude --plugin-dir /opt/p ."),
-        ])
+        result = check_launch_commands_resume(
+            [
+                _repo("web", "claude --plugin-dir /opt/p ."),
+            ]
+        )
         fix = result["issues"][0]["fix"]
         assert "web" in fix
         assert "-c" in fix
 
     def test_non_claude_command_skipped(self):
-        result = check_launch_commands_resume([
-            _repo("tools", "python3 run.py"),
-        ])
+        result = check_launch_commands_resume(
+            [
+                _repo("tools", "python3 run.py"),
+            ]
+        )
         assert result["status"] == "ok"
 
     def test_multiple_repos_each_get_issue(self):
-        result = check_launch_commands_resume([
-            _repo("api", "claude --plugin-dir /opt/p ."),
-            _repo("web", "claude --plugin-dir /opt/q ."),
-        ])
+        result = check_launch_commands_resume(
+            [
+                _repo("api", "claude --plugin-dir /opt/p ."),
+                _repo("web", "claude --plugin-dir /opt/q ."),
+            ]
+        )
         assert result["status"] == "warn"
         assert len(result["issues"]) == 2
 
     def test_one_ok_one_warn(self):
-        result = check_launch_commands_resume([
-            _repo("api", "claude -c --plugin-dir /opt/p ."),
-            _repo("web", "claude --plugin-dir /opt/q ."),
-        ])
+        result = check_launch_commands_resume(
+            [
+                _repo("api", "claude -c --plugin-dir /opt/p ."),
+                _repo("web", "claude --plugin-dir /opt/q ."),
+            ]
+        )
         assert result["status"] == "warn"
         assert len(result["issues"]) == 1
         assert "web" in result["issues"][0]["issue"]
 
     def test_string_command(self):
         """launch_commands as a plain string (not a list)."""
-        result = check_launch_commands_resume([
-            _repo("api", "claude --plugin-dir /opt/p ."),
-        ])
+        result = check_launch_commands_resume(
+            [
+                _repo("api", "claude --plugin-dir /opt/p ."),
+            ]
+        )
         assert result["status"] == "warn"

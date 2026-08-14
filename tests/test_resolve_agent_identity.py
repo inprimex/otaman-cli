@@ -11,7 +11,6 @@ line was wrong in 7/8 tabs.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
@@ -19,7 +18,6 @@ import pytest
 # resolve_agent_identity is provided by otaman_cli.identity
 # (pythonpath includes src/ via pyproject.toml).
 from otaman_cli.identity import resolve_agent_identity
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -29,7 +27,6 @@ from otaman_cli.identity import resolve_agent_identity
 def clear_otaman_agent_env(monkeypatch):
     """Ensure OTAMAN_AGENT env var doesn't bleed in from the test runner's environment."""
     monkeypatch.delenv("OTAMAN_AGENT", raising=False)
-
 
 
 @pytest.fixture
@@ -89,7 +86,10 @@ repos:
 def test_explicit_arg_wins_over_everything(project: Path) -> None:
     (project / ".agents" / "current-agent").write_text("global-agent\n")
     backend_cwd = project.parent / "auth-service"
-    assert resolve_agent_identity(project, backend_cwd, explicit="cli-passed-agent") == "cli-passed-agent"
+    assert (
+        resolve_agent_identity(project, backend_cwd, explicit="cli-passed-agent")
+        == "cli-passed-agent"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +154,7 @@ def test_malformed_platform_yaml_does_not_crash(project: Path, monkeypatch) -> N
     the platform.yaml → current-agent fallback path specifically.
     """
     import otaman_cli.identity as _id_mod
+
     monkeypatch.setattr(_id_mod, "_read_otaman_agent_field", lambda cwd: None)
     (project / "platform.yaml").write_text("not: valid: yaml: ::: [", encoding="utf-8")
     (project / ".agents" / "current-agent").write_text("rescue-agent\n")
@@ -167,6 +168,7 @@ def test_repo_missing_owner_field_skipped(project: Path, monkeypatch) -> None:
     the platform.yaml → current-agent fallback path specifically.
     """
     import otaman_cli.identity as _id_mod
+
     monkeypatch.setattr(_id_mod, "_read_otaman_agent_field", lambda cwd: None)
     (project / "platform.yaml").write_text(
         """

@@ -17,8 +17,8 @@ migrated command group.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 Handler = Callable[[list[str]], int]
 
@@ -75,7 +75,9 @@ from otaman_cli.commands import blocked as _blocked  # noqa: E402,F401
 from otaman_cli.commands import bus_messaging as _bus_messaging  # noqa: E402,F401
 from otaman_cli.commands import check as _check  # noqa: E402,F401
 from otaman_cli.commands import cleanup as _cleanup  # noqa: E402,F401
-from otaman_cli.commands import clone_launcher_setagent as _clone_launcher_setagent  # noqa: E402,F401
+from otaman_cli.commands import (  # noqa: E402
+    clone_launcher_setagent as _clone_launcher_setagent,  # noqa: F401
+)
 from otaman_cli.commands import complete as _complete  # noqa: E402,F401
 from otaman_cli.commands import doctor as _doctor  # noqa: E402,F401
 from otaman_cli.commands import emergency_halt as _emergency_halt  # noqa: E402,F401

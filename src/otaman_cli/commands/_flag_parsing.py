@@ -14,7 +14,7 @@ def _parse_flag_value(rest: list[str], flag: str, *, default: str | None = None)
         i = rest.index(flag)
         if i + 1 < len(rest):
             value = rest[i + 1]
-            del rest[i:i + 2]
+            del rest[i : i + 2]
             return value
     return default
 
@@ -26,9 +26,9 @@ def _parse_flag_list(rest: list[str], flag: str) -> list[str]:
         i = rest.index(flag)
         if i + 1 < len(rest):
             values.append(rest[i + 1])
-            del rest[i:i + 2]
+            del rest[i : i + 2]
         else:
-            del rest[i:i + 1]
+            del rest[i : i + 1]
             break
     return values
 

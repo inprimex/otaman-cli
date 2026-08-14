@@ -25,7 +25,6 @@ scripts), preserving the legacy scan behaviour for automation.
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -42,7 +41,6 @@ _YAML.indent(mapping=2, sequence=4, offset=2)
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
-
 @dataclass
 class PostScanGaps:
     """Result of `analyze_draft` — which UX gaps the draft has."""
@@ -54,12 +52,14 @@ class PostScanGaps:
     openspec_missing: bool = False
 
     def any(self) -> bool:
-        return any([
-            self.specs_repo_missing,
-            self.specs_repo_unrecognised_path is not None,
-            self.launcher_block_missing,
-            self.openspec_missing,
-        ])
+        return any(
+            [
+                self.specs_repo_missing,
+                self.specs_repo_unrecognised_path is not None,
+                self.launcher_block_missing,
+                self.openspec_missing,
+            ]
+        )
 
 
 @dataclass
@@ -79,11 +79,7 @@ class PostScanResult:
 
 def _is_spec_repo_name(name: str) -> bool:
     n = name.lower()
-    return (
-        n.endswith("-specs")
-        or n.endswith("-spec")
-        or n in ("specs", "spec", "openspec")
-    )
+    return n.endswith("-specs") or n.endswith("-spec") or n in ("specs", "spec", "openspec")
 
 
 def analyze_draft(
@@ -99,13 +95,10 @@ def analyze_draft(
     doc = _YAML.load(draft_path.read_text(encoding="utf-8")) or {}
     repos = doc.get("repos") or []
     repo_paths_in_draft = {
-        (scan_root / (r.get("path") or "")).resolve()
-        for r in repos
-        if isinstance(r, dict)
+        (scan_root / (r.get("path") or "")).resolve() for r in repos if isinstance(r, dict)
     }
     has_specs_in_draft = any(
-        isinstance(r, dict) and _is_spec_repo_name(r.get("name", ""))
-        for r in repos
+        isinstance(r, dict) and _is_spec_repo_name(r.get("name", "")) for r in repos
     )
 
     # #1 + #2: specs repo missing OR unrecognised
@@ -175,22 +168,31 @@ def _render_templates(kind_dir: Path, target: Path, ctx: dict[str, Any]) -> None
 
 def _git_init_and_commit(target: Path, commit_msg: str) -> None:
     """git init + initial commit. Local-only; no remote."""
+
     def _run(cmd: list[str]) -> None:
         r = subprocess.run(cmd, cwd=str(target), capture_output=True, text=True)
         if r.returncode != 0:
             raise RuntimeError(
-                f"git command failed in {target}: {' '.join(cmd)}: "
-                f"{r.stderr.strip() or '<empty>'}"
+                f"git command failed in {target}: {' '.join(cmd)}: {r.stderr.strip() or '<empty>'}"
             )
+
     _run(["git", "init", "--quiet"])
     _run(["git", "add", "."])
-    _run([
-        "git",
-        "-c", "user.email=otaman@localhost",
-        "-c", "user.name=otaman",
-        "-c", "commit.gpgsign=false",
-        "commit", "--quiet", "-m", commit_msg,
-    ])
+    _run(
+        [
+            "git",
+            "-c",
+            "user.email=otaman@localhost",
+            "-c",
+            "user.name=otaman",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            commit_msg,
+        ]
+    )
 
 
 def scaffold_specs_repo(target: Path, program_slug: str, program_name: str) -> None:
@@ -199,7 +201,8 @@ def scaffold_specs_repo(target: Path, program_slug: str, program_name: str) -> N
         raise FileExistsError(f"specs repo already exists: {target}")
     target.mkdir(parents=True, exist_ok=False)
     _render_templates(
-        _TEMPLATES_DIR / "specs", target,
+        _TEMPLATES_DIR / "specs",
+        target,
         {"program_slug": program_slug, "program_name": program_name},
     )
     _git_init_and_commit(target, f"scaffold: initialize {program_slug}-specs repo")
@@ -220,18 +223,30 @@ def scaffold_openspec(specs_repo: Path) -> Path:
     if (specs_repo / ".git").exists():
         try:
             subprocess.run(
-                ["git", "add", "openspec"], cwd=str(specs_repo),
-                capture_output=True, text=True, check=False,
+                ["git", "add", "openspec"],
+                cwd=str(specs_repo),
+                capture_output=True,
+                text=True,
+                check=False,
             )
             subprocess.run(
                 [
                     "git",
-                    "-c", "user.email=otaman@localhost",
-                    "-c", "user.name=otaman",
-                    "-c", "commit.gpgsign=false",
-                    "commit", "--quiet", "-m", "scaffold: initialize OpenSpec layout",
+                    "-c",
+                    "user.email=otaman@localhost",
+                    "-c",
+                    "user.name=otaman",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "commit",
+                    "--quiet",
+                    "-m",
+                    "scaffold: initialize OpenSpec layout",
                 ],
-                cwd=str(specs_repo), capture_output=True, text=True, check=False,
+                cwd=str(specs_repo),
+                capture_output=True,
+                text=True,
+                check=False,
             )
         except OSError:
             pass  # best-effort; scaffold itself succeeded
@@ -255,7 +270,10 @@ def _default_launcher_block() -> dict[str, Any]:
 
 
 def _build_specs_repo_entry(
-    scan_root: Path, otaman_dir: Path, specs_path: Path, program_slug: str,
+    scan_root: Path,
+    otaman_dir: Path,
+    specs_path: Path,
+    program_slug: str,
 ) -> dict[str, Any]:
     """Build the `repos[]` entry for the new/lifted specs repo.
 
@@ -310,7 +328,6 @@ def update_draft(
     # add the default stub when add_launcher is requested.
     if add_launcher and "launcher" not in doc:
         doc["launcher"] = _default_launcher_block()
-    launcher_comment_needed = False
 
     if set_specs_format_openspec is not None:
         otaman_dir = draft_path.parent
@@ -419,7 +436,10 @@ def run(
     add_specs_entry: dict[str, Any] | None = None
     if specs_repo_path is not None:
         add_specs_entry = _build_specs_repo_entry(
-            scan_root, otaman_dir, specs_repo_path, program_slug,
+            scan_root,
+            otaman_dir,
+            specs_repo_path,
+            program_slug,
         )
 
     update_draft(

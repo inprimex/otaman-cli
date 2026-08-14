@@ -25,8 +25,6 @@ from typing import Any
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from ruamel.yaml import YAML
 
-
-
 # Module-local ruamel YAML instance — round-trip preserves comments + key order
 _YAML = YAML()
 _YAML.preserve_quotes = True
@@ -47,6 +45,7 @@ def _clear_readonly_recursive(path: Path) -> None:
                 (Path(root) / name).chmod(stat.S_IWRITE)
             except OSError:
                 pass
+
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
@@ -71,16 +70,18 @@ class ScaffoldError(RuntimeError):
 @dataclass
 class ScaffoldedRepo:
     """One companion repo created (or skipped) by the scaffolder."""
+
     kind: str
     path: Path
     owner: str
-    skipped: bool = False   # True when path already exists and force=False
+    skipped: bool = False  # True when path already exists and force=False
     skipped_reason: str = ""
 
 
 @dataclass
 class ScaffoldCEResult:
     """Outcome of a `scaffold_companion_repos_ce` invocation."""
+
     repos: list[ScaffoldedRepo] = field(default_factory=list)
     platform_yaml_updated: bool = False
 
@@ -137,6 +138,7 @@ def scaffold_companion_repos_ce(
         from otaman_cli.onboard.program_init.scaffold import (
             compute_companion_repos,
         )
+
         repo_kinds = compute_companion_repos(processes)
     if not repo_kinds:
         return ScaffoldCEResult()
@@ -145,8 +147,7 @@ def scaffold_companion_repos_ce(
     unknown = [k for k in repo_kinds if k not in _KIND_META]
     if unknown:
         raise ScaffoldError(
-            f"Unknown companion repo kind(s): {unknown}. "
-            f"Supported: {sorted(_KIND_META.keys())}"
+            f"Unknown companion repo kind(s): {unknown}. Supported: {sorted(_KIND_META.keys())}"
         )
 
     result = ScaffoldCEResult()
@@ -157,10 +158,15 @@ def scaffold_companion_repos_ce(
         owner = _KIND_META[kind]["owner"]
 
         if target.exists() and not force:
-            result.repos.append(ScaffoldedRepo(
-                kind=kind, path=target, owner=owner,
-                skipped=True, skipped_reason="path already exists (use --force to recreate)",
-            ))
+            result.repos.append(
+                ScaffoldedRepo(
+                    kind=kind,
+                    path=target,
+                    owner=owner,
+                    skipped=True,
+                    skipped_reason="path already exists (use --force to recreate)",
+                )
+            )
             continue
 
         if dry_run:
@@ -224,7 +230,10 @@ def _build_repo_entry(program_slug: str, kind: str, owner: str) -> dict[str, Any
 
 
 def _render_templates(
-    kind: str, target: Path, program_slug: str, program_name: str,
+    kind: str,
+    target: Path,
+    program_slug: str,
+    program_name: str,
 ) -> None:
     """Render every template file in templates/<kind>/ into *target*.
 
@@ -260,31 +269,45 @@ def _render_templates(
 
 def _git_init_and_commit(target: Path, program_slug: str, kind: str) -> None:
     """Initialise a local git repo and make the initial scaffold commit."""
+
     def _run(cmd: list[str]) -> None:
         result = subprocess.run(
-            cmd, cwd=str(target), capture_output=True, text=True, check=False,
+            cmd,
+            cwd=str(target),
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if result.returncode != 0:
             raise ScaffoldError(
                 f"git command failed in {target}: {' '.join(cmd)}\n"
                 f"  stderr: {result.stderr.strip() or '<empty>'}"
             )
+
     _run(["git", "init", "--quiet"])
     _run(["git", "add", "."])
     # Use --no-gpg-sign to avoid hanging on signing-required setups, and
     # explicit author args so commits work even when global git is unconfigured.
-    _run([
-        "git",
-        "-c", "user.email=otaman@localhost",
-        "-c", "user.name=otaman",
-        "-c", "commit.gpgsign=false",
-        "commit", "--quiet",
-        "-m", f"scaffold: initialize {program_slug}-{kind} companion repo",
-    ])
+    _run(
+        [
+            "git",
+            "-c",
+            "user.email=otaman@localhost",
+            "-c",
+            "user.name=otaman",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            f"scaffold: initialize {program_slug}-{kind} companion repo",
+        ]
+    )
 
 
 def _append_to_platform_yaml(
-    platform_yaml_path: Path, new_entries: list[dict[str, Any]],
+    platform_yaml_path: Path,
+    new_entries: list[dict[str, Any]],
 ) -> None:
     """Append entries to platform.yaml `repos[]` via ruamel round-trip.
 

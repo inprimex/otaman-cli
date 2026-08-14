@@ -34,7 +34,9 @@ from pathlib import Path
 # Walk up to otaman-cli/ root, then into cli/.
 CLI_DIR = Path(__file__).resolve().parent.parent.parent / "cli"
 POSIX_LAUNCHER = CLI_DIR / "maestro.sh"  # legacy: launcher filename in plugin repo not yet renamed
-WINDOWS_LAUNCHER = CLI_DIR / "maestro.cmd"  # legacy: launcher filename in plugin repo not yet renamed
+WINDOWS_LAUNCHER = (
+    CLI_DIR / "maestro.cmd"  # legacy: launcher filename in plugin repo not yet renamed
+)
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +84,7 @@ def posix_install(
         )
         if not apply:
             print(
-                f"\nTo replace it: otaman install-cli --apply",
+                "\nTo replace it: otaman install-cli --apply",
                 file=out,
             )
             return 0
@@ -100,7 +102,7 @@ def posix_install(
         print(f"Would symlink: {target} → {POSIX_LAUNCHER}", file=out)
         if not bin_dir.exists():
             print(f"Would create dir: {bin_dir}", file=out)
-        print(f"\nRun with --apply to do it.", file=out)
+        print("\nRun with --apply to do it.", file=out)
         return _posix_path_hint(bin_dir, out=out, preview=True)
 
     # Actually do it.
@@ -142,7 +144,7 @@ def posix_uninstall(
         return 1
     if not apply:
         print(f"Would remove: {target}", file=out)
-        print(f"\nRun with --apply to do it.", file=out)
+        print("\nRun with --apply to do it.", file=out)
         return 0
     try:
         target.unlink()
@@ -197,7 +199,9 @@ def windows_current_user_path() -> str:
 
 
 def windows_install(
-    *, apply: bool = False, out=sys.stdout,
+    *,
+    apply: bool = False,
+    out=sys.stdout,
 ) -> int:
     if not WINDOWS_LAUNCHER.exists():
         print(f"ERROR: launcher missing: {WINDOWS_LAUNCHER}", file=sys.stderr)
@@ -206,11 +210,7 @@ def windows_install(
     cli_dir_str = str(CLI_DIR)
     user_path = windows_current_user_path()
     user_path_entries = [p.strip() for p in user_path.split(";") if p.strip()]
-    already_present = any(
-        Path(p).resolve() == CLI_DIR.resolve()
-        for p in user_path_entries
-        if p
-    )
+    already_present = any(Path(p).resolve() == CLI_DIR.resolve() for p in user_path_entries if p)
 
     if already_present:
         print(f"OK: {cli_dir_str} is already on the User PATH.", file=out)
@@ -229,9 +229,7 @@ def windows_install(
     # Apply: use setx so the change survives reboots. Append to the
     # existing User PATH value — we prepend the plugin cli so a conda /
     # asdf / other wrapper-shadowed `otaman` doesn't win.
-    new_path = (
-        cli_dir_str + ";" + user_path if user_path else cli_dir_str
-    )
+    new_path = cli_dir_str + ";" + user_path if user_path else cli_dir_str
     # setx truncates at 1024 chars silently — warn if we'd hit that
     # (rare but annoying to debug).
     if len(new_path) > 1024:
@@ -244,10 +242,13 @@ def windows_install(
         return 1
     setx = shutil.which("setx") or "setx"
     import subprocess
+
     try:
         result = subprocess.run(
             [setx, "PATH", new_path],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
     except OSError as e:
         print(f"ERROR: failed to run setx: {e}", file=sys.stderr)
@@ -274,15 +275,10 @@ def windows_uninstall(*, apply: bool = False, out=sys.stdout) -> int:
     user_path = windows_current_user_path()
     cli_dir_str = str(CLI_DIR)
     user_path_entries = [p for p in user_path.split(";") if p]
-    if not any(Path(p).resolve() == CLI_DIR.resolve()
-               for p in user_path_entries if p):
-        print(f"Nothing to do: {cli_dir_str} is not on the User PATH.",
-              file=out)
+    if not any(Path(p).resolve() == CLI_DIR.resolve() for p in user_path_entries if p):
+        print(f"Nothing to do: {cli_dir_str} is not on the User PATH.", file=out)
         return 0
-    filtered = ";".join(
-        p for p in user_path_entries
-        if Path(p).resolve() != CLI_DIR.resolve()
-    )
+    filtered = ";".join(p for p in user_path_entries if Path(p).resolve() != CLI_DIR.resolve())
     print(
         f"To remove {cli_dir_str} from User PATH, run:\n"
         f'    setx PATH "{filtered}"\n'
@@ -302,14 +298,16 @@ def run(argv: list[str] | None = None) -> int:
         description="Put `otaman` on your PATH.",
     )
     parser.add_argument(
-        "--apply", action="store_true",
+        "--apply",
+        action="store_true",
         help="Actually make the change. Without this flag, the command "
-             "only prints what it would do.",
+        "only prints what it would do.",
     )
     parser.add_argument(
-        "--uninstall", action="store_true",
+        "--uninstall",
+        action="store_true",
         help="Remove the otaman launcher from PATH (POSIX) or print "
-             "the command to remove it (Windows).",
+        "the command to remove it (Windows).",
     )
     parser.add_argument(
         "--bin-dir",

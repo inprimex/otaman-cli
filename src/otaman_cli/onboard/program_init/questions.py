@@ -27,6 +27,7 @@ Condition expression context::
 
 Example condition: ``"'strategy' in answers.get('processes', [])"``
 """
+
 from __future__ import annotations
 
 import re
@@ -38,6 +39,7 @@ import yaml
 # questionary is an optional import — tests can monkeypatch _ask_* functions
 try:
     import questionary
+
     _Q_AVAILABLE = True
 except ImportError:
     questionary = None  # type: ignore[assignment]
@@ -50,21 +52,25 @@ _KEBAB_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 
 _VALIDATORS: dict[str, Any] = {
     "kebab_slug": lambda v: (
-        True if _KEBAB_RE.match(v or "")
+        True
+        if _KEBAB_RE.match(v or "")
         else "Must be a lowercase kebab-slug (a-z, 0-9, hyphens); e.g. 'my-program'"
     ),
-    "nonempty": lambda v: (True if (v or "").strip() else "Required — please enter a value"),
+    "nonempty": lambda v: True if (v or "").strip() else "Required — please enter a value",
 }
 
 
 # --------------------------------------------------------------------------- loader
+
 
 def load_questions(questions_yaml_path: Path) -> list[dict[str, Any]]:
     """Load + return the raw question list from *questions_yaml_path*."""
     data = yaml.safe_load(questions_yaml_path.read_text(encoding="utf-8")) or {}
     questions = data.get("questions") or []
     if not isinstance(questions, list):
-        raise ValueError(f"questions.yaml: 'questions' must be a list, got {type(questions).__name__}")
+        raise ValueError(
+            f"questions.yaml: 'questions' must be a list, got {type(questions).__name__}"
+        )
     return questions
 
 
@@ -95,7 +101,7 @@ def _eval_condition(condition: str | None, context: dict[str, Any]) -> bool:
         return True  # fail-open: unknown condition → include the question
 
 
-import ast as _ast
+import ast as _ast  # noqa: E402
 
 _SAFE_CALL_NAMES = frozenset({"bool", "set", "list", "len", "str", "int", "float"})
 
@@ -128,8 +134,13 @@ class _AstEvaluator(_ast.NodeVisitor):
             return {"True": True, "False": False, "None": None}[name]
         # Expose whitelisted builtins by name
         _builtins_map: dict[str, Any] = {
-            "bool": bool, "set": set, "list": list,
-            "len": len, "str": str, "int": int, "float": float,
+            "bool": bool,
+            "set": set,
+            "list": list,
+            "len": len,
+            "str": str,
+            "int": int,
+            "float": float,
         }
         if name in _builtins_map:
             return _builtins_map[name]
@@ -160,7 +171,7 @@ class _AstEvaluator(_ast.NodeVisitor):
 
     def visit_Compare(self, node):  # noqa: N802
         left = self.visit(node.left)
-        for op, comparator in zip(node.ops, node.comparators):
+        for op, comparator in zip(node.ops, node.comparators, strict=False):
             right = self.visit(comparator)
             if isinstance(op, _ast.Eq):
                 result = left == right
@@ -201,9 +212,9 @@ class _AstEvaluator(_ast.NodeVisitor):
         left = self.visit(node.left)
         right = self.visit(node.right)
         if isinstance(node.op, _ast.BitAnd):
-            return left & right   # set intersection
+            return left & right  # set intersection
         if isinstance(node.op, _ast.BitOr):
-            return left | right   # set union
+            return left | right  # set union
         if isinstance(node.op, _ast.Add):
             return left + right
         raise ValueError(f"Binary operator not allowed: {type(node.op).__name__}")
@@ -241,6 +252,7 @@ def _is_mode_gated(q: dict[str, Any], mode: int) -> bool:
 
 
 # --------------------------------------------------------------------------- asking
+
 
 def _ask_text(q: dict[str, Any]) -> str:
     validator_name = q.get("validate")
@@ -290,9 +302,7 @@ def _ask_checkbox(q: dict[str, Any], answers: dict[str, Any]) -> list[str]:
     if _Q_AVAILABLE:
         # questionary 2.x: pre-select via Choice(..., checked=True), not default=[list].
         # `default` is now a SINGLE value used for initial focus only.
-        choices = [
-            questionary.Choice(opt, checked=(opt in defaults)) for opt in options
-        ]
+        choices = [questionary.Choice(opt, checked=(opt in defaults)) for opt in options]
         focus_default = defaults[0] if defaults and defaults[0] in options else None
         result = questionary.checkbox(
             q["label"],
@@ -353,12 +363,13 @@ def _resolve_options(q: dict[str, Any], answers: dict[str, Any]) -> list[str]:
     """Options can be a static list or a reference like ``answers.processes``."""
     opts = q.get("options") or []
     if isinstance(opts, str) and opts.startswith("answers."):
-        key = opts[len("answers."):]
+        key = opts[len("answers.") :]
         return list(answers.get(key) or [])
     return list(opts)
 
 
 # --------------------------------------------------------------------------- computed defaults
+
 
 def _recommend_skill_profile(answers: dict[str, Any]) -> str:
     """Recommend a skill profile based on domain + role selections.

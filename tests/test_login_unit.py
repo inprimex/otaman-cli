@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -20,7 +19,6 @@ from otaman_cli.auth.login import (
     poll_for_token,
     save_token,
 )
-
 
 # ---------------------------------------------------------------------------
 # build_scope
@@ -47,7 +45,8 @@ class TestBuildScope:
 
     def test_aud_scope_not_duplicated(self):
         cfg = DeviceFlowConfig(
-            issuer="http://x", client_id="c",
+            issuer="http://x",
+            client_id="c",
             project_id="proj-1",
             scopes=["openid", "urn:zitadel:iam:org:project:id:proj-1:aud"],
         )
@@ -62,9 +61,11 @@ class TestBuildScope:
 class TestCachedToken:
     def test_roundtrip(self, tmp_path):
         tok = CachedToken(
-            access_token="abc", refresh_token="def",
+            access_token="abc",
+            refresh_token="def",
             expires_at=int(time.time() + 3600),
-            issuer="http://x", client_id="c1",
+            issuer="http://x",
+            client_id="c1",
         )
         p = save_token(tok, tmp_path / "tok.json")
         assert p.is_file()
@@ -81,24 +82,31 @@ class TestCachedToken:
 
     def test_is_expired_when_past(self):
         tok = CachedToken(
-            access_token="x", refresh_token=None,
+            access_token="x",
+            refresh_token=None,
             expires_at=int(time.time()) - 100,
-            issuer="i", client_id="c",
+            issuer="i",
+            client_id="c",
         )
         assert tok.is_expired is True
 
     def test_is_expired_with_leeway(self):
         tok = CachedToken(
-            access_token="x", refresh_token=None,
+            access_token="x",
+            refresh_token=None,
             expires_at=int(time.time()) + 5,  # well within 30s leeway
-            issuer="i", client_id="c",
+            issuer="i",
+            client_id="c",
         )
         assert tok.is_expired is True
 
     def test_no_expiry_means_not_expired(self):
         tok = CachedToken(
-            access_token="x", refresh_token=None,
-            expires_at=0, issuer="i", client_id="c",
+            access_token="x",
+            refresh_token=None,
+            expires_at=0,
+            issuer="i",
+            client_id="c",
         )
         assert tok.is_expired is False
 
@@ -246,8 +254,10 @@ class TestPollForToken:
             _FakeHTTPResponse({"error": "authorization_pending"}),
             _FakeHTTPResponse({"access_token": "TOK", "expires_in": 3600}),
         ]
-        with patch("urllib.request.urlopen", side_effect=responses), \
-             patch("time.sleep"):  # don't actually sleep in tests
+        with (
+            patch("urllib.request.urlopen", side_effect=responses),
+            patch("time.sleep"),
+        ):  # don't actually sleep in tests
             r = poll_for_token(cfg, device_code="dc", interval=1, expires_in=60)
         assert r["access_token"] == "TOK"
 
@@ -257,8 +267,7 @@ class TestPollForToken:
             _FakeHTTPResponse({"error": "slow_down"}),
             _FakeHTTPResponse({"access_token": "TOK", "expires_in": 3600}),
         ]
-        with patch("urllib.request.urlopen", side_effect=responses), \
-             patch("time.sleep"):
+        with patch("urllib.request.urlopen", side_effect=responses), patch("time.sleep"):
             r = poll_for_token(cfg, device_code="dc", interval=1, expires_in=60)
         assert r["access_token"] == "TOK"
 
@@ -273,8 +282,10 @@ class TestPollForToken:
         cfg = DeviceFlowConfig(issuer="http://x", client_id="c")
         body = {"error": "authorization_pending"}
         # Fake clock that always exceeds the deadline immediately.
-        with patch("urllib.request.urlopen", return_value=_FakeHTTPResponse(body)), \
-             patch("time.sleep"), \
-             patch("time.time", side_effect=[0, 999, 999, 999]):
+        with (
+            patch("urllib.request.urlopen", return_value=_FakeHTTPResponse(body)),
+            patch("time.sleep"),
+            patch("time.time", side_effect=[0, 999, 999, 999]),
+        ):
             with pytest.raises(LoginError, match="timed out"):
                 poll_for_token(cfg, device_code="dc", interval=1, expires_in=60)

@@ -1,8 +1,8 @@
 """Tests for git_init.py — git repo initialization + initial commit."""
+
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -77,11 +77,13 @@ class TestInitialCommit:
         subprocess.run(["git", "init", str(repo)], capture_output=True)
         subprocess.run(
             ["git", "config", "user.email", "test@test.com"],
-            cwd=repo, capture_output=True,
+            cwd=repo,
+            capture_output=True,
         )
         subprocess.run(
             ["git", "config", "user.name", "Test"],
-            cwd=repo, capture_output=True,
+            cwd=repo,
+            capture_output=True,
         )
 
         (repo / "platform.yaml").write_text("project: test\n")
@@ -91,7 +93,9 @@ class TestInitialCommit:
 
         rc = subprocess.run(
             ["git", "log", "--oneline"],
-            cwd=repo, capture_output=True, text=True,
+            cwd=repo,
+            capture_output=True,
+            text=True,
         )
         assert "test-app" in rc.stdout or "init" in rc.stdout
 

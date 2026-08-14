@@ -14,6 +14,7 @@ Sub-modules:
     guidance     — post-init next-step message generator
     runner       — top-level orchestrator (entry point)
 """
+
 from __future__ import annotations
 
 from otaman_cli.onboard.program_init.runner import run_program_init

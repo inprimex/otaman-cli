@@ -3,6 +3,7 @@
 Task 2.3 (otaman_check MCP tool) lives in otaman-plugin and is not
 implemented here — coordination question sent to plugin-agent.
 """
+
 from __future__ import annotations
 
 import os
@@ -10,7 +11,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 import yaml
 
 from otaman_cli.commands.init import _ensure_routing_rules
@@ -29,13 +29,22 @@ class TestSendCcFlag:
         }
         return subprocess.run(
             [
-                sys.executable, "-m", "otaman_cli.main",
-                "send", "plugin-agent",
-                "--subject", "test cc subject",
-                "--body", "test body",
+                sys.executable,
+                "-m",
+                "otaman_cli.main",
+                "send",
+                "plugin-agent",
+                "--subject",
+                "test cc subject",
+                "--body",
+                "test body",
                 *extra,
             ],
-            cwd=root, env=env, capture_output=True, text=True, timeout=30,
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
 
     def _setup_root(self, tmp_path: Path) -> Path:
@@ -76,11 +85,16 @@ class TestSendCcFlag:
         # spec-agent appears twice; should appear once.
         r = self._run_send(
             root,
-            "--cc", "spec-agent",
-            "--cc", "plugin-agent",   # dropped: same as `to`
-            "--cc", "spec-agent",     # dropped: duplicate
-            "--cc", "  ",             # dropped: empty/whitespace
-            "--cc", "cpo-agent",
+            "--cc",
+            "spec-agent",
+            "--cc",
+            "plugin-agent",  # dropped: same as `to`
+            "--cc",
+            "spec-agent",  # dropped: duplicate
+            "--cc",
+            "  ",  # dropped: empty/whitespace
+            "--cc",
+            "cpo-agent",
         )
         assert r.returncode == 0, r.stderr
         msgs = list((root / ".agents" / "bus" / "active").glob("*.md"))
@@ -114,10 +128,19 @@ class TestCheckCcDisplay:
         )
         return tmp_path
 
-    def _plant_message(self, root: Path, *, name: str, to: str, frm: str = "runner-agent",
-                       is_cc: bool = False, priority: str = "normal",
-                       msg_type: str = "info", subject: str = "test subj",
-                       cc_for: str = "spec-agent") -> Path:
+    def _plant_message(
+        self,
+        root: Path,
+        *,
+        name: str,
+        to: str,
+        frm: str = "runner-agent",
+        is_cc: bool = False,
+        priority: str = "normal",
+        msg_type: str = "info",
+        subject: str = "test subj",
+        cc_for: str = "spec-agent",
+    ) -> Path:
         # Per the spec, CC copies carry both `cc:` (the recipient list) AND
         # `x-cc: true` (the marker that this file IS a CC copy).
         cc_line = f"cc: [{cc_for}]\n" if is_cc else ""
@@ -150,7 +173,11 @@ class TestCheckCcDisplay:
         }
         return subprocess.run(
             [sys.executable, "-m", "otaman_cli.main", "check"],
-            cwd=root, env=env, capture_output=True, text=True, timeout=30,
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
 
     def test_no_cc_messages_no_cc_section(self, tmp_path: Path):
@@ -176,10 +203,10 @@ class TestCheckCcDisplay:
         r = self._run_check(root)
         assert r.returncode == 0
         # Find the CC line
-        cc_lines = [l for l in r.stdout.splitlines() if "cc1" in l]
+        cc_lines = [line for line in r.stdout.splitlines() if "cc1" in line]
         assert cc_lines, "expected a line containing cc1"
         # The CC bullet line should contain "·" and not begin with "*"
-        bullet_line = next((l for l in cc_lines if "·" in l), None)
+        bullet_line = next((line for line in cc_lines if "·" in line), None)
         assert bullet_line is not None, f"expected · bullet, got: {cc_lines}"
 
     def test_cc_line_includes_to_field(self, tmp_path: Path):
@@ -188,9 +215,10 @@ class TestCheckCcDisplay:
         r = self._run_check(root)
         assert r.returncode == 0
         # The CC bullet line should mention the primary recipient
-        cc_lines = [l for l in r.stdout.splitlines() if "cc1" in l and "·" in l]
-        assert any("to" in l and "human" in l for l in cc_lines), \
+        cc_lines = [line for line in r.stdout.splitlines() if "cc1" in line and "·" in line]
+        assert any("to" in line and "human" in line for line in cc_lines), (
             f"CC bullet should include to-field; got: {cc_lines}"
+        )
 
     def test_cc_does_not_appear_in_primary_section(self, tmp_path: Path):
         root = self._setup_root(tmp_path)
@@ -214,12 +242,15 @@ class TestInitRoutingRules:
     def test_fresh_init_produces_routing_rules(self, tmp_path: Path):
         """write_platform_yaml (used by program-init) includes routing_rules."""
         out = tmp_path / "platform.yaml"
-        write_platform_yaml({
-            "program_name": "fresh",
-            "primary_repo": ".",
-            "mode": 1,
-            "active_edition": "ce",
-        }, out)
+        write_platform_yaml(
+            {
+                "program_name": "fresh",
+                "primary_repo": ".",
+                "mode": 1,
+                "active_edition": "ce",
+            },
+            out,
+        )
         doc = yaml.safe_load(out.read_text())
         assert "bus" in doc
         assert "routing_rules" in doc["bus"]
@@ -230,13 +261,16 @@ class TestInitRoutingRules:
 
     def test_fresh_init_includes_cpo_rule_when_cpo_repo_present(self, tmp_path: Path):
         out = tmp_path / "platform.yaml"
-        write_platform_yaml({
-            "program_name": "cpo-test",
-            "primary_repo": ".",
-            "scaffold_business": True,    # adds <name>-business owned by cpo-agent
-            "mode": 2,
-            "active_edition": "ce",
-        }, out)
+        write_platform_yaml(
+            {
+                "program_name": "cpo-test",
+                "primary_repo": ".",
+                "scaffold_business": True,  # adds <name>-business owned by cpo-agent
+                "mode": 2,
+                "active_edition": "ce",
+            },
+            out,
+        )
         doc = yaml.safe_load(out.read_text())
         rules = doc["bus"]["routing_rules"]
         cpo_rule = next(
@@ -249,12 +283,15 @@ class TestInitRoutingRules:
 
     def test_fresh_init_no_cpo_rule_without_cpo_repo(self, tmp_path: Path):
         out = tmp_path / "platform.yaml"
-        write_platform_yaml({
-            "program_name": "no-cpo",
-            "primary_repo": ".",
-            "mode": 1,
-            "active_edition": "ce",
-        }, out)
+        write_platform_yaml(
+            {
+                "program_name": "no-cpo",
+                "primary_repo": ".",
+                "mode": 1,
+                "active_edition": "ce",
+            },
+            out,
+        )
         doc = yaml.safe_load(out.read_text())
         rules = doc["bus"]["routing_rules"]
         assert all("cpo-agent" not in (r.get("cc") or []) for r in rules)
@@ -320,8 +357,7 @@ class TestInitRoutingRules:
     def test_update_does_not_add_cpo_rule_without_cpo_repo(self, tmp_path: Path):
         platform_yaml = tmp_path / "platform.yaml"
         platform_yaml.write_text(
-            "project: nocpo\nversion: '1.0'\n"
-            "repos:\n  - {name: x, path: ., owner: spec-agent}\n",
+            "project: nocpo\nversion: '1.0'\nrepos:\n  - {name: x, path: ., owner: spec-agent}\n",
             encoding="utf-8",
         )
         rc = _ensure_routing_rules(platform_yaml)

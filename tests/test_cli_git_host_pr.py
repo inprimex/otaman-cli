@@ -7,7 +7,6 @@ their own unit tests). Uses a fake adapter so we don't hit HTTP.
 from __future__ import annotations
 
 import io
-import json
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -17,9 +16,9 @@ import pytest
 
 CLI_PY = None  # cli/cli_main.py replaced by otaman_cli.main module invocation
 # git_host now imported from otaman_core; cli dispatcher imported as package module
-from otaman_core import git_host as gh
-from otaman_cli import main as cli_main
+from otaman_core import git_host as gh  # noqa: E402
 
+from otaman_cli import main as cli_main  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Fake adapter — no HTTP
@@ -97,12 +96,14 @@ def _run_cli(args: list[str], cwd: Path):
     try:
         sys.argv = ["maestro"] + args
         import os as _os
+
         _os.chdir(str(cwd))
         with redirect_stdout(buf):
             rc = cli_main.main()
     finally:
         sys.argv = orig_argv
         import os as _os
+
         _os.chdir(str(orig_cwd))
     return rc, buf.getvalue()
 
@@ -139,13 +140,16 @@ def _make_pr(number=42, head_ref="feature/x", **overrides):
 
 class TestPrList:
     def test_lists_open_prs(self, maestro_workspace):
-        fake = FakeAdapter(prs=[
-            _make_pr(number=1, title="A"),
-            _make_pr(number=2, title="B"),
-        ])
-        with patch.object(gh, "get_adapter", return_value=fake), \
-                patch.object(gh, "detect_remote_for_repo",
-                             return_value=_fake_remote_info()):
+        fake = FakeAdapter(
+            prs=[
+                _make_pr(number=1, title="A"),
+                _make_pr(number=2, title="B"),
+            ]
+        )
+        with (
+            patch.object(gh, "get_adapter", return_value=fake),
+            patch.object(gh, "detect_remote_for_repo", return_value=_fake_remote_info()),
+        ):
             rc, out = _run_cli(
                 ["git-host", "pr", "list", "--repo", "app"],
                 cwd=maestro_workspace["maestro"],
@@ -156,9 +160,10 @@ class TestPrList:
 
     def test_empty(self, maestro_workspace):
         fake = FakeAdapter(prs=[])
-        with patch.object(gh, "get_adapter", return_value=fake), \
-                patch.object(gh, "detect_remote_for_repo",
-                             return_value=_fake_remote_info()):
+        with (
+            patch.object(gh, "get_adapter", return_value=fake),
+            patch.object(gh, "detect_remote_for_repo", return_value=_fake_remote_info()),
+        ):
             rc, out = _run_cli(
                 ["git-host", "pr", "list", "--repo", "app"],
                 cwd=maestro_workspace["maestro"],
@@ -170,9 +175,10 @@ class TestPrList:
 class TestPrGet:
     def test_get_by_number(self, maestro_workspace):
         fake = FakeAdapter(prs=[_make_pr(number=42, title="Real PR")])
-        with patch.object(gh, "get_adapter", return_value=fake), \
-                patch.object(gh, "detect_remote_for_repo",
-                             return_value=_fake_remote_info()):
+        with (
+            patch.object(gh, "get_adapter", return_value=fake),
+            patch.object(gh, "detect_remote_for_repo", return_value=_fake_remote_info()),
+        ):
             rc, out = _run_cli(
                 ["git-host", "pr", "get", "42", "--repo", "app"],
                 cwd=maestro_workspace["maestro"],
@@ -183,9 +189,10 @@ class TestPrGet:
 
     def test_not_found(self, maestro_workspace):
         fake = FakeAdapter(prs=[])
-        with patch.object(gh, "get_adapter", return_value=fake), \
-                patch.object(gh, "detect_remote_for_repo",
-                             return_value=_fake_remote_info()):
+        with (
+            patch.object(gh, "get_adapter", return_value=fake),
+            patch.object(gh, "detect_remote_for_repo", return_value=_fake_remote_info()),
+        ):
             rc, _ = _run_cli(
                 ["git-host", "pr", "get", "999", "--repo", "app"],
                 cwd=maestro_workspace["maestro"],
@@ -194,9 +201,10 @@ class TestPrGet:
 
     def test_invalid_number(self, maestro_workspace):
         fake = FakeAdapter()
-        with patch.object(gh, "get_adapter", return_value=fake), \
-                patch.object(gh, "detect_remote_for_repo",
-                             return_value=_fake_remote_info()):
+        with (
+            patch.object(gh, "get_adapter", return_value=fake),
+            patch.object(gh, "detect_remote_for_repo", return_value=_fake_remote_info()),
+        ):
             rc, _ = _run_cli(
                 ["git-host", "pr", "get", "not-a-number", "--repo", "app"],
                 cwd=maestro_workspace["maestro"],
@@ -207,12 +215,12 @@ class TestPrGet:
 class TestPrComment:
     def test_post_with_body_flag(self, maestro_workspace):
         fake = FakeAdapter(prs=[_make_pr(number=42)])
-        with patch.object(gh, "get_adapter", return_value=fake), \
-                patch.object(gh, "detect_remote_for_repo",
-                             return_value=_fake_remote_info()):
+        with (
+            patch.object(gh, "get_adapter", return_value=fake),
+            patch.object(gh, "detect_remote_for_repo", return_value=_fake_remote_info()),
+        ):
             rc, out = _run_cli(
-                ["git-host", "pr", "comment", "42",
-                 "--repo", "app", "--body", "LGTM"],
+                ["git-host", "pr", "comment", "42", "--repo", "app", "--body", "LGTM"],
                 cwd=maestro_workspace["maestro"],
             )
         assert rc == 0
@@ -222,12 +230,12 @@ class TestPrComment:
 
     def test_empty_body_fails(self, maestro_workspace):
         fake = FakeAdapter(prs=[_make_pr(number=42)])
-        with patch.object(gh, "get_adapter", return_value=fake), \
-                patch.object(gh, "detect_remote_for_repo",
-                             return_value=_fake_remote_info()):
+        with (
+            patch.object(gh, "get_adapter", return_value=fake),
+            patch.object(gh, "detect_remote_for_repo", return_value=_fake_remote_info()),
+        ):
             rc, _ = _run_cli(
-                ["git-host", "pr", "comment", "42",
-                 "--repo", "app", "--body", "   "],
+                ["git-host", "pr", "comment", "42", "--repo", "app", "--body", "   "],
                 cwd=maestro_workspace["maestro"],
             )
         assert rc == 1
@@ -249,11 +257,13 @@ class TestPostReview:
     def test_posts_latest_review_by_default(self, maestro_workspace):
         review = self._setup_review(maestro_workspace["maestro"])
         fake = FakeAdapter(prs=[_make_pr(number=42, head_ref="my-branch")])
-        with patch.object(gh, "get_adapter", return_value=fake), \
-                patch.object(gh, "detect_remote_for_repo",
-                             return_value=_fake_remote_info()), \
-                patch("otaman_cli.commands.git_host._git_host_current_branch",
-                      return_value="my-branch"):
+        with (
+            patch.object(gh, "get_adapter", return_value=fake),
+            patch.object(gh, "detect_remote_for_repo", return_value=_fake_remote_info()),
+            patch(
+                "otaman_cli.commands.git_host._git_host_current_branch", return_value="my-branch"
+            ),
+        ):
             rc, out = _run_cli(
                 ["git-host", "post-review", "--repo", "app"],
                 cwd=maestro_workspace["maestro"],
@@ -269,12 +279,14 @@ class TestPostReview:
     def test_no_review_file_errors(self, maestro_workspace):
         # Don't create any review files.
         (maestro_workspace["maestro"] / ".agents" / "reviews" / "pending").mkdir(
-            parents=True, exist_ok=True,
+            parents=True,
+            exist_ok=True,
         )
         fake = FakeAdapter(prs=[_make_pr(number=42, head_ref="my-branch")])
-        with patch.object(gh, "get_adapter", return_value=fake), \
-                patch.object(gh, "detect_remote_for_repo",
-                             return_value=_fake_remote_info()):
+        with (
+            patch.object(gh, "get_adapter", return_value=fake),
+            patch.object(gh, "detect_remote_for_repo", return_value=_fake_remote_info()),
+        ):
             rc, _ = _run_cli(
                 ["git-host", "post-review", "--repo", "app"],
                 cwd=maestro_workspace["maestro"],
@@ -284,9 +296,10 @@ class TestPostReview:
     def test_explicit_pr_number(self, maestro_workspace):
         self._setup_review(maestro_workspace["maestro"])
         fake = FakeAdapter(prs=[_make_pr(number=7)])
-        with patch.object(gh, "get_adapter", return_value=fake), \
-                patch.object(gh, "detect_remote_for_repo",
-                             return_value=_fake_remote_info()):
+        with (
+            patch.object(gh, "get_adapter", return_value=fake),
+            patch.object(gh, "detect_remote_for_repo", return_value=_fake_remote_info()),
+        ):
             rc, _ = _run_cli(
                 ["git-host", "post-review", "--pr", "7", "--repo", "app"],
                 cwd=maestro_workspace["maestro"],
@@ -297,11 +310,14 @@ class TestPostReview:
     def test_no_pr_for_branch_errors(self, maestro_workspace):
         self._setup_review(maestro_workspace["maestro"])
         fake = FakeAdapter(prs=[])  # no PR for the branch
-        with patch.object(gh, "get_adapter", return_value=fake), \
-                patch.object(gh, "detect_remote_for_repo",
-                             return_value=_fake_remote_info()), \
-                patch("otaman_cli.commands.git_host._git_host_current_branch",
-                      return_value="orphan-branch"):
+        with (
+            patch.object(gh, "get_adapter", return_value=fake),
+            patch.object(gh, "detect_remote_for_repo", return_value=_fake_remote_info()),
+            patch(
+                "otaman_cli.commands.git_host._git_host_current_branch",
+                return_value="orphan-branch",
+            ),
+        ):
             rc, _ = _run_cli(
                 ["git-host", "post-review", "--repo", "app"],
                 cwd=maestro_workspace["maestro"],

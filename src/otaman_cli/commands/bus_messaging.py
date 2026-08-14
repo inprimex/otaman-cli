@@ -19,7 +19,7 @@ from otaman_core.validate_message import PRIVILEGED_TYPES
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, resolve_agent_identity
-from otaman_cli.main import C, UI, _read_platform_specs_path, _resolve_bus_paths, run_script
+from otaman_cli.main import UI, C, _read_platform_specs_path, _resolve_bus_paths, run_script
 
 # outcome-proposal-routing task 3.1 — message-type registry for `otaman send`
 # validation.  Keep this list lean: deliberately limited to types that have
@@ -32,18 +32,20 @@ from otaman_cli.main import C, UI, _read_platform_specs_path, _resolve_bus_paths
 # (assert a human decision was made) and must only be producible via
 # `otaman approve`'s TTY-gated confirmation, never the general send path.
 # See the PRIVILEGED_TYPES check in cmd_send below.
-MESSAGE_TYPES: frozenset[str] = frozenset({
-    "info",
-    "question",
-    "task-assignment",
-    "task-complete",
-    "spec-change",
-    "spec-change-request",
-    "contract-change",
-    "review-request",
-    "proposal",
-    "outcome-proposal",
-})
+MESSAGE_TYPES: frozenset[str] = frozenset(
+    {
+        "info",
+        "question",
+        "task-assignment",
+        "task-complete",
+        "spec-change",
+        "spec-change-request",
+        "contract-change",
+        "review-request",
+        "proposal",
+        "outcome-proposal",
+    }
+)
 
 _PRIVILEGED_TYPE_HINTS: dict[str, str] = {
     "spec-change-approved": "Use `otaman approve approve <stem>` instead.",
@@ -67,6 +69,7 @@ def cmd_send(args: list[str]) -> int:
     `to` is the recipient agent name, "all" for broadcast, or "human".
     """
     import argparse
+
     parser = argparse.ArgumentParser(prog="otaman send", add_help=False)
     parser.add_argument("to", nargs="?")
     parser.add_argument("--subject", required=False)
@@ -75,20 +78,26 @@ def cmd_send(args: list[str]) -> int:
     parser.add_argument("--priority", default="normal")
     parser.add_argument("--from", dest="explicit_from")
     parser.add_argument(
-        "--cc", action="append", default=None, metavar="AGENT",
+        "--cc",
+        action="append",
+        default=None,
+        metavar="AGENT",
         help="add a CC recipient; repeat for multiple (bus-cc-routing task 2.1)",
     )
     try:
         ns = parser.parse_args(args)
     except SystemExit:
-        UI.muted("Usage: otaman send <to> --subject \"...\" --body \"...\" "
-                 "[--type info|question|task-assignment|...] [--priority low|normal|high|urgent]")
+        UI.muted(
+            'Usage: otaman send <to> --subject "..." --body "..." '
+            "[--type info|question|task-assignment|...] [--priority low|normal|high|urgent]"
+        )
         return 2
 
     if not ns.to or not ns.subject or not ns.body:
         UI.error("send requires <to>, --subject, and --body")
-        UI.muted("Usage: otaman send <to> --subject \"...\" --body \"...\" "
-                 "[--type ...] [--priority ...]")
+        UI.muted(
+            'Usage: otaman send <to> --subject "..." --body "..." [--type ...] [--priority ...]'
+        )
         return 2
 
     # F012 — privileged types assert a human decision; forging one defeats
@@ -97,10 +106,16 @@ def cmd_send(args: list[str]) -> int:
     # actually produce them — checked BEFORE the general registry lookup
     # below so the error is directed, not a generic "unknown type".
     if ns.msg_type in PRIVILEGED_TYPES:
-        UI.error(f"'{ns.msg_type}' is a privileged message type and cannot be sent via `otaman send`.")
-        UI.muted("  " + _PRIVILEGED_TYPE_HINTS.get(
-            ns.msg_type, "This type asserts a human decision and requires a dedicated command.",
-        ))
+        UI.error(
+            f"'{ns.msg_type}' is a privileged message type and cannot be sent via `otaman send`."
+        )
+        UI.muted(
+            "  "
+            + _PRIVILEGED_TYPE_HINTS.get(
+                ns.msg_type,
+                "This type asserts a human decision and requires a dedicated command.",
+            )
+        )
         return 2
 
     # outcome-proposal-routing task 3.1 — validate message type against the
@@ -130,12 +145,19 @@ def cmd_send(args: list[str]) -> int:
     agent = resolve_agent_identity(root, explicit=ns.explicit_from)
     if not agent:
         UI.error("Agent identity could not be resolved.")
-        UI.muted("  Sources tried: OTAMAN_AGENT env, .otaman agent: field (CWD walk), .agents/current-agent")
-        UI.muted("  Fix: set OTAMAN_AGENT env var, or run 'otaman init --update' to write per-repo .otaman files")
+        UI.muted(
+            "  Sources tried: OTAMAN_AGENT env, .otaman agent: field (CWD walk), "
+            ".agents/current-agent"
+        )
+        UI.muted(
+            "  Fix: set OTAMAN_AGENT env var, or run 'otaman init --update' "
+            "to write per-repo .otaman files"
+        )
         UI.muted("Tip: run from inside a managed repo, or pass --from <agent>")
         return 1
 
     from datetime import datetime, timezone
+
     now = datetime.now(timezone.utc)
     ts = now.strftime("%Y%m%dT%H%M%S")
     ts_iso = now.isoformat()
@@ -148,11 +170,12 @@ def cmd_send(args: list[str]) -> int:
     # bus_server.py:157-283 so cmd_send and the MCP otaman_send produce
     # byte-identical on-disk files.
     from otaman_cli.cc_fanout import (
+        cc_copy_filename,
         compute_effective_cc,
         inject_x_cc,
         load_routing_rules,
-        cc_copy_filename,
     )
+
     routing_rules = load_routing_rules(root)
     # Strip + drop empties from --cc values (a UX nicety; the ported
     # compute_effective_cc preserves whitespace-only entries because
@@ -198,8 +221,10 @@ def cmd_send(args: list[str]) -> int:
         cc_content = inject_x_cc(content)
         for recipient in effective_cc:
             cc_fname = cc_copy_filename(
-                timestamp=ts, from_agent=agent,
-                cc_recipient=recipient, slug=slug,
+                timestamp=ts,
+                from_agent=agent,
+                cc_recipient=recipient,
+                slug=slug,
             )
             cc_path = active_dir / cc_fname
             cc_path.write_text(cc_content, encoding="utf-8")
@@ -327,7 +352,10 @@ def cmd_ack(args: list[str]) -> int:
     agent = resolve_agent_identity(root)
     if not agent:
         UI.error("No agent identity set.")
-        UI.muted("  Set OTAMAN_AGENT env var, or run 'otaman init --update' to write per-repo .otaman agent: fields")
+        UI.muted(
+            "  Set OTAMAN_AGENT env var, or run 'otaman init --update' "
+            "to write per-repo .otaman agent: fields"
+        )
         return 1
 
     active_dir, acks_dir = _resolve_bus_paths(root)
@@ -358,11 +386,14 @@ def cmd_ack(args: list[str]) -> int:
     # is a short hash that doesn't appear in the filename).
     if not matches and active_dir.is_dir():
         import re as _re
+
         for f in active_dir.glob("*.md"):
             try:
                 head = f.read_text(encoding="utf-8")[:512]
                 fm_id_match = _re.search(r"^id:\s*(\S+)", head, _re.MULTILINE)
-                if fm_id_match and (fm_id_match.group(1) == pattern or pattern in fm_id_match.group(1)):
+                if fm_id_match and (
+                    fm_id_match.group(1) == pattern or pattern in fm_id_match.group(1)
+                ):
                     matches.append(f)
             except (OSError, UnicodeDecodeError):
                 continue
@@ -381,8 +412,10 @@ def cmd_ack(args: list[str]) -> int:
     # Task 2.3 advisory: when resolving a message that expects a response,
     # warn if no outbound reply with reply-to: <this-id> exists.  Do not block.
     if status == "resolved":
-        from otaman_cli.response_contract import has_outbound_reply as _has_reply
         import yaml as _yaml
+
+        from otaman_cli.response_contract import has_outbound_reply as _has_reply
+
         for msg_file in matches:
             try:
                 head = msg_file.read_text(encoding="utf-8")[:2048]
@@ -431,7 +464,10 @@ def _status_hook_after_ack(root: Path, agent: str, msg_files: list[Path]) -> Non
     """
     try:
         from otaman_cli.status import (
-            AgentStatus, State, get_backend, is_agent_presence_enabled,
+            AgentStatus,
+            State,
+            get_backend,
+            is_agent_presence_enabled,
         )
     except Exception:
         return
@@ -439,6 +475,7 @@ def _status_hook_after_ack(root: Path, agent: str, msg_files: list[Path]) -> Non
         return
 
     import yaml as _yaml
+
     for f in msg_files:
         try:
             text = f.read_text(encoding="utf-8")
@@ -454,20 +491,26 @@ def _status_hook_after_ack(root: Path, agent: str, msg_files: list[Path]) -> Non
         if not isinstance(fm, dict) or fm.get("type") != "task-assignment":
             continue
 
-        body = text[fm_match.end():] if fm_match else ""
+        body = text[fm_match.end() :] if fm_match else ""
         task, change = _parse_task_and_change_from_body(body)
         backend = get_backend(root)
         existing = backend.read(agent)
         from datetime import datetime, timezone
+
         now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
         # State change → reset since; same state → preserve.
         since = existing.since if (existing and existing.state == State.WORKING) else now_iso
         try:
-            backend.write(AgentStatus(
-                agent=agent, state=State.WORKING,
-                task=task, change=change,
-                since=since, updated_at=now_iso,
-            ))
+            backend.write(
+                AgentStatus(
+                    agent=agent,
+                    state=State.WORKING,
+                    task=task,
+                    change=change,
+                    since=since,
+                    updated_at=now_iso,
+                )
+            )
         except Exception:
             pass
         return  # first task-assignment in this ack batch is enough
@@ -525,17 +568,23 @@ def _parse_task_and_change_from_body(body: str) -> tuple[str | None, str | None]
     return task, change
 
 
-def _write_spec_owner(root: "Path", change_name: str, agent: str) -> None:
+def _write_spec_owner(root: Path, change_name: str, agent: str) -> None:
     """Write or update spec_owner field in <change>/.openspec.yaml. Silent no-op on any error."""
     try:
         specs_rel = _read_platform_specs_path(root)
         if not specs_rel:
             return
-        openspec_yaml = (root / specs_rel / "openspec" / "changes" / change_name / ".openspec.yaml").resolve()
+        openspec_yaml = (
+            root / specs_rel / "openspec" / "changes" / change_name / ".openspec.yaml"
+        ).resolve()
         if not openspec_yaml.parent.is_dir():
             return
-        lines = openspec_yaml.read_text(encoding="utf-8").splitlines() if openspec_yaml.is_file() else []
-        new_lines = [l for l in lines if not l.strip().startswith("spec_owner:")]
+        lines = (
+            openspec_yaml.read_text(encoding="utf-8").splitlines()
+            if openspec_yaml.is_file()
+            else []
+        )
+        new_lines = [line for line in lines if not line.strip().startswith("spec_owner:")]
         new_lines.append(f"spec_owner: {agent}")
         openspec_yaml.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
     except Exception:
@@ -555,6 +604,7 @@ def cmd_assign(args: list[str]) -> int:
         # Auto-detect: scan OpenSpec changes/ for tasks.md files
         try:
             import yaml
+
             config_path = root / "platform.yaml"
             if config_path.exists():
                 with open(config_path, encoding="utf-8") as f:
@@ -590,6 +640,7 @@ def cmd_assign(args: list[str]) -> int:
 
     try:
         import json
+
         report = json.loads(result.stdout)
     except (json.JSONDecodeError, ImportError):
         print(result.stdout)
@@ -639,6 +690,7 @@ def cmd_assign(args: list[str]) -> int:
         resolve_tasks_md_path,
         scan_tasks_md,
     )
+
     tasks_md = resolve_tasks_md_path(target)
     if tasks_md is not None:
         findings = scan_tasks_md(tasks_md, root)
@@ -652,7 +704,7 @@ def cmd_assign(args: list[str]) -> int:
                 marker = "✓" if sol_id in findings.valid_ids else "✗"
                 UI.bullet(f"{marker} {sol_id} — {len(anns)} task(s)")
                 if sol_id in findings.missing_ids:
-                    UI.muted(f"    not found in solutions.yaml")
+                    UI.muted("    not found in solutions.yaml")
             if findings.missing_ids:
                 print()
                 UI.warn(
@@ -667,9 +719,11 @@ def cmd_assign(args: list[str]) -> int:
         try:
             from otaman_cli.hitl.mode_annotations import (
                 ModeAnnotationError,
-                ModeSummary,
+            )
+            from otaman_cli.hitl.mode_annotations import (
                 scan_tasks_md as _mode_scan,
             )
+
             try:
                 _mode_result = _mode_scan(tasks_md)
             except ModeAnnotationError as exc:
@@ -696,5 +750,7 @@ def cmd_assign(args: list[str]) -> int:
 
 register(CommandSpec(name="send", handler=cmd_send, help="Send a bus message (substring match OK)"))
 register(CommandSpec(name="read", handler=cmd_read, help="Read full content of a bus message"))
-register(CommandSpec(name="ack", handler=cmd_ack, help="Acknowledge a bus message (resolved is default)"))
+register(
+    CommandSpec(name="ack", handler=cmd_ack, help="Acknowledge a bus message (resolved is default)")
+)
 register(CommandSpec(name="assign", handler=cmd_assign, help="Map OpenSpec tasks to repo owners"))

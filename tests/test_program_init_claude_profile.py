@@ -12,12 +12,9 @@ Covers:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from unittest import mock
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # 1.1 — wizard question is in _builtin_questions
@@ -117,6 +114,7 @@ def test_program_extensions_claude_alias_with_hyphen():
 def test_program_extensions_claude_rejects_unknown_subkey():
     """ClaudeConfig uses extra='forbid' — typos surface as validation errors."""
     from pydantic import ValidationError
+
     from otaman_cli.registries.platform_ext import ProgramExtensions
 
     with pytest.raises(ValidationError):
@@ -134,7 +132,7 @@ def _make_launch_project(tmp_path: Path, *, account=None, program_claude_dir=Non
     # platform.yaml
     yaml_text = "project: x\nrepos: []\n"
     if program_claude_dir is not None:
-        yaml_text += f"program:\n  claude:\n    config_dir: \"{program_claude_dir}\"\n"
+        yaml_text += f'program:\n  claude:\n    config_dir: "{program_claude_dir}"\n'
     (meta / "platform.yaml").write_text(yaml_text, encoding="utf-8")
     # launch-settings.yaml — minimal with optional account
     settings_lines = ["connections:", "  default:", "    type: local"]
@@ -160,7 +158,9 @@ def test_launch_resolve_account_override_wins_over_program_claude(tmp_path: Path
     from otaman_cli.launch_resolve import resolve
 
     meta = _make_launch_project(
-        tmp_path, account="acct1", program_claude_dir="~/.claude-prog",
+        tmp_path,
+        account="acct1",
+        program_claude_dir="~/.claude-prog",
     )
     state = resolve(maestro_root=meta, connection_name="default", shell="bash")
     # Account override (~/.claude-acct1) wins
@@ -278,6 +278,7 @@ def test_wizard_output_passes_platform_schema_validation(tmp_path, monkeypatch):
         load_yaml,
         validate_with_jsonschema,
     )
+
     config = load_yaml(output)
     schema = load_yaml(SCHEMA_PATH)
     errors = validate_with_jsonschema(config, schema)
@@ -292,8 +293,9 @@ def test_wizard_processes_nested_under_program_key(tmp_path):
     """Specific to the 2026-06-07 fix: processes must be at
     `program.processes.<name>.enabled: true`, NOT a top-level `processes:` key.
     """
-    from otaman_cli.onboard.program_init.platform_gen import write_platform_yaml
     import yaml as _y
+
+    from otaman_cli.onboard.program_init.platform_gen import write_platform_yaml
 
     answers = _base_answers(
         program_name="ptest",
@@ -317,8 +319,9 @@ def test_wizard_processes_nested_under_program_key(tmp_path):
 
 def test_wizard_omits_processes_block_when_none_opted_in(tmp_path):
     """No processes selected → no `program.processes` block written."""
-    from otaman_cli.onboard.program_init.platform_gen import write_platform_yaml
     import yaml as _y
+
+    from otaman_cli.onboard.program_init.platform_gen import write_platform_yaml
 
     answers = _base_answers(program_name="noproc", processes=[])
     output = tmp_path / "platform.yaml"

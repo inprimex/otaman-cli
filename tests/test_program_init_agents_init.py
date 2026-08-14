@@ -1,9 +1,8 @@
 """Tests for agents_init.py — .agents/ structure initialization."""
+
 from __future__ import annotations
 
 from pathlib import Path
-
-import pytest
 
 from otaman_cli.onboard.program_init.agents_init import init_agents_structure
 
@@ -23,6 +22,7 @@ class TestInitAgentsStructure:
         ownership = tmp_path / ".agents" / "ownership.json"
         assert ownership.is_file()
         import json
+
         data = json.loads(ownership.read_text())
         assert data["program"] == "my-app"
         assert data["version"] == 1
@@ -37,7 +37,7 @@ class TestInitAgentsStructure:
 
     def test_idempotent(self, tmp_path):
         """Second call creates nothing new."""
-        first = init_agents_structure(tmp_path, "my-app")
+        init_agents_structure(tmp_path, "my-app")
         second = init_agents_structure(tmp_path, "my-app")
         assert len(second) == 0  # nothing new created
 

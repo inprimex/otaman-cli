@@ -18,7 +18,7 @@ from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, resolve_agent_identity
-from otaman_cli.main import C, UI, _get_agent_ack_status, _resolve_bus_paths, run_script
+from otaman_cli.main import UI, C, _get_agent_ack_status, _resolve_bus_paths, run_script
 
 
 def cmd_set_status(args: list[str]) -> int:
@@ -34,6 +34,7 @@ def cmd_set_status(args: list[str]) -> int:
     `updated_at` advances.
     """
     import argparse
+
     parser = argparse.ArgumentParser(prog="otaman set-status", add_help=False)
     parser.add_argument("state", nargs="?")
     parser.add_argument("--task", default=None)
@@ -44,8 +45,10 @@ def cmd_set_status(args: list[str]) -> int:
     try:
         ns = parser.parse_args(args)
     except SystemExit:
-        UI.muted("Usage: otaman set-status <working|blocked|waiting|idle> "
-                 "[--task \"...\"] [--change SLUG] [--blocked-by NAME] [--outcome SLUG]")
+        UI.muted(
+            "Usage: otaman set-status <working|blocked|waiting|idle> "
+            '[--task "..."] [--change SLUG] [--blocked-by NAME] [--outcome SLUG]'
+        )
         return 2
 
     if not ns.state:
@@ -54,14 +57,16 @@ def cmd_set_status(args: list[str]) -> int:
         return 2
 
     from otaman_cli.status import (
-        AgentStatus, State, get_backend, is_agent_presence_enabled,
+        AgentStatus,
+        State,
+        get_backend,
+        is_agent_presence_enabled,
     )
 
     try:
         new_state = State(ns.state.lower())
     except ValueError:
-        UI.error(f"Invalid state {ns.state!r}; expected one of: "
-                 "working, blocked, waiting, idle")
+        UI.error(f"Invalid state {ns.state!r}; expected one of: working, blocked, waiting, idle")
         return 2
 
     root = find_project_root()
@@ -72,7 +77,10 @@ def cmd_set_status(args: list[str]) -> int:
     agent = resolve_agent_identity(root, explicit=ns.explicit_agent)
     if not agent:
         UI.error("Agent identity could not be resolved.")
-        UI.muted("  Sources tried: OTAMAN_AGENT env, .otaman agent: field (CWD walk), .agents/current-agent")
+        UI.muted(
+            "  Sources tried: OTAMAN_AGENT env, .otaman agent: field (CWD walk), "
+            ".agents/current-agent"
+        )
         UI.muted("  Fix: pass --agent <name>, or set OTAMAN_AGENT, or run 'otaman init --update'")
         return 1
 
@@ -84,6 +92,7 @@ def cmd_set_status(args: list[str]) -> int:
     existing = backend.read(agent)
 
     from datetime import datetime, timezone
+
     now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
     # Heartbeat: same state → preserve `since`; advance `updated_at` only.
@@ -104,8 +113,10 @@ def cmd_set_status(args: list[str]) -> int:
         outcome = ns.outcome if ns.outcome is not None else (existing.outcome if existing else None)
         # blocked_by only meaningful for blocked state
         if new_state == State.BLOCKED:
-            blocked_by = ns.blocked_by if ns.blocked_by is not None else (
-                existing.blocked_by if existing else "human"
+            blocked_by = (
+                ns.blocked_by
+                if ns.blocked_by is not None
+                else (existing.blocked_by if existing else "human")
             )
         else:
             blocked_by = None
@@ -147,6 +158,7 @@ def cmd_fleet_status(args: list[str]) -> int:
     (blocked → working → waiting → idle), prints a table with summary counts.
     """
     import argparse
+
     parser = argparse.ArgumentParser(prog="otaman status", add_help=False)
     parser.add_argument("--blocked", action="store_true")
     parser.add_argument("--agent", dest="agent_filter", default=None)
@@ -158,6 +170,7 @@ def cmd_fleet_status(args: list[str]) -> int:
         return 2
 
     from otaman_cli.status import State, get_backend, is_agent_presence_enabled
+
     root = find_project_root()
     if not root:
         UI.error("Not in an otaman project")
@@ -187,16 +200,23 @@ def cmd_fleet_status(args: list[str]) -> int:
     records.sort(key=lambda r: (order.get(r.state, 99), r.agent))
 
     if ns.as_json:
-        print(json.dumps({
-            "enabled": True,
-            "generated_at": __import__("datetime").datetime.now(
-                __import__("datetime").timezone.utc
-            ).isoformat(timespec="seconds").replace("+00:00", "Z"),
-            "agents": [r.to_dict() for r in records],
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "generated_at": __import__("datetime")
+                    .datetime.now(__import__("datetime").timezone.utc)
+                    .isoformat(timespec="seconds")
+                    .replace("+00:00", "Z"),
+                    "agents": [r.to_dict() for r in records],
+                },
+                indent=2,
+            )
+        )
         return 0
 
     from datetime import datetime, timezone
+
     now_utc = datetime.now(timezone.utc)
     print()
     UI.header(f"Fleet status  ({now_utc.strftime('%Y-%m-%d %H:%M UTC')})")
@@ -235,7 +255,7 @@ def cmd_fleet_status(args: list[str]) -> int:
         elif r.state == State.IDLE:
             tail = "—"
         if r.state == State.BLOCKED and r.blocked_by:
-            tail = f"blocked by {r.blocked_by}  ·  {tail}".rstrip("  ·  ")
+            tail = f"blocked by {r.blocked_by}  ·  {tail}".removesuffix("  ·  ")
         print(f"  {r.agent:<18} {r.state.value:<9} {_since_human(r.since):<8} {tail}")
 
     print()
@@ -283,7 +303,7 @@ def _cmd_status_repos(args: list[str]) -> int:
         return 0
 
     if "error" in report:
-        UI.error(report['error'])
+        UI.error(report["error"])
         return 1
 
     UI.header(f"Otaman Status: {report.get('project', '?')}")
@@ -330,7 +350,11 @@ def _cmd_status_repos(args: list[str]) -> int:
 
     # Messages summary
     msgs = report.get("messages", {})
-    UI.kv("Messages", f"{msgs.get('pending', 0)} pending | {msgs.get('read', 0)} read | {msgs.get('resolved', 0)} resolved")
+    UI.kv(
+        "Messages",
+        f"{msgs.get('pending', 0)} pending | {msgs.get('read', 0)} read | "
+        f"{msgs.get('resolved', 0)} resolved",
+    )
 
     # Pending reviews
     reviews = report.get("pending_reviews", [])
@@ -344,7 +368,9 @@ def _cmd_status_repos(args: list[str]) -> int:
     if proposals:
         UI.subheader("Active proposals:")
         for p in proposals:
-            UI.bullet(f"{p.get('id', '?')}: {p.get('title', '?')} [{p.get('status', '?')}]", color=C.BLUE)
+            UI.bullet(
+                f"{p.get('id', '?')}: {p.get('title', '?')} [{p.get('status', '?')}]", color=C.BLUE
+            )
 
     # Silent bus cleanup
     cleanup_result = run_script("cleanup-bus.py", str(root), capture=True)
@@ -383,6 +409,7 @@ def _cmd_whoami_for_path(raw_path: str) -> int:
     the path isn't under any registered repo.
     """
     from pathlib import Path as _Path
+
     from otaman_cli.owner_paths import resolve_owner_for_path
 
     root = find_project_root()
@@ -398,15 +425,13 @@ def _cmd_whoami_for_path(raw_path: str) -> int:
 
     result = resolve_owner_for_path(target, project_root=root)
     if result is None:
-        UI.error(
-            f'path "{raw_path}" is not under any repo registered in platform.yaml'
-        )
+        UI.error(f'path "{raw_path}" is not under any repo registered in platform.yaml')
         return 1
 
     UI.kv("  repo", result.repo_name)
     UI.kv("  path", result.relative_path)
     if result.matched_glob is not None:
-        tail = f"(matched glob: \"{result.matched_glob}\")"
+        tail = f'(matched glob: "{result.matched_glob}")'
     else:
         tail = f"({result.fallback_reason})"
     UI.kv("  owner", f"{result.agent}  {tail}")
@@ -474,11 +499,14 @@ def cmd_whoami(args: list[str]) -> int:
     # Routing: read via the same env-var chain the hooks use.
     try:
         from otaman_core._resolve import active_routing_env
+
         routing = active_routing_env()
     except ImportError:
-        routing = (os.environ.get("OTAMAN_ACTIVE_ROUTING")
-                   or os.environ.get("OTAMAN_ACTIVE_ACCOUNT")
-                   or os.environ.get("MAESTRO_ACTIVE_ACCOUNT"))
+        routing = (
+            os.environ.get("OTAMAN_ACTIVE_ROUTING")
+            or os.environ.get("OTAMAN_ACTIVE_ACCOUNT")
+            or os.environ.get("MAESTRO_ACTIVE_ACCOUNT")
+        )
 
     config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or "<default ~/.claude>"
     tmux_env = os.environ.get("TMUX", "")
@@ -489,9 +517,13 @@ def cmd_whoami(args: list[str]) -> int:
     if in_tmux:
         try:
             import subprocess
+
             res = subprocess.run(
                 ["tmux", "display-message", "-p", "#S"],
-                capture_output=True, text=True, timeout=3, check=False,
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
             )
             if res.returncode == 0:
                 tmux_session = res.stdout.strip() or None
@@ -512,6 +544,7 @@ def cmd_whoami(args: list[str]) -> int:
         active_dir, acks_dir = _resolve_bus_paths(root)
         if active_dir.is_dir():
             import re
+
             for f in sorted(active_dir.glob("*.md")):
                 try:
                     content = f.read_text(encoding="utf-8")
@@ -530,17 +563,22 @@ def cmd_whoami(args: list[str]) -> int:
                     continue
 
     if json_mode:
-        print(json.dumps({
-            "agent": agent,
-            "project": project_name,
-            "project_root": str(root) if root else None,
-            "cwd": str(Path.cwd()),
-            "routing": routing,
-            "config_dir": config_dir,
-            "in_tmux": in_tmux,
-            "tmux_session": tmux_session,
-            "bus_counts": counts,
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "agent": agent,
+                    "project": project_name,
+                    "project_root": str(root) if root else None,
+                    "cwd": str(Path.cwd()),
+                    "routing": routing,
+                    "config_dir": config_dir,
+                    "in_tmux": in_tmux,
+                    "tmux_session": tmux_session,
+                    "bus_counts": counts,
+                },
+                indent=2,
+            )
+        )
         return 0
 
     # Pretty output
@@ -557,11 +595,36 @@ def cmd_whoami(args: list[str]) -> int:
     if in_tmux:
         UI.kv("  Tmux", tmux_session or "<unknown session>")
     if root and agent:
-        UI.kv("  Bus", f"{counts['pending']} pending | {counts['read']} read | {counts['resolved']} resolved")
+        UI.kv(
+            "  Bus",
+            f"{counts['pending']} pending | {counts['read']} read | {counts['resolved']} resolved",
+        )
     return 0
 
 
-register(CommandSpec(name="status", handler=cmd_status, help="Fleet status (per-agent presence; --repos for legacy view)"))
-register(CommandSpec(name="set-status", handler=cmd_set_status, help="Update this agent's status (working|blocked|waiting|idle)"))
-register(CommandSpec(name="whoami", handler=cmd_whoami, help="Show agent identity + project + routing + bus state"))
-register(CommandSpec(name="iam", handler=cmd_whoami, help="Show agent identity + project + routing + bus state"))
+register(
+    CommandSpec(
+        name="status",
+        handler=cmd_status,
+        help="Fleet status (per-agent presence; --repos for legacy view)",
+    )
+)
+register(
+    CommandSpec(
+        name="set-status",
+        handler=cmd_set_status,
+        help="Update this agent's status (working|blocked|waiting|idle)",
+    )
+)
+register(
+    CommandSpec(
+        name="whoami",
+        handler=cmd_whoami,
+        help="Show agent identity + project + routing + bus state",
+    )
+)
+register(
+    CommandSpec(
+        name="iam", handler=cmd_whoami, help="Show agent identity + project + routing + bus state"
+    )
+)

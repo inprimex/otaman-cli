@@ -1,7 +1,6 @@
 """Tests for guidance.py — post-init next-step generation (tasks.md 6.1)."""
-from __future__ import annotations
 
-import pytest
+from __future__ import annotations
 
 from otaman_cli.onboard.program_init.guidance import generate_guidance, print_guidance
 

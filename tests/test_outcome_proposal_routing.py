@@ -7,6 +7,7 @@ Covers:
 - 3.4 — upsert routing rule by when.type (append if missing, replace cc if present)
 - 3.5 — 7 enumerated cases from tasks.md
 """
+
 from __future__ import annotations
 
 import os
@@ -14,10 +15,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 import yaml
 
-from otaman_cli.commands.bus_messaging import MESSAGE_TYPES, _OUTCOME_SUBJECT_RE
+from otaman_cli.commands.bus_messaging import MESSAGE_TYPES
 from otaman_cli.commands.init import _detect_strategic_agents, _ensure_routing_rules
 
 
@@ -27,10 +27,17 @@ class TestMessageTypeRegistry:
         assert "outcome-proposal" in MESSAGE_TYPES
 
     def test_canonical_types_still_registered(self):
-        for t in ("info", "question", "task-assignment", "task-complete",
-                  "spec-change", "spec-change-request",
-                  "contract-change", "review-request",
-                  "proposal"):
+        for t in (
+            "info",
+            "question",
+            "task-assignment",
+            "task-complete",
+            "spec-change",
+            "spec-change-request",
+            "contract-change",
+            "review-request",
+            "proposal",
+        ):
             assert t in MESSAGE_TYPES, f"missing canonical type {t!r}"
 
     def test_privileged_types_deliberately_excluded(self):
@@ -64,13 +71,22 @@ def _run_send(root: Path, *extra: str) -> subprocess.CompletedProcess:
     }
     return subprocess.run(
         [
-            sys.executable, "-m", "otaman_cli.main",
-            "send", "plugin-agent",
-            "--subject", "test subject",
-            "--body", "body",
+            sys.executable,
+            "-m",
+            "otaman_cli.main",
+            "send",
+            "plugin-agent",
+            "--subject",
+            "test subject",
+            "--body",
+            "body",
             *extra,
         ],
-        cwd=root, env=env, capture_output=True, text=True, timeout=30,
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
 
 
@@ -98,46 +114,85 @@ class TestSubjectPatternNudge:
         root = _project_root(tmp_path)
         # Override --subject via custom invocation
         env = {
-            **os.environ, "OTAMAN_AGENT": "cli-agent",
+            **os.environ,
+            "OTAMAN_AGENT": "cli-agent",
             "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
             "NO_COLOR": "1",
         }
-        r = subprocess.run([
-            sys.executable, "-m", "otaman_cli.main",
-            "send", "human",
-            "--subject", "Outcome: ship X by end of quarter",
-            "--body", "body",
-        ], cwd=root, env=env, capture_output=True, text=True, timeout=30)
+        r = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "otaman_cli.main",
+                "send",
+                "human",
+                "--subject",
+                "Outcome: ship X by end of quarter",
+                "--body",
+                "body",
+            ],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         assert r.returncode == 0
         assert "outcome-proposal" in r.stdout, "expected nudge in stdout"
 
     def test_warns_on_proposal_keyword(self, tmp_path: Path):
         root = _project_root(tmp_path)
-        r = subprocess.run([
-            sys.executable, "-m", "otaman_cli.main",
-            "send", "human",
-            "--subject", "Proposal: refactor the bus",
-            "--body", "body",
-        ], cwd=root, env={
-            **os.environ, "OTAMAN_AGENT": "cli-agent",
-            "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
-            "NO_COLOR": "1",
-        }, capture_output=True, text=True, timeout=30)
+        r = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "otaman_cli.main",
+                "send",
+                "human",
+                "--subject",
+                "Proposal: refactor the bus",
+                "--body",
+                "body",
+            ],
+            cwd=root,
+            env={
+                **os.environ,
+                "OTAMAN_AGENT": "cli-agent",
+                "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
+                "NO_COLOR": "1",
+            },
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         assert r.returncode == 0
         assert "outcome-proposal" in r.stdout
 
     def test_warns_on_business_impact_phrase(self, tmp_path: Path):
         root = _project_root(tmp_path)
-        r = subprocess.run([
-            sys.executable, "-m", "otaman_cli.main",
-            "send", "human",
-            "--subject", "Considering business impact of the migration",
-            "--body", "body",
-        ], cwd=root, env={
-            **os.environ, "OTAMAN_AGENT": "cli-agent",
-            "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
-            "NO_COLOR": "1",
-        }, capture_output=True, text=True, timeout=30)
+        r = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "otaman_cli.main",
+                "send",
+                "human",
+                "--subject",
+                "Considering business impact of the migration",
+                "--body",
+                "body",
+            ],
+            cwd=root,
+            env={
+                **os.environ,
+                "OTAMAN_AGENT": "cli-agent",
+                "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
+                "NO_COLOR": "1",
+            },
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         assert r.returncode == 0
         assert "outcome-proposal" in r.stdout
 
@@ -150,34 +205,65 @@ class TestSubjectPatternNudge:
     def test_no_warning_when_type_is_outcome_proposal(self, tmp_path: Path):
         """User already declared the right type → no nudge needed."""
         root = _project_root(tmp_path)
-        r = subprocess.run([
-            sys.executable, "-m", "otaman_cli.main",
-            "send", "human",
-            "--subject", "Outcome: critical refactor",
-            "--body", "body",
-            "--type", "outcome-proposal",
-        ], cwd=root, env={
-            **os.environ, "OTAMAN_AGENT": "cli-agent",
-            "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
-            "NO_COLOR": "1",
-        }, capture_output=True, text=True, timeout=30)
+        r = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "otaman_cli.main",
+                "send",
+                "human",
+                "--subject",
+                "Outcome: critical refactor",
+                "--body",
+                "body",
+                "--type",
+                "outcome-proposal",
+            ],
+            cwd=root,
+            env={
+                **os.environ,
+                "OTAMAN_AGENT": "cli-agent",
+                "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
+                "NO_COLOR": "1",
+            },
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         assert r.returncode == 0
         # No "consider" nudge in output
-        assert "consider" not in r.stdout.lower() or "outcome-proposal" not in r.stdout.lower() \
+        assert (
+            "consider" not in r.stdout.lower()
+            or "outcome-proposal" not in r.stdout.lower()
             or "Subject looks like" not in r.stdout
+        )
 
     def test_send_NOT_blocked_when_warning_fires(self, tmp_path: Path):
         """The nudge must be advisory only — message still goes out."""
         root = _project_root(tmp_path)
-        subprocess.run([
-            sys.executable, "-m", "otaman_cli.main",
-            "send", "human",
-            "--subject", "Outcome candidate", "--body", "body",
-        ], cwd=root, env={
-            **os.environ, "OTAMAN_AGENT": "cli-agent",
-            "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
-            "NO_COLOR": "1",
-        }, capture_output=True, text=True, timeout=30)
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "otaman_cli.main",
+                "send",
+                "human",
+                "--subject",
+                "Outcome candidate",
+                "--body",
+                "body",
+            ],
+            cwd=root,
+            env={
+                **os.environ,
+                "OTAMAN_AGENT": "cli-agent",
+                "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
+                "NO_COLOR": "1",
+            },
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         # Message file should exist on disk
         msgs = list((root / ".agents" / "bus" / "active").glob("*.md"))
         assert len(msgs) == 1
@@ -195,10 +281,12 @@ class TestStrategicAgentDetection:
         assert _detect_strategic_agents(doc) == ["cofounder-agent"]
 
     def test_both_suffixes_detect_both_agents(self):
-        doc = {"repos": [
-            {"name": "myprog-business", "owner": "cpo-agent"},
-            {"name": "myprog-strategy", "owner": "cofounder-agent"},
-        ]}
+        doc = {
+            "repos": [
+                {"name": "myprog-business", "owner": "cpo-agent"},
+                {"name": "myprog-strategy", "owner": "cofounder-agent"},
+            ]
+        }
         result = _detect_strategic_agents(doc)
         assert result == ["cpo-agent", "cofounder-agent"]
 
@@ -244,11 +332,12 @@ class TestRoutingRuleUpsert:
 
     # 3.5 (a)
     def test_init_with_business_repo_seeds_rule(self, tmp_path: Path):
-        p = self._write(tmp_path / "platform.yaml",
+        p = self._write(
+            tmp_path / "platform.yaml",
             "project: x\nversion: '1.0'\n"
             "repos:\n"
             "  - {name: x-business, path: ./b, owner: cpo-agent}\n"
-            "  - {name: x, path: ., owner: spec-agent}\n"
+            "  - {name: x, path: ., owner: spec-agent}\n",
         )
         rc = _ensure_routing_rules(p)
         assert rc == 1
@@ -260,11 +349,12 @@ class TestRoutingRuleUpsert:
 
     # 3.5 (b)
     def test_init_with_strategy_repo_seeds_rule(self, tmp_path: Path):
-        p = self._write(tmp_path / "platform.yaml",
+        p = self._write(
+            tmp_path / "platform.yaml",
             "project: x\nversion: '1.0'\n"
             "repos:\n"
             "  - {name: x-strategy, path: ./s, owner: cofounder-agent}\n"
-            "  - {name: x, path: ., owner: spec-agent}\n"
+            "  - {name: x, path: ., owner: spec-agent}\n",
         )
         rc = _ensure_routing_rules(p)
         assert rc == 1
@@ -276,12 +366,13 @@ class TestRoutingRuleUpsert:
 
     # 3.5 (c)
     def test_init_with_both_seeds_one_rule_with_both_agents(self, tmp_path: Path):
-        p = self._write(tmp_path / "platform.yaml",
+        p = self._write(
+            tmp_path / "platform.yaml",
             "project: x\nversion: '1.0'\n"
             "repos:\n"
             "  - {name: x-business, path: ./b, owner: cpo-agent}\n"
             "  - {name: x-strategy, path: ./s, owner: cofounder-agent}\n"
-            "  - {name: x, path: ., owner: spec-agent}\n"
+            "  - {name: x, path: ., owner: spec-agent}\n",
         )
         rc = _ensure_routing_rules(p)
         assert rc == 1
@@ -293,9 +384,9 @@ class TestRoutingRuleUpsert:
 
     # 3.5 (d)
     def test_init_without_strategic_repos_seeds_no_outcome_rule(self, tmp_path: Path):
-        p = self._write(tmp_path / "platform.yaml",
-            "project: x\nversion: '1.0'\n"
-            "repos:\n  - {name: x, path: ., owner: spec-agent}\n"
+        p = self._write(
+            tmp_path / "platform.yaml",
+            "project: x\nversion: '1.0'\nrepos:\n  - {name: x, path: ., owner: spec-agent}\n",
         )
         _ensure_routing_rules(p)
         doc = yaml.safe_load(p.read_text(encoding="utf-8"))
@@ -306,7 +397,8 @@ class TestRoutingRuleUpsert:
     # 3.5 (e)
     def test_update_upserts_cc_when_agent_added(self, tmp_path: Path):
         """An existing `outcome-proposal` rule's `cc:` is replaced to match current detection."""
-        p = self._write(tmp_path / "platform.yaml",
+        p = self._write(
+            tmp_path / "platform.yaml",
             "project: x\nversion: '1.0'\n"
             "repos:\n"
             "  - {name: x-business, path: ./b, owner: cpo-agent}\n"
@@ -315,20 +407,22 @@ class TestRoutingRuleUpsert:
             "bus:\n"
             "  routing_rules:\n"
             "    - when: {type: outcome-proposal}\n"
-            "      cc: [cpo-agent]\n"
+            "      cc: [cpo-agent]\n",
         )
         rc = _ensure_routing_rules(p)
         assert rc == 1
         doc = yaml.safe_load(p.read_text(encoding="utf-8"))
-        op_rules = [r for r in doc["bus"]["routing_rules"]
-                    if r["when"].get("type") == "outcome-proposal"]
+        op_rules = [
+            r for r in doc["bus"]["routing_rules"] if r["when"].get("type") == "outcome-proposal"
+        ]
         assert len(op_rules) == 1
         assert op_rules[0]["cc"] == ["cpo-agent", "cofounder-agent"]
 
     # 3.5 (f)
     def test_update_does_not_duplicate_rule(self, tmp_path: Path):
         """If the rule already matches detected agents, no duplication."""
-        p = self._write(tmp_path / "platform.yaml",
+        p = self._write(
+            tmp_path / "platform.yaml",
             "project: x\nversion: '1.0'\n"
             "repos:\n"
             "  - {name: x-business, path: ./b, owner: cpo-agent}\n"
@@ -338,41 +432,46 @@ class TestRoutingRuleUpsert:
             "    - when: {to: human}\n"
             "      cc: [spec-agent]\n"
             "    - when: {type: outcome-proposal}\n"
-            "      cc: [cpo-agent]\n"
+            "      cc: [cpo-agent]\n",
         )
-        rc1 = _ensure_routing_rules(p)
+        _ensure_routing_rules(p)
         # First call may add the cpo high/urgent rule (bus-cc-routing default).
         # But the outcome-proposal rule should NOT be duplicated.
         rc2 = _ensure_routing_rules(p)
         assert rc2 == 0, "second call should be a pure no-op"
         doc = yaml.safe_load(p.read_text(encoding="utf-8"))
-        op_rules = [r for r in doc["bus"]["routing_rules"]
-                    if r.get("when", {}).get("type") == "outcome-proposal"]
+        op_rules = [
+            r
+            for r in doc["bus"]["routing_rules"]
+            if r.get("when", {}).get("type") == "outcome-proposal"
+        ]
         assert len(op_rules) == 1
 
     # 3.5 (g)
     def test_explicit_role_cpo_precedence_in_seed(self, tmp_path: Path):
         """Explicit `role: cpo` on an agent overrides the repo suffix detection."""
-        p = self._write(tmp_path / "platform.yaml",
+        p = self._write(
+            tmp_path / "platform.yaml",
             "project: x\nversion: '1.0'\n"
             "agents:\n"
             "  - {name: custom-cpo, role: cpo}\n"
             "repos:\n"
             "  - {name: x-business, path: ./b, owner: should-be-ignored}\n"
-            "  - {name: x, path: ., owner: spec-agent}\n"
+            "  - {name: x, path: ., owner: spec-agent}\n",
         )
         _ensure_routing_rules(p)
         doc = yaml.safe_load(p.read_text(encoding="utf-8"))
-        op_rules = [r for r in doc["bus"]["routing_rules"]
-                    if r["when"].get("type") == "outcome-proposal"]
+        op_rules = [
+            r for r in doc["bus"]["routing_rules"] if r["when"].get("type") == "outcome-proposal"
+        ]
         assert len(op_rules) == 1
         assert op_rules[0]["cc"] == ["custom-cpo"]
 
     # Additional: idempotency on no-bus-block path
     def test_idempotent_when_no_bus_block_and_no_strategic_agents(self, tmp_path: Path):
-        p = self._write(tmp_path / "platform.yaml",
-            "project: x\nversion: '1.0'\n"
-            "repos:\n  - {name: x, path: ., owner: spec-agent}\n"
+        p = self._write(
+            tmp_path / "platform.yaml",
+            "project: x\nversion: '1.0'\nrepos:\n  - {name: x, path: ., owner: spec-agent}\n",
         )
         rc1 = _ensure_routing_rules(p)
         assert rc1 == 1  # adds the bus-cc-routing default (to: human → spec-agent)

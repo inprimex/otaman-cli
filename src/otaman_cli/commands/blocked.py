@@ -74,7 +74,8 @@ def cmd_blocked(args: list[str]) -> int:
         text = blocked_file.read_text(encoding="utf-8")
         sections = re.findall(
             r"^## Blocked: (.+?)$(.*?)(?=^## Blocked:|\Z)",
-            text, re.MULTILINE | re.DOTALL,
+            text,
+            re.MULTILINE | re.DOTALL,
         )
         if not sections:
             print("No blocked tasks.")
@@ -102,13 +103,10 @@ def cmd_blocked(args: list[str]) -> int:
             UI.error("Empty blocked slug")
             return 1
         from datetime import datetime, timezone
+
         now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
         by = blocked_by or "human"
-        entry = (
-            f"## Blocked: {slug}\n"
-            f"- **Blocked since**: {now_iso}\n"
-            f"- **Blocked by**: {by}\n"
-        )
+        entry = f"## Blocked: {slug}\n- **Blocked since**: {now_iso}\n- **Blocked by**: {by}\n"
         blocked_file.parent.mkdir(parents=True, exist_ok=True)
         existing = blocked_file.read_text(encoding="utf-8") if blocked_file.is_file() else ""
         if f"## Blocked: {slug}" in existing:
@@ -226,6 +224,7 @@ def _cmd_blocked_clear_by_stem(root: Path, stem: str) -> int:
         return 0
 
     from datetime import datetime, timezone
+
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     # Same regex shape as plugin-agent's `_auto_tombstone_blocked` in
@@ -236,11 +235,12 @@ def _cmd_blocked_clear_by_stem(root: Path, stem: str) -> int:
         re.DOTALL | re.MULTILINE,
     )
     proposal_field_re = re.compile(
-        r"^\s*-\s*\*\*Proposal\*\*:\s*(\S+)", re.MULTILINE,
+        r"^\s*-\s*\*\*Proposal\*\*:\s*(\S+)",
+        re.MULTILINE,
     )
     title_re = re.compile(r"^## Blocked:\s*(.+)$", re.MULTILINE)
 
-    tombstoned: list[tuple[str, str]] = []   # (agent, title)
+    tombstoned: list[tuple[str, str]] = []  # (agent, title)
 
     for blocked_file in sorted(blocked_dir.glob("*.md")):
         agent_name = blocked_file.stem
@@ -254,7 +254,7 @@ def _cmd_blocked_clear_by_stem(root: Path, stem: str) -> int:
         last_end = 0
         for m in entry_re.finditer(text):
             entry_block = m.group(1)
-            new_parts.append(text[last_end:m.start()])
+            new_parts.append(text[last_end : m.start()])
 
             prop_m = proposal_field_re.search(entry_block)
             if prop_m and prop_m.group(1) == stem:
@@ -289,7 +289,10 @@ def _status_hook_after_blocked(root: Path, agent: str, slug: str, by: str) -> No
     """agent-status-presence task 1.8 — write `blocked` status after `otaman blocked <slug>`."""
     try:
         from otaman_cli.status import (
-            AgentStatus, State, get_backend, is_agent_presence_enabled,
+            AgentStatus,
+            State,
+            get_backend,
+            is_agent_presence_enabled,
         )
     except Exception:
         return
@@ -297,6 +300,7 @@ def _status_hook_after_blocked(root: Path, agent: str, slug: str, by: str) -> No
         return
 
     from datetime import datetime, timezone
+
     now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
     backend = get_backend(root)
@@ -306,17 +310,26 @@ def _status_hook_after_blocked(root: Path, agent: str, slug: str, by: str) -> No
     task = existing.task if existing else slug
     change = existing.change if existing else None
     try:
-        backend.write(AgentStatus(
-            agent=agent, state=State.BLOCKED,
-            task=task, change=change, blocked_by=by,
-            since=since, updated_at=now_iso,
-        ))
+        backend.write(
+            AgentStatus(
+                agent=agent,
+                state=State.BLOCKED,
+                task=task,
+                change=change,
+                blocked_by=by,
+                since=since,
+                updated_at=now_iso,
+            )
+        )
     except Exception:
         pass
 
 
-register(CommandSpec(
-    name="blocked",
-    handler=cmd_blocked,
-    help="List/clear/register blocked tasks (--clear matches title, substring, or Proposal stem)",
-))
+register(
+    CommandSpec(
+        name="blocked",
+        handler=cmd_blocked,
+        help="List/clear/register blocked tasks "
+        "(--clear matches title, substring, or Proposal stem)",
+    )
+)

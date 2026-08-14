@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Long lines in this file are aligned usage/help tables inside the module docstring
+# and the cmd_help() f-string; wrapping them would change CLI help output.
+# ruff: noqa: E501
 """Otaman CLI - human-facing wrapper for multi-repo agent orchestration.
 
 Usage:
@@ -55,11 +58,8 @@ from __future__ import annotations
 
 import os
 import re
-import shlex
-import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 
 def _resolve_version() -> str:
@@ -69,6 +69,7 @@ def _resolve_version() -> str:
     # where the package isn't installed.
     try:
         from importlib.metadata import PackageNotFoundError, version
+
         return version("otaman-cli")
     except (ImportError, PackageNotFoundError):
         return "0.1.0-dev"
@@ -117,6 +118,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
+
 # Colors for terminal output
 class C:
     BOLD = "\033[1m"
@@ -135,13 +137,16 @@ class C:
 
 
 # Disable colors if not a terminal or on Windows without ANSI support
-if not sys.stdout.isatty() or (sys.platform == "win32" and "WT_SESSION" not in os.environ and "TERM" not in os.environ):
+if not sys.stdout.isatty() or (
+    sys.platform == "win32" and "WT_SESSION" not in os.environ and "TERM" not in os.environ
+):
     C.disable()
 
 
 # ---------------------------------------------------------------------------
 # UI — standardized output templates
 # ---------------------------------------------------------------------------
+
 
 class UI:
     """Consistent output formatting for all otaman CLI commands.
@@ -207,7 +212,9 @@ class UI:
         print(f"    {c}{icon}{C.RESET} {text}")
 
     @staticmethod
-    def table(headers: list[str], rows: list[list[str]], col_widths: list[int] | None = None) -> None:
+    def table(
+        headers: list[str], rows: list[list[str]], col_widths: list[int] | None = None
+    ) -> None:
         if not col_widths:
             col_widths = []
             for i, h in enumerate(headers):
@@ -269,7 +276,6 @@ class UI:
 
 # find_project_root + resolve_agent_identity moved to identity.py (Stage 2A);
 # re-export for backward compat with the rest of this module.
-from otaman_cli.identity import find_project_root, resolve_agent_identity
 
 
 def run_script(name: str, *args: str, capture: bool = False, stream_stderr: bool = False):
@@ -293,9 +299,9 @@ def run_script(name: str, *args: str, capture: bool = False, stream_stderr: bool
         sys.exit(2)
     module_name = SCRIPT_MAP[name]
 
+    import contextlib
     import importlib
     import io
-    import contextlib
     from types import SimpleNamespace
 
     try:
@@ -315,6 +321,7 @@ def run_script(name: str, *args: str, capture: bool = False, stream_stderr: bool
         # Inspect main() signature: scripts either accept argv as a list
         # or take no args and read sys.argv directly.
         import inspect
+
         try:
             sig = inspect.signature(main_fn)
             takes_argv = len(sig.parameters) >= 1
@@ -346,15 +353,16 @@ def run_script(name: str, *args: str, capture: bool = False, stream_stderr: bool
     return SimpleNamespace(returncode=rc, stdout=None, stderr=None)
 
 
-
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
+
 
 def _resolve_bus_paths(root: Path) -> tuple[Path, Path]:
     """Resolve bus active dir and acks dir from project root."""
     try:
         import yaml as _yaml
+
         config_path = root / "platform.yaml"
         if config_path.exists():
             with open(config_path, encoding="utf-8") as f:
@@ -384,10 +392,11 @@ def _get_agent_ack_status(msg_stem: str, agent: str, acks_dir: Path) -> str:
     return "pending"
 
 
-def _read_platform_specs_path(root: "Path") -> str:
+def _read_platform_specs_path(root: Path) -> str:
     """Return the specs.path value from platform.yaml, or '' if absent."""
     try:
         import yaml as _yaml
+
         config_path = root / "platform.yaml"
         if not config_path.is_file():
             return ""
@@ -433,8 +442,9 @@ def _normalize_ce_platform_yaml_for_validation(config_path: Path) -> tuple[Path,
         the follow-up cleanup; only the empty-repos placeholder remains
         for the CE org-dir scaffold use case.
     """
-    import yaml as _yaml
     import tempfile as _tmp
+
+    import yaml as _yaml
 
     hints: list[str] = []
     if not config_path.is_file():
@@ -456,8 +466,8 @@ def _normalize_ce_platform_yaml_for_validation(config_path: Path) -> tuple[Path,
     if "version" not in doc:
         doc["version"] = "1.0"
         hints.append(
-            "platform.yaml: `version:` field missing — defaulted to \"1.0\" for validation. "
-            "Add `version: \"1.0\"` to the canonical file to silence this hint."
+            'platform.yaml: `version:` field missing — defaulted to "1.0" for validation. '
+            'Add `version: "1.0"` to the canonical file to silence this hint.'
         )
         changed = True
 
@@ -468,6 +478,7 @@ def _normalize_ce_platform_yaml_for_validation(config_path: Path) -> tuple[Path,
             inferred = parent.name or "ce-org"
             # Sanitize: lowercase, replace anything non-[a-z0-9-] with '-'
             import re as _re
+
             inferred = _re.sub(r"[^a-z0-9-]+", "-", inferred.lower()).strip("-") or "ce-org"
         except Exception:
             inferred = "ce-org"
@@ -516,15 +527,18 @@ def _normalize_ce_platform_yaml_for_validation(config_path: Path) -> tuple[Path,
     # check passes; the on-disk file's empty `repos:` is preserved.
     _CE_SCAFFOLD_MARKERS = ("runner", "terminal")
     has_ce_marker = any(k in doc for k in _CE_SCAFFOLD_MARKERS)
-    if (not isinstance(doc.get("repos"), list) or len(doc.get("repos") or []) == 0) \
-            and has_ce_marker:
+    if (
+        not isinstance(doc.get("repos"), list) or len(doc.get("repos") or []) == 0
+    ) and has_ce_marker:
         # Schema requires name to match ^[A-Za-z][A-Za-z0-9._-]{1,63}$
         # and owner to match ^[a-z][a-z0-9-]{1,63}$.
-        doc["repos"] = [{
-            "name": "ce-org-placeholder",
-            "path": ".",
-            "owner": "ops-agent",
-        }]
+        doc["repos"] = [
+            {
+                "name": "ce-org-placeholder",
+                "path": ".",
+                "owner": "ops-agent",
+            }
+        ]
         hints.append(
             "platform.yaml: empty/missing `repos:` accepted for fresh "
             "CE org-dir scaffold (detected via runner:/terminal: marker). "
@@ -541,7 +555,9 @@ def _normalize_ce_platform_yaml_for_validation(config_path: Path) -> tuple[Path,
     parent_dir = config_path.parent
     try:
         fd, tmp_name = _tmp.mkstemp(
-            prefix=".otaman-ce-norm-", suffix=".yaml", dir=str(parent_dir),
+            prefix=".otaman-ce-norm-",
+            suffix=".yaml",
+            dir=str(parent_dir),
         )
     except OSError:
         # Fall back to system tmp if the parent dir isn't writable
@@ -696,6 +712,7 @@ def cmd_help() -> int:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     args = sys.argv[1:]
 
@@ -714,6 +731,7 @@ def main() -> int:
     # `commands = {...}` dict and its shared flag-parsing loop (F021/F022)
     # were retired in this change along with the last dict entry, "init".
     from otaman_cli import commands as _commands_registry
+
     registry_result = _commands_registry.dispatch(command, rest)
     if registry_result is not None:
         return registry_result

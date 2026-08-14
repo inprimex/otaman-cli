@@ -76,7 +76,7 @@ def test_score_with_custom_weights():
 def test_rank_orders_by_score_descending():
     o = _outcome("M")  # weight 3
     sols = [
-        _sol("SOL-1-cheap", effort=3),    # 3/3 = 1.00
+        _sol("SOL-1-cheap", effort=3),  # 3/3 = 1.00
         _sol("SOL-2-medium", effort=10),  # 3/10 = 0.30
         _sol("SOL-3-expensive", effort=30),  # 3/30 = 0.10
     ]
@@ -120,8 +120,8 @@ def test_rank_priority_tiebreaker():
     # The tiebreaker here is informational since score is the dominant key —
     # but two solutions with the same score do exist below.
     sols = [
-        _sol("SOL-2-b", effort=3),   # 3/3 = 1.0
-        _sol("SOL-1-a", effort=3),   # 3/3 = 1.0
+        _sol("SOL-2-b", effort=3),  # 3/3 = 1.0
+        _sol("SOL-1-a", effort=3),  # 3/3 = 1.0
     ]
     ranked = rank_solutions(o, sols)
     # Same score, same priority_rank → final tiebreaker is sol_seq ASC
@@ -132,9 +132,9 @@ def test_rank_sol_seq_tiebreaker_when_all_else_equal():
     """Equal score + equal priority → lower SOL-<seq> wins (G.3)."""
     o = _outcome("M", priority="P2")
     sols = [
-        _sol("SOL-5-late", effort=10),     # 3/10 = 0.30
-        _sol("SOL-3-middle", effort=10),   # 3/10 = 0.30
-        _sol("SOL-1-early", effort=10),    # 3/10 = 0.30
+        _sol("SOL-5-late", effort=10),  # 3/10 = 0.30
+        _sol("SOL-3-middle", effort=10),  # 3/10 = 0.30
+        _sol("SOL-1-early", effort=10),  # 3/10 = 0.30
     ]
     ranked = rank_solutions(o, sols)
     assert [r.solution_id for r in ranked] == ["SOL-1-early", "SOL-3-middle", "SOL-5-late"]
@@ -147,7 +147,7 @@ def test_rank_sol_seq_tiebreaker_when_all_else_equal():
 def test_recommend_returns_top_ranked():
     o = _outcome("L")  # weight 5
     sols = [
-        _sol("SOL-1-cheap", effort=2),   # 5/2 = 2.5
+        _sol("SOL-1-cheap", effort=2),  # 5/2 = 2.5
         _sol("SOL-2-expensive", effort=10),  # 5/10 = 0.5
     ]
     r = recommend(o, sols)
