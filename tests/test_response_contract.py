@@ -338,6 +338,8 @@ def _plant_request(meta: Path, stem: str, *, expects_response: bool = True) -> N
 
 def _run_ack(meta: Path, stem: str, *flags: str) -> subprocess.CompletedProcess:
     env = {**os.environ, "OTAMAN_AGENT": "cli-agent"}
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     return subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "ack", stem, *flags],
         capture_output=True,
@@ -418,6 +420,8 @@ def test_check_orders_by_response_contract(project: Path):
     )
 
     env = {**os.environ, "OTAMAN_AGENT": "cli-agent"}
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     rc = subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "check", "cli-agent"],
         capture_output=True,
@@ -448,6 +452,8 @@ def test_check_shows_deadline_indicator(project: Path):
         encoding="utf-8",
     )
     env = {**os.environ, "OTAMAN_AGENT": "cli-agent", "NO_COLOR": "1"}
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     rc = subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "check", "cli-agent"],
         capture_output=True,

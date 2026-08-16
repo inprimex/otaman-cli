@@ -69,6 +69,8 @@ class FakeAdapter:
 def maestro_workspace(tmp_path, monkeypatch):
     """Maestro root with platform.yaml and a managed repo that has an origin."""
     monkeypatch.setenv("MAESTRO_GH_CLI_TEST", "ghp_fake")
+    # Resolve this fixture tree (walk-up from cwd), not the isolate_bus sandbox.
+    monkeypatch.delenv("OTAMAN_ROOT", raising=False)
     maestro = tmp_path / "maestro"
     maestro.mkdir()
     (maestro / "platform.yaml").write_text(

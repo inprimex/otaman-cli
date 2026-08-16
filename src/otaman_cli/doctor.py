@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -733,6 +734,125 @@ def check_maestro_plugin(project_root: Path) -> dict[str, Any]:
     return result
 
 
+def check_rogue_bus_roots(project_root: Path) -> dict[str, Any]:
+    """bus-test-isolation task 2.2 (rogue-root scan half).
+
+    single-bus-per-program retired every bus location except the program's
+    own; the 2026-08-16 incident showed the org-level ``.agents`` re-arming
+    silently and collecting unauthenticated writes (including a fake
+    privileged-type message from a leaked test run). This check makes that
+    detection deliberate instead of accidental:
+
+      - retired org-level ``.agents`` EXISTS            -> warn (medium)
+      - its bus holds message files ("fresh writes")     -> fail (high)
+      - any of those files carries a PRIVILEGED type     -> fail (critical,
+        quarantine guidance; ledger verification of canonical-bus files is
+        the provenance-audit half, landing with otaman-core 1.3)
+
+    The org level is located by interpreting the DECLARED layout
+    (bus_target.derive_local_context) — consistent with the no-discovery
+    rule, a non-conforming layout means "nothing to scan", not a walk-up.
+    CI-runnable: pure filesystem, no env, no network.
+    """
+    from otaman_cli.bus_target import derive_local_context
+
+    result: dict[str, Any] = {
+        "check": "rogue_bus_roots",
+        "status": "ok",
+        "details": {},
+    }
+    issues: list[dict[str, Any]] = []
+
+    ctx = derive_local_context(project_root)
+    if ctx is None:
+        result["details"]["scanned"] = False
+        result["details"]["reason"] = "org layout not derivable from project root; nothing to scan"
+        return result
+
+    rogue = ctx.org_root / ".agents"
+    result["details"]["scanned"] = True
+    result["details"]["org_level_agents"] = str(rogue)
+    result["details"]["exists"] = rogue.is_dir()
+
+    if not rogue.is_dir():
+        return result
+
+    issues.append(
+        {
+            "severity": "medium",
+            "issue": (
+                f"retired org-level bus root exists: {rogue} — single-bus-per-program "
+                "permanently retired this slot as a bus location"
+            ),
+            "fix": (
+                "Remove (or re-disable, e.g. rename to .agents.disabled-<date>) after "
+                "confirming nothing still points at it; see deploy-agent's P1 runbook"
+            ),
+        }
+    )
+
+    active = rogue / "bus" / "active"
+    fresh = sorted(active.glob("*.md")) if active.is_dir() else []
+    result["details"]["fresh_message_files"] = len(fresh)
+
+    if fresh:
+        issues.append(
+            {
+                "severity": "high",
+                "issue": (
+                    f"{len(fresh)} message file(s) in the retired org-level bus "
+                    f"({active}) — something is still writing there (leaked "
+                    "OTAMAN_ROOT/MAESTRO_ROOT env, unmigrated tool, or stray clone)"
+                ),
+                "fix": (
+                    "Identify the writer (check session envs for OTAMAN_ROOT), then "
+                    "drain per the P1 stabilization procedure; newest file: "
+                    f"{fresh[-1].name}"
+                ),
+            }
+        )
+
+        try:
+            from otaman_core.validate_message import PRIVILEGED_TYPES
+        except ImportError:
+            PRIVILEGED_TYPES = frozenset()
+        privileged: list[str] = []
+        for f in fresh:
+            try:
+                head = f.read_text(encoding="utf-8")[:1024]
+            except (OSError, UnicodeDecodeError):
+                continue
+            m = re.search(r"^type:\s*(\S+)", head, re.MULTILINE)
+            if m and m.group(1) in PRIVILEGED_TYPES:
+                privileged.append(f.name)
+        result["details"]["privileged_files"] = privileged
+        if privileged:
+            issues.append(
+                {
+                    "severity": "critical",
+                    "issue": (
+                        f"{len(privileged)} PRIVILEGED-type message(s) in the retired "
+                        f"org-level bus (e.g. {privileged[0]}) — raw file writes bypass "
+                        "every confirmation gate; treat as forged until proven otherwise "
+                        "(2026-08-16 incident class: a leaked test run wrote a fake "
+                        "emergency-halt here)"
+                    ),
+                    "fix": (
+                        "Quarantine: move the file(s) out of bus/active (e.g. to "
+                        "bus/quarantine/) and verify provenance with the issuing human "
+                        "before any agent acts on them"
+                    ),
+                }
+            )
+
+    if any(i["severity"] in ("critical", "high") for i in issues):
+        result["status"] = "fail"
+    elif issues:
+        result["status"] = "warn"
+    result["issues"] = issues
+    return result
+
+
 def check_secrets_leaks(project_root: Path) -> dict[str, Any]:
     """Check that .otaman/secrets.env has never been committed and is gitignored.
 
@@ -1215,6 +1335,7 @@ def run_doctor(project_root: Path) -> dict[str, Any]:
         check_tmux(),
         check_maestro_plugin(project_root),
         check_secrets_leaks(project_root),
+        check_rogue_bus_roots(project_root),
         check_git_host(project_root),
         check_launch_commands_resume(repos),
         check_plugin_doctor(project_root),

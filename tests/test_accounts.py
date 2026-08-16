@@ -43,6 +43,9 @@ class TestResolveSettingsPath:
 
     def test_falls_back_to_cwd(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
+        # The autouse isolate_bus fixture pins OTAMAN_ROOT at its sandbox;
+        # this test exercises the cwd fallback, so drop the env override.
+        monkeypatch.delenv("OTAMAN_ROOT", raising=False)
         result = resolve_settings_path(None)
         assert result == tmp_path / "launch-settings.yaml"
 

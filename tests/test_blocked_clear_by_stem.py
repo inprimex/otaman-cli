@@ -54,6 +54,8 @@ def _run_cli(root: Path, *args: str) -> subprocess.CompletedProcess:
         "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
         "NO_COLOR": "1",
     }
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     return subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", *args],
         cwd=root,

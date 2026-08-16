@@ -156,6 +156,8 @@ def _run_complete(
     import os
 
     env = {**os.environ, "OTAMAN_AGENT": "cli-agent"}
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     if env_extra:
         env.update(env_extra)
     return subprocess.run(

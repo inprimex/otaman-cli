@@ -63,6 +63,8 @@ def _run_cli(project: Path, agent: str, *args: str) -> subprocess.CompletedProce
         "PYTHONPATH": os.pathsep.join(p for p in sys.path if p),
         "NO_COLOR": "1",
     }
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     return subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", *args],
         cwd=project,

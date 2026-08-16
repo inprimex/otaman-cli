@@ -37,6 +37,8 @@ def _run_send(root: Path, msg_type: str, *, to: str = "human") -> subprocess.Com
         "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
         "NO_COLOR": "1",
     }
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     return subprocess.run(
         [
             sys.executable,
@@ -108,6 +110,8 @@ class TestPrivilegedTypeRejection:
             "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
             "NO_COLOR": "1",
         }
+        for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+            env.pop(_var, None)
         r = subprocess.run(
             [
                 sys.executable,

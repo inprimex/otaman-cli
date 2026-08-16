@@ -131,3 +131,42 @@ def confirm_human_decision(description: str, expected_phrase: str = "CONFIRM") -
         print()
         return False
     return typed == expected_phrase
+
+
+def record_privileged_confirmation(
+    *,
+    message_id: str,
+    content: str,
+    command: str,
+    agent: str = "human",
+) -> bool:
+    """bus-test-isolation task 2.1 — ledger-gate a privileged bus write.
+
+    Called by the TTY-gated producers (`approve`, `emergency-halt`,
+    `hitl take`) AFTER human confirmation and BEFORE writing the bus file.
+    Appends the confirmation record (message id + hash of the exact bytes
+    about to be written) to ``~/.otaman/confirmations.log``; consumers
+    (bridge watcher, doctor provenance audit) verify against it.
+
+    Returns True on success. On failure prints the refusal and returns
+    False — the caller MUST then not write the bus file (fail closed:
+    no record, no bus file).
+    """
+    from otaman_core.confirmations import LedgerError, append_confirmation, hash_message
+
+    try:
+        append_confirmation(
+            message_id=message_id,
+            content_hash=hash_message(content),
+            command=command,
+            agent=agent,
+        )
+    except LedgerError as exc:
+        print(f"  [!] Refusing to write the bus message: {exc}", file=sys.stderr)
+        print(
+            "      Privileged messages require a confirmation-ledger record "
+            "(fail closed: no record, no bus file).",
+            file=sys.stderr,
+        )
+        return False
+    return True

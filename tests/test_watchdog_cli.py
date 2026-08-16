@@ -414,6 +414,8 @@ class TestMainDispatcher:
             "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
             "NO_COLOR": "1",
         }
+        for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+            env.pop(_var, None)
         # No runner running → expect exit 1 with friendly error.  The
         # critical assertion is that "Unknown command" does NOT appear —
         # i.e. the dispatcher accepted `watchdog` as a known surface.

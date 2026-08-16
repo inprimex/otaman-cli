@@ -69,6 +69,8 @@ def _run_send(root: Path, *extra: str) -> subprocess.CompletedProcess:
         "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
         "NO_COLOR": "1",
     }
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     return subprocess.run(
         [
             sys.executable,
@@ -119,6 +121,8 @@ class TestSubjectPatternNudge:
             "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
             "NO_COLOR": "1",
         }
+        for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+            env.pop(_var, None)
         r = subprocess.run(
             [
                 sys.executable,
@@ -142,6 +146,14 @@ class TestSubjectPatternNudge:
 
     def test_warns_on_proposal_keyword(self, tmp_path: Path):
         root = _project_root(tmp_path)
+        env = {
+            **os.environ,
+            "OTAMAN_AGENT": "cli-agent",
+            "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
+            "NO_COLOR": "1",
+        }
+        for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+            env.pop(_var, None)
         r = subprocess.run(
             [
                 sys.executable,
@@ -155,12 +167,7 @@ class TestSubjectPatternNudge:
                 "body",
             ],
             cwd=root,
-            env={
-                **os.environ,
-                "OTAMAN_AGENT": "cli-agent",
-                "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
-                "NO_COLOR": "1",
-            },
+            env=env,
             capture_output=True,
             text=True,
             timeout=30,
@@ -170,6 +177,14 @@ class TestSubjectPatternNudge:
 
     def test_warns_on_business_impact_phrase(self, tmp_path: Path):
         root = _project_root(tmp_path)
+        env = {
+            **os.environ,
+            "OTAMAN_AGENT": "cli-agent",
+            "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
+            "NO_COLOR": "1",
+        }
+        for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+            env.pop(_var, None)
         r = subprocess.run(
             [
                 sys.executable,
@@ -183,12 +198,7 @@ class TestSubjectPatternNudge:
                 "body",
             ],
             cwd=root,
-            env={
-                **os.environ,
-                "OTAMAN_AGENT": "cli-agent",
-                "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
-                "NO_COLOR": "1",
-            },
+            env=env,
             capture_output=True,
             text=True,
             timeout=30,
@@ -205,6 +215,14 @@ class TestSubjectPatternNudge:
     def test_no_warning_when_type_is_outcome_proposal(self, tmp_path: Path):
         """User already declared the right type → no nudge needed."""
         root = _project_root(tmp_path)
+        env = {
+            **os.environ,
+            "OTAMAN_AGENT": "cli-agent",
+            "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
+            "NO_COLOR": "1",
+        }
+        for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+            env.pop(_var, None)
         r = subprocess.run(
             [
                 sys.executable,
@@ -220,12 +238,7 @@ class TestSubjectPatternNudge:
                 "outcome-proposal",
             ],
             cwd=root,
-            env={
-                **os.environ,
-                "OTAMAN_AGENT": "cli-agent",
-                "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
-                "NO_COLOR": "1",
-            },
+            env=env,
             capture_output=True,
             text=True,
             timeout=30,
@@ -241,6 +254,14 @@ class TestSubjectPatternNudge:
     def test_send_NOT_blocked_when_warning_fires(self, tmp_path: Path):
         """The nudge must be advisory only — message still goes out."""
         root = _project_root(tmp_path)
+        env = {
+            **os.environ,
+            "OTAMAN_AGENT": "cli-agent",
+            "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
+            "NO_COLOR": "1",
+        }
+        for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+            env.pop(_var, None)
         subprocess.run(
             [
                 sys.executable,
@@ -254,12 +275,7 @@ class TestSubjectPatternNudge:
                 "body",
             ],
             cwd=root,
-            env={
-                **os.environ,
-                "OTAMAN_AGENT": "cli-agent",
-                "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
-                "NO_COLOR": "1",
-            },
+            env=env,
             capture_output=True,
             text=True,
             timeout=30,

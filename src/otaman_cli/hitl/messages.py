@@ -204,15 +204,34 @@ def emit_human_decision(
     payload: HumanDecisionPayload,
     bus_active_dir: Path,
 ) -> Path:
-    """Write the `human-decision` message file. Returns the absolute path."""
+    """Write the `human-decision` message file. Returns the absolute path.
+
+    bus-test-isolation 2.1: the rendered content is ledger-recorded BEFORE
+    the bus file is written; a failed append raises
+    ``otaman_core.confirmations.LedgerError`` and nothing is written (fail
+    closed — no record, no bus file). Callers surface the error.
+    """
+    import re as _re
+
+    from otaman_core.confirmations import append_confirmation, hash_message
+
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
     filename = (
         f"{ts}-human-to-{payload.to_agent.replace('/', '-')}-human-decision-"
         f"{payload.in_reply_to[:30]}.md"
     )
+    content = payload.render()
+    id_match = _re.search(r"^id:\s*(\S+)", content, _re.MULTILINE)
+    message_id = id_match.group(1) if id_match else filename[:-3]
+    append_confirmation(
+        message_id=message_id,
+        content_hash=hash_message(content),
+        command="hitl-take",
+        agent=payload.decided_by or "human",
+    )
     bus_active_dir.mkdir(parents=True, exist_ok=True)
     out = bus_active_dir / filename
-    out.write_text(payload.render(), encoding="utf-8")
+    out.write_text(content, encoding="utf-8")
     return out
 
 

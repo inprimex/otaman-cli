@@ -66,21 +66,24 @@ def _dispatcher_commands() -> set[str]:
 
 def _help_output() -> str:
     """Run ``maestro help`` and capture stdout, stripping ANSI colour codes."""
+    env = {
+        **os.environ,
+        "NO_COLOR": "1",
+        "PYTHONPATH": os.pathsep.join(
+            [
+                str(REPO_ROOT / "src"),
+                str(REPO_ROOT.parent / "otaman-core" / "src"),
+                os.environ.get("PYTHONPATH", ""),
+            ]
+        ),
+    }
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     result = subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "help"],
         capture_output=True,
         text=True,
-        env={
-            **os.environ,
-            "NO_COLOR": "1",
-            "PYTHONPATH": os.pathsep.join(
-                [
-                    str(REPO_ROOT / "src"),
-                    str(REPO_ROOT.parent / "otaman-core" / "src"),
-                    os.environ.get("PYTHONPATH", ""),
-                ]
-            ),
-        },
+        env=env,
     )
     assert result.returncode == 0, result.stderr
     # Strip ANSI escape sequences regardless of NO_COLOR, since the help

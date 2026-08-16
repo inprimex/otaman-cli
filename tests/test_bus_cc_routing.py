@@ -27,6 +27,8 @@ class TestSendCcFlag:
             "OTAMAN_AGENT": "cli-agent",
             "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
         }
+        for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+            env.pop(_var, None)
         return subprocess.run(
             [
                 sys.executable,
@@ -171,6 +173,8 @@ class TestCheckCcDisplay:
             "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
             "NO_COLOR": "1",
         }
+        for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+            env.pop(_var, None)
         return subprocess.run(
             [sys.executable, "-m", "otaman_cli.main", "check"],
             cwd=root,
