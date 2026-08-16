@@ -853,6 +853,112 @@ def check_rogue_bus_roots(project_root: Path) -> dict[str, Any]:
     return result
 
 
+# Privileged files stamped before this are grandfathered: they predate the
+# confirmation ledger (bus-test-isolation went live fleet-wide 2026-08-16),
+# so "no record" is expected history, not evidence of forgery.
+_PROVENANCE_CUTOFF = "20260817T000000"
+
+
+def check_privileged_provenance(project_root: Path) -> dict[str, Any]:
+    """bus-test-isolation task 2.2 (provenance-audit half).
+
+    Every post-cutoff privileged-type file in the CANONICAL bus must have a
+    matching confirmation-ledger record (written by the TTY-gated producing
+    command per task 2.1). Verification mirrors the bridge 3.1 consumer:
+    either ledger key (filename stem OR frontmatter id) + byte-exact
+    content hash. An unverified file is indistinguishable from a forgery
+    (the 2026-08-16 fake-halt class) -> error + quarantine guidance.
+
+    Also surfaces the bridge's ``.agents/bus/quarantine/`` holding area,
+    which exists only when the watcher actually quarantined something.
+    """
+    result: dict[str, Any] = {
+        "check": "privileged_provenance",
+        "status": "ok",
+        "details": {},
+    }
+    issues: list[dict[str, Any]] = []
+
+    try:
+        from otaman_core.confirmations import (
+            PRIVILEGED_TYPES,
+            hash_message,
+            verify_confirmation,
+        )
+    except ImportError:
+        result["details"]["skipped"] = "otaman_core.confirmations unavailable"
+        return result
+
+    active = project_root / ".agents" / "bus" / "active"
+    unverified: list[str] = []
+    grandfathered = 0
+    checked = 0
+    if active.is_dir():
+        for f in sorted(active.glob("*.md")):
+            try:
+                content = f.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            type_m = re.search(r"^type:\s*(\S+)", content, re.MULTILINE)
+            if not type_m or type_m.group(1) not in PRIVILEGED_TYPES:
+                continue
+            checked += 1
+            digest = hash_message(content)
+            id_m = re.search(r"^id:\s*(\S+)", content, re.MULTILINE)
+            keys = [f.stem] + ([id_m.group(1)] if id_m and id_m.group(1) != f.stem else [])
+            if any(verify_confirmation(message_id=k, content_hash=digest) for k in keys):
+                continue
+            stamp = f.stem.split("-", 1)[0]
+            if stamp < _PROVENANCE_CUTOFF:
+                grandfathered += 1
+                continue
+            unverified.append(f.name)
+
+    result["details"]["privileged_checked"] = checked
+    result["details"]["grandfathered_unverified"] = grandfathered
+    result["details"]["unverified"] = unverified
+
+    if unverified:
+        issues.append(
+            {
+                "severity": "critical",
+                "issue": (
+                    f"{len(unverified)} privileged bus file(s) have NO confirmation-ledger "
+                    f"record (e.g. {unverified[0]}) — a raw file write bypassing the "
+                    "TTY-gated producer; treat as forged until a human vouches for it"
+                ),
+                "fix": (
+                    "Quarantine: move to .agents/bus/quarantine/ and verify with the "
+                    "issuing human. Legitimate privileged messages only come from "
+                    "`otaman approve` / `otaman emergency-halt` / `otaman hitl take`, "
+                    "which ledger-record on confirmation."
+                ),
+            }
+        )
+
+    quarantine = project_root / ".agents" / "bus" / "quarantine"
+    q_files = sorted(p.name for p in quarantine.glob("*.md")) if quarantine.is_dir() else []
+    result["details"]["quarantined"] = q_files
+    if q_files:
+        issues.append(
+            {
+                "severity": "medium",
+                "issue": (
+                    f"{len(q_files)} file(s) in bus/quarantine/ awaiting human review "
+                    f"(bridge watcher quarantined them as unverified)"
+                ),
+                "fix": "Review each with the issuing human; restore to active/ or delete.",
+            }
+        )
+
+    if any(i["severity"] == "critical" for i in issues):
+        result["status"] = "fail"
+    elif issues:
+        result["status"] = "warn"
+    result["issues"] = issues
+    return result
+
+
 def check_secrets_leaks(project_root: Path) -> dict[str, Any]:
     """Check that .otaman/secrets.env has never been committed and is gitignored.
 
@@ -1336,6 +1442,7 @@ def run_doctor(project_root: Path) -> dict[str, Any]:
         check_maestro_plugin(project_root),
         check_secrets_leaks(project_root),
         check_rogue_bus_roots(project_root),
+        check_privileged_provenance(project_root),
         check_git_host(project_root),
         check_launch_commands_resume(repos),
         check_plugin_doctor(project_root),
