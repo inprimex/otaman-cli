@@ -1,5 +1,7 @@
 # otaman-cli
 
+> **Otaman platform:** [otaman-core](https://github.com/inprimex/otaman-core) · **otaman-cli (you are here)** · [otaman-plugin](https://github.com/inprimex/otaman-plugin) · [otaman-bridge](https://github.com/inprimex/otaman-bridge) · [otaman-runner](https://github.com/inprimex/otaman-runner) · [otaman-adapters](https://github.com/inprimex/otaman-adapters)
+
 The `otaman` command-line binary — local project management, remote bridge
 operations, and interactive agent launching from a single entry point.
 
