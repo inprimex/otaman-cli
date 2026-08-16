@@ -14,7 +14,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # ce-lint-standard: ruff pinned exactly (F182 doctrine — unpinned CI
       # tooling is drift waiting to break builds). Bump via ordinary PR.
@@ -37,33 +37,33 @@ jobs:
 
     steps:
       - name: Checkout otaman-cli
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: workspace/otaman-cli
 
       - name: Checkout otaman-core (sibling path-dep)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: inprimex/otaman-core
           token: ${{ secrets.INPRIMEX_RO_TOKEN }}
           path: workspace/otaman-core
 
       - name: Checkout otaman-bridge (sibling path-dep)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: inprimex/otaman-bridge
           token: ${{ secrets.INPRIMEX_RO_TOKEN }}
           path: workspace/otaman-bridge
 
       - name: Checkout otaman-plugin (sibling path-dep)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: inprimex/otaman-plugin
           token: ${{ secrets.INPRIMEX_RO_TOKEN }}
           path: workspace/otaman-plugin
 
       - name: Checkout otaman-adapters (sibling path-dep)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: inprimex/otaman-adapters
           token: ${{ secrets.INPRIMEX_RO_TOKEN }}
