@@ -124,6 +124,19 @@ def _make_dir_shape_project(tmp_path: Path, agent_name: str = "human") -> Path:
     return meta
 
 
+def _cli_env() -> dict:
+    """Explicit subprocess env: strip the isolate_bus sandbox pin so the CLI
+    resolves this test's fixture tree; propagate sys.path for sibling
+    checkouts."""
+    import os
+    import sys
+
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)}
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
+    return env
+
+
 def test_init_update_writes_dir_shape_agent_file(tmp_path: Path) -> None:
     """--update must create .otaman/agent for dir-shape meta target."""
     import subprocess
@@ -136,6 +149,7 @@ def test_init_update_writes_dir_shape_agent_file(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
         cwd=str(meta),
+        env=_cli_env(),
     )
 
     agent_file = meta / ".otaman" / "agent"
@@ -157,6 +171,7 @@ def test_init_update_dir_shape_leaves_siblings_untouched(tmp_path: Path) -> None
         capture_output=True,
         text=True,
         cwd=str(meta),
+        env=_cli_env(),
     )
 
     assert activity_file.read_text(encoding="utf-8") == original_content
@@ -175,6 +190,7 @@ def test_init_update_dir_shape_idempotent(tmp_path: Path) -> None:
             capture_output=True,
             text=True,
             cwd=str(meta),
+            env=_cli_env(),
         )
         assert r.returncode == 0
 

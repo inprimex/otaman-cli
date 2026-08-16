@@ -115,12 +115,21 @@ def test_falls_back_to_human_on_empty_bus(tmp_path: Path) -> None:
 
 
 def _run_check(project_root: Path, agent: str, extra_args: list[str] | None = None) -> str:
-    """Run `otaman check <agent>` and return stdout."""
+    """Run `otaman check <agent>` and return stdout.
+
+    Explicit env: the autouse isolate_bus fixture pins OTAMAN_ROOT at a
+    sandbox; an inherited env would redirect the subprocess there instead of
+    this test's fixture tree. PYTHONPATH propagation covers sibling checkouts.
+    """
+    import os
     import subprocess
     import sys
 
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)}
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     cmd = [sys.executable, "-m", "otaman_cli.main", "check", agent] + (extra_args or [])
-    result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(project_root))
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(project_root), env=env)
     return result.stdout + result.stderr
 
 

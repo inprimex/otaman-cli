@@ -33,11 +33,21 @@ def project(tmp_path: Path) -> Path:
 
 
 def _run_check(project_root: Path, agent: str = "cli-agent") -> str:
+    # Explicit env: the autouse isolate_bus fixture pins OTAMAN_ROOT at a
+    # sandbox; an inherited env would redirect the subprocess there instead
+    # of this test's own fixture tree. PYTHONPATH propagation also lets the
+    # subprocess resolve otaman_cli in sibling-checkout dev setups.
+    import os
+
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)}
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     result = subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "check", agent],
         capture_output=True,
         text=True,
         cwd=str(project_root),
+        env=env,
     )
     return result.stdout + result.stderr
 
