@@ -246,6 +246,8 @@ def test_cli_hitl_take_non_tty_refuses_and_writes_nothing(project: Path):
     )
 
     env = {**os.environ, "OTAMAN_AGENT": "human"}
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     stdin_input = "approve\n\n\n\n"
 
     rc = subprocess.run(
@@ -270,6 +272,8 @@ def test_cli_hitl_list_shows_pending(project: Path):
     _write_request(active, stem="req-2", priority="low", subject="Low prio item")
 
     env = {**os.environ, "OTAMAN_AGENT": "human"}
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     rc = subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "hitl", "list"],
         capture_output=True,
@@ -286,6 +290,8 @@ def test_cli_hitl_list_shows_pending(project: Path):
 
 def test_cli_hitl_take_missing_id_errors(project: Path):
     env = {**os.environ, "OTAMAN_AGENT": "human"}
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     rc = subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", "hitl", "take", "no-such-stem"],
         capture_output=True,

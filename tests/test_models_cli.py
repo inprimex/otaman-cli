@@ -42,6 +42,8 @@ def _run_cli(*args: str, cwd: Path):
     """Run models_report as a subprocess; assert rc and return stdout."""
     # Subprocess does not inherit pytest pythonpath config — set explicitly.
     env = os.environ.copy()
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     cli_src = str(Path(__file__).resolve().parent.parent / "src")
     core_src = str(Path(__file__).resolve().parent.parent.parent / "otaman-core" / "src")
     env["PYTHONPATH"] = os.pathsep.join([cli_src, core_src, env.get("PYTHONPATH", "")])

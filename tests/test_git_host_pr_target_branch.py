@@ -38,8 +38,10 @@ def _run_cli(args: list[str], cwd: Path):
 
 
 @pytest.fixture
-def project(tmp_path: Path) -> Path:
+def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (tmp_path / ".agents").mkdir()
+    # Resolve this fixture tree (walk-up from cwd), not the isolate_bus sandbox.
+    monkeypatch.delenv("OTAMAN_ROOT", raising=False)
     return tmp_path
 
 

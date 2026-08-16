@@ -85,6 +85,8 @@ def _setup_project(tmp_path: Path) -> Path:
 def project(tmp_path, monkeypatch):
     meta = _setup_project(tmp_path)
     monkeypatch.chdir(meta)
+    # Resolve this fixture tree (marker/walk-up), not the isolate_bus sandbox.
+    monkeypatch.delenv("OTAMAN_ROOT", raising=False)
     return meta
 
 

@@ -181,11 +181,11 @@ def cmd_approve(args: list[str]) -> int:
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     now_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
 
-    if action == "approve":
-        # Create approval ack
-        ack_file = acks_dir / f"{target['stem']}.human.ack"
-        ack_file.write_text("approved\n", encoding="utf-8")
+    # bus-test-isolation 2.1 — the approved/rejected messages are PRIVILEGED;
+    # ledger-gate before any file is written (fail closed).
+    from otaman_cli.safety import record_privileged_confirmation
 
+    if action == "approve":
         # Broadcast approval
         slug = re.sub(r"[^a-z0-9]+", "-", target["subject"].lower()).strip("-")[:30]
         broadcast_file = active_dir / f"{now_ts}-human-to-all-spec-change-approved.md"
@@ -214,6 +214,17 @@ The spec-change-request from **{target["fm"].get("from", "?")}** has been **appr
 
 Use `/otaman:check` to track updates.
 """
+        if not record_privileged_confirmation(
+            message_id=f"{now_ts}-approved-{slug}",
+            content=broadcast,
+            command="approve",
+        ):
+            return 1
+
+        # Create approval ack (only after the ledger record exists)
+        ack_file = acks_dir / f"{target['stem']}.human.ack"
+        ack_file.write_text("approved\n", encoding="utf-8")
+
         broadcast_file.write_text(broadcast, encoding="utf-8")
 
         UI.header("Proposal Approved")
@@ -243,10 +254,6 @@ Use `/otaman:check` to track updates.
         return 0
 
     elif action == "reject":
-        # Create rejection ack
-        ack_file = acks_dir / f"{target['stem']}.human.ack"
-        ack_file.write_text("rejected\n", encoding="utf-8")
-
         # Notify the proposing agent
         proposer = target["fm"].get("from", "all")
         reject_file = active_dir / f"{now_ts}-human-to-{proposer}-spec-change-rejected.md"
@@ -270,6 +277,17 @@ The spec-change-request has been **rejected**.
 
 **Original proposal**: {target["stem"]}
 """
+        if not record_privileged_confirmation(
+            message_id=f"{now_ts}-rejected",
+            content=reject_msg,
+            command="approve",
+        ):
+            return 1
+
+        # Create rejection ack (only after the ledger record exists)
+        ack_file = acks_dir / f"{target['stem']}.human.ack"
+        ack_file.write_text("rejected\n", encoding="utf-8")
+
         reject_file.write_text(reject_msg, encoding="utf-8")
 
         UI.header("Proposal Rejected")

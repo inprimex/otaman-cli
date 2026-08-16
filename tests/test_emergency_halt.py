@@ -22,6 +22,8 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (tmp_path / ".agents" / "bus" / "active" / "acks").mkdir(parents=True)
     (tmp_path / "platform.yaml").write_text("project: tst\nrepos: []\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
+    # Resolve this fixture tree (walk-up from cwd), not the isolate_bus sandbox.
+    monkeypatch.delenv("OTAMAN_ROOT", raising=False)
     return tmp_path
 
 

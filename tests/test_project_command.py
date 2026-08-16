@@ -148,6 +148,8 @@ def project(tmp_path: Path) -> Path:
 
 def _run(meta: Path, *cli_args: str) -> subprocess.CompletedProcess:
     env = {**os.environ, "OTAMAN_AGENT": "cli-agent"}
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     return subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", *cli_args],
         capture_output=True,

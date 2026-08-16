@@ -243,7 +243,14 @@ def cmd_take(args: dict[str, Any]) -> int:
         followup_actions=followup,
         subject=f"Re: {req.subject}",
     )
-    out_path = emit_human_decision(payload, active_dir)
+    # bus-test-isolation 2.1 — emit ledger-gates the privileged write and
+    # raises on append failure; nothing is written in that case.
+    from otaman_core.confirmations import LedgerError
+
+    try:
+        out_path = emit_human_decision(payload, active_dir)
+    except LedgerError as exc:
+        return _bail(f"Refusing to record the decision — confirmation-ledger append failed: {exc}")
     ack_path = write_resolved_ack(active_dir, req.msg_stem, by=human)
 
     UI.ok(f"Recorded decision: {out_path.name}")

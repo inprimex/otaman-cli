@@ -165,6 +165,8 @@ class TestCmdCompleteBranching:
             "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
             "NO_COLOR": "1",
         }
+        for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+            env.pop(_var, None)
         return subprocess.run(
             [
                 sys.executable,
@@ -224,6 +226,8 @@ class TestCmdCompleteBranching:
         _stage_project(tmp_path, agent="cli-agent")
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("OTAMAN_AGENT", raising=False)
+        # Resolve the staged tree (walk-up from cwd), not the isolate_bus sandbox.
+        monkeypatch.delenv("OTAMAN_ROOT", raising=False)
 
         from otaman_cli.commands import complete as _m
 
@@ -299,6 +303,8 @@ class TestCmdCompleteBranching:
             "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
             "NO_COLOR": "1",
         }
+        for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+            env.pop(_var, None)
         r = subprocess.run(
             [
                 sys.executable,

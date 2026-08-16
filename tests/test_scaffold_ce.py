@@ -295,6 +295,8 @@ def test_outcome_add_succeeds_after_scaffold(meta: Path) -> None:
     )
 
     env = {**os.environ, "OTAMAN_AGENT": "human"}
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     rc = subprocess.run(
         [
             sys.executable,
@@ -332,6 +334,8 @@ def test_outcome_add_succeeds_after_scaffold(meta: Path) -> None:
 
 def test_cli_init_companion_repos_subcommand(meta: Path) -> None:
     env = {**os.environ, "OTAMAN_AGENT": "human"}
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     rc = subprocess.run(
         [
             sys.executable,
@@ -355,6 +359,8 @@ def test_cli_init_companion_repos_subcommand(meta: Path) -> None:
 
 def test_cli_init_companion_repos_dry_run(meta: Path) -> None:
     env = {**os.environ, "OTAMAN_AGENT": "human"}
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     rc = subprocess.run(
         [
             sys.executable,
@@ -381,6 +387,8 @@ def test_cli_init_companion_repos_repos_flag(meta: Path) -> None:
     """--repos strategy creates only the strategy repo, even when business
     processes are enabled."""
     env = {**os.environ, "OTAMAN_AGENT": "human"}
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     rc = subprocess.run(
         [
             sys.executable,

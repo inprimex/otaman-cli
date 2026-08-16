@@ -28,6 +28,8 @@ def _run_cli(
         "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
         "NO_COLOR": "1",
     }
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     env.pop("OTAMAN_AGENT", None)
     if env_overrides:
         env.update(env_overrides)

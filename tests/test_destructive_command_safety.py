@@ -108,6 +108,8 @@ def _setup_migrate_project(tmp_path: Path) -> Path:
 def migrate_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = _setup_migrate_project(tmp_path)
     monkeypatch.chdir(root)
+    # Resolve this fixture tree (walk-up from cwd), not the isolate_bus sandbox.
+    monkeypatch.delenv("OTAMAN_ROOT", raising=False)
     return root
 
 

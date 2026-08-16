@@ -79,6 +79,17 @@ status: pending
 Do not start new tasks, do not commit, do not push. Await further
 instructions from a human before resuming.
 """
+    # bus-test-isolation 2.1 — no ledger record, no bus file. The 2026-08-16
+    # forged-halt incident is exactly a halt file with no matching record.
+    from otaman_cli.safety import record_privileged_confirmation
+
+    if not record_privileged_confirmation(
+        message_id=f"{now_ts}-emergency-halt-{slug}",
+        content=msg,
+        command="emergency-halt",
+    ):
+        return 1
+
     msg_file = active_dir / f"{now_ts}-human-to-all-emergency-halt.md"
     msg_file.write_text(msg, encoding="utf-8")
 

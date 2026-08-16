@@ -73,6 +73,8 @@ def _run_main(
         "PYTHONPATH": os.pathsep.join([SRC_PATH, CORE_PATH, os.environ.get("PYTHONPATH", "")]),
         "NO_COLOR": "1",
     }
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     if env_extra:
         env.update(env_extra)
     return subprocess.run(

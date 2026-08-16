@@ -41,6 +41,8 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _run(meta: Path, *cli_args: str) -> subprocess.CompletedProcess:
     env = {**os.environ, "OTAMAN_AGENT": "human"}
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     return subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", *cli_args],
         capture_output=True,
@@ -739,6 +741,8 @@ def test_solution_add_recommendation_picks_cheapest(project: Path) -> None:
 def test_unauthorized_actor_emits_warning_but_proceeds(project: Path, monkeypatch) -> None:
     # role-assignments has cpo:human, but actor is "stranger" (no cpo role)
     env = {**os.environ, "OTAMAN_AGENT": "stranger"}
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     rc = subprocess.run(
         [
             sys.executable,

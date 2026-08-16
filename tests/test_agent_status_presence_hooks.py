@@ -36,6 +36,8 @@ def _run_cli(
         "PYTHONPATH": str(Path(__file__).parent.parent / "src"),
         "NO_COLOR": "1",
     }
+    for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(_var, None)
     if extra_env:
         env.update(extra_env)
     return subprocess.run(
