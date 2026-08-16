@@ -92,6 +92,7 @@ from otaman_cli.commands import pm as _pm  # noqa: E402,F401
 from otaman_cli.commands import presale as _presale  # noqa: E402,F401
 from otaman_cli.commands import project as _project  # noqa: E402,F401
 from otaman_cli.commands import propose_team as _propose_team  # noqa: E402,F401
+from otaman_cli.commands import runner as _runner  # noqa: E402,F401
 from otaman_cli.commands import scan as _scan  # noqa: E402,F401
 from otaman_cli.commands import simple_dispatch as _simple_dispatch  # noqa: E402,F401
 from otaman_cli.commands import solution as _solution  # noqa: E402,F401

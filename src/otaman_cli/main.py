@@ -655,6 +655,8 @@ def cmd_help() -> int:
   {C.GREEN}ping{C.RESET} <message>                 Proactively notify the user via Telegram
   {C.GREEN}mcp-config{C.RESET} --bridge-url URL     Emit .mcp.json for Claude Code (team mode)
   {C.GREEN}session{C.RESET} spawn --agent A --repo R  Spawn a Claude session under logged-in user
+  {C.GREEN}runner platforms{C.RESET} add|list|remove   Manage which platform.yaml files a --platforms-dir runner serves
+  {C.GREEN}runner token{C.RESET} install|rotate|show    Bootstrap / rotate / inspect the runner's stable token
 
 {C.BOLD}Git host integration (PR / MR):{C.RESET}
   {C.GREEN}git-host{C.RESET} <subcommand>          Git host PAT + PR/MR API:
