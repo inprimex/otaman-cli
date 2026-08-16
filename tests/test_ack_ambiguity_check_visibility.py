@@ -55,6 +55,11 @@ def _run(meta: Path, agent: str, *argv: str) -> subprocess.CompletedProcess:
         "OTAMAN_AGENT": agent,
         "PYTHONPATH": os.pathsep.join(p for p in sys.path if p),
     }
+    # A developer shell's OTAMAN_ROOT/MAESTRO_ROOT would redirect the
+    # subprocess to the real workspace bus (root chain: marker → env →
+    # walk-up). Strip for isolation.
+    for var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
+        env.pop(var, None)
     return subprocess.run(
         [sys.executable, "-m", "otaman_cli.main", *argv],
         capture_output=True,
