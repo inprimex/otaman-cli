@@ -43,8 +43,9 @@ class TestPlatformsRegistry:
         assert result["status"] == "installed"
         link = pdir / "acme.yaml"
         assert link.is_symlink()
-        # normalize: Windows readlink returns \\?\-prefixed extended paths
-        assert Path(os.readlink(link)).resolve() == target.resolve()
+        # compare through the module's own normalization (Windows readlink
+        # returns \\?\-prefixed extended paths that resolve() keeps)
+        assert rr._resolve_link_target(link) == target.resolve()
 
     @_POSIX_ONLY
     def test_platforms_dir_created_0700(self, tmp_path: Path) -> None:
@@ -105,7 +106,7 @@ class TestPlatformsRegistry:
         t2 = _make_platform_yaml(tmp_path, "acme", "two.yaml")
         result = rr.platforms_add(t2, force=True, dir_override=str(pdir))
         assert result["status"] == "installed"
-        assert Path(os.readlink(pdir / "acme.yaml")).resolve() == t2.resolve()
+        assert rr._resolve_link_target(pdir / "acme.yaml") == t2.resolve()
 
     def test_list_empty_dir(self, tmp_path: Path) -> None:
         assert rr.platforms_list(dir_override=str(tmp_path / "platforms")) == []
