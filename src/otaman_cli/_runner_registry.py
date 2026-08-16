@@ -114,9 +114,17 @@ def _read_program_name(path: Path) -> str:
 
 
 def _resolve_link_target(link: Path) -> Path:
+    """Resolve where *link* points, normalized for comparison.
+
+    Windows ``os.readlink`` returns extended-length paths (``\\\\?\\C:...``);
+    ``resolve()`` normalizes them (realpath strips the prefix), so targets
+    compare equal to ``Path.resolve()`` output — without it, idempotency
+    detection breaks and re-adding the same target refuses instead of
+    no-opping.
+    """
     raw = Path(os.readlink(link))
     if raw.is_absolute():
-        return raw
+        return raw.resolve()
     return (link.parent / raw).resolve()
 
 
