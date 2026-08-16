@@ -156,13 +156,71 @@ def cmd_send(args: list[str]) -> int:
         UI.muted("Tip: run from inside a managed repo, or pass --from <agent>")
         return 1
 
+    # single-bus-per-program tasks 2.1-2.3 — parse the target through the
+    # core URI layer when the declared org layout is derivable. Bare names
+    # keep their exact legacy behavior (including outside the CE layout,
+    # where ctx is None and no URI fields are emitted).
+    from otaman_core.bus.uri import BusUriError
+    from otaman_core.bus.uri import parse as _parse_bus_uri
+
+    from otaman_cli.bus_target import (
+        BoundaryError,
+        CrossOrgError,
+        TargetResolutionError,
+        derive_local_context,
+        envelope_uri_fields,
+        resolve_cross_program_delivery,
+    )
+
+    ctx = derive_local_context(root)
+    target_uri = None
+    to_agent = ns.to
+    is_cross_program = False
+    if ctx is not None:
+        try:
+            target_uri = _parse_bus_uri(ns.to, local_org=ctx.org, local_program=ctx.program)
+        except BusUriError as exc:
+            if ns.to.startswith("otaman://") or "@" in ns.to:
+                UI.error(f"Invalid target address: {exc}")
+                return 2
+            # Bare name the slug grammar rejects (legacy edge): keep exact
+            # current behavior, just without canonical-URI envelope fields.
+            target_uri = None
+        else:
+            to_agent = target_uri.agent
+            is_cross_program = target_uri.is_cross_program(ctx.org, ctx.program)
+    elif ns.to.startswith("otaman://") or "@" in ns.to:
+        UI.error(
+            "Cross-program targets require the declared org layout "
+            "(orgs/<org>/programs/<program>/...) — could not derive the local "
+            "org/program from this project's location."
+        )
+        return 1
+
+    target_root = root
+    if is_cross_program and target_uri is not None and ctx is not None:
+        try:
+            target_root = resolve_cross_program_delivery(
+                ctx,
+                target_program=target_uri.program,
+                target_org=target_uri.org,
+                sender_agent=agent,
+                msg_type=ns.msg_type,
+            )
+        except CrossOrgError as exc:
+            UI.error(str(exc))
+            return 1
+        except (TargetResolutionError, BoundaryError) as exc:
+            UI.error(f"Cross-program send refused: {exc}")
+            return 1
+
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc)
     ts = now.strftime("%Y%m%dT%H%M%S")
     ts_iso = now.isoformat()
     slug = re.sub(r"[^a-z0-9]+", "-", ns.subject.lower())[:40].strip("-")
-    filename = f"{ts}-{agent}-to-{ns.to}-{slug}.md"
+    filename = f"{ts}-{agent}-to-{to_agent}-{slug}.md"
 
     # cli-send-cc-fanout-parity (tasks 1.1-1.5) — compute the effective CC
     # list as the union of explicit --cc and routing-rule-derived CC, then
@@ -176,27 +234,39 @@ def cmd_send(args: list[str]) -> int:
         load_routing_rules,
     )
 
-    routing_rules = load_routing_rules(root)
+    # Cross-program: the sender's routing rules govern the sender's bus,
+    # not the target's — auto-CC does not fan out across the boundary.
+    # Explicit --cc recipients are target-program-scoped copies.
+    routing_rules = [] if is_cross_program else load_routing_rules(root)
     # Strip + drop empties from --cc values (a UX nicety; the ported
     # compute_effective_cc preserves whitespace-only entries because
     # bus_server.py:227 doesn't strip).  cmd_send historically stripped
     # so keep that behavior at the CLI boundary.
     stripped_cc = [c.strip() for c in (ns.cc or []) if isinstance(c, str) and c.strip()]
     effective_cc = compute_effective_cc(
-        to=ns.to,
+        to=to_agent,
         priority=ns.priority,
         explicit_cc=stripped_cc,
         routing_rules=routing_rules,
         msg_type=ns.msg_type,
     )
 
+    # Schema-v2 projection fields (single-bus-per-program 2.1): `from`/`to`
+    # keep the bare-name convention every consumer keys on; the canonical
+    # URIs travel in from-uri/to-uri with from_org/to_org projected.
+    uri_lines = ""
+    if ctx is not None and target_uri is not None:
+        fields = envelope_uri_fields(ctx, sender_agent=agent, to_uri=target_uri)
+        uri_lines = "".join(f"{k}: {v}\n" for k, v in fields.items())
+
     cc_line = f"cc: [{', '.join(effective_cc)}]\n" if effective_cc else ""
     content = (
         f"---\n"
         f"id: {ts}-{agent[:8]}\n"
         f"from: {agent}\n"
-        f"to: {ns.to}\n"
+        f"to: {to_agent}\n"
         f"{cc_line}"
+        f"{uri_lines}"
         f"priority: {ns.priority}\n"
         f"type: {ns.msg_type}\n"
         f"timestamp: {ts_iso}\n"
@@ -208,7 +278,9 @@ def cmd_send(args: list[str]) -> int:
         f"{ns.body}\n"
     )
 
-    active_dir, _acks_dir = _resolve_bus_paths(root)
+    # Cross-program delivery writes into the TARGET program's own bus
+    # (ack lifecycle owned by the recipient there); local sends unchanged.
+    active_dir, _acks_dir = _resolve_bus_paths(target_root)
     active_dir.mkdir(parents=True, exist_ok=True)
     msg_path = active_dir / filename
     msg_path.write_text(content, encoding="utf-8")
@@ -232,16 +304,26 @@ def cmd_send(args: list[str]) -> int:
 
     UI.ok(f"Sent: {filename}")
     UI.kv("  From", agent)
-    UI.kv("  To", ns.to)
+    UI.kv("  To", str(target_uri) if is_cross_program and target_uri else to_agent)
     if effective_cc:
         UI.kv("  CC", ", ".join(effective_cc))
     UI.kv("  Type", ns.msg_type)
     UI.kv("  Priority", ns.priority)
-    UI.muted(f"  Path: {msg_path.relative_to(root)}")
+
+    def _display(p: Path) -> str:
+        try:
+            return str(p.relative_to(target_root if is_cross_program else root))
+        except ValueError:
+            return str(p)
+
+    if is_cross_program and target_uri is not None:
+        UI.muted(f"  Delivered into program '{target_uri.program}' bus: {_display(msg_path)}")
+    else:
+        UI.muted(f"  Path: {_display(msg_path)}")
     if cc_copy_paths:
         UI.muted(f"  CC copies: {len(cc_copy_paths)} written (x-cc: true)")
         for p in cc_copy_paths:
-            UI.muted(f"    {p.relative_to(root)}")
+            UI.muted(f"    {_display(p)}")
     return 0
 
 
