@@ -113,10 +113,29 @@ def _read_program_name(path: Path) -> str:
     return _validate_name(name.strip(), path)
 
 
+def _strip_extended_prefix(raw: str) -> str:
+    r"""Drop Windows extended-length prefixes (``\\?\C:...``, ``\\?\UNC\...``).
+
+    ``os.readlink`` returns them on Windows and — observed on windows-latest
+    CI, Python 3.11 — ``Path.resolve()`` does NOT normalize an
+    already-prefixed path, so prefixed targets never compare equal to
+    ``Path.resolve()`` output. Strip textually; deterministic on every
+    platform (no-op on POSIX).
+    """
+    if raw.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + raw[8:]
+    if raw.startswith("\\\\?\\"):
+        return raw[4:]
+    return raw
+
+
 def _resolve_link_target(link: Path) -> Path:
-    raw = Path(os.readlink(link))
+    """Resolve where *link* points, normalized for comparison with
+    ``Path.resolve()`` output — without this, idempotency detection breaks
+    on Windows and re-adding the same target refuses instead of no-opping."""
+    raw = Path(_strip_extended_prefix(os.readlink(link)))
     if raw.is_absolute():
-        return raw
+        return raw.resolve()
     return (link.parent / raw).resolve()
 
 
