@@ -331,3 +331,15 @@ def test_cross_program_explicit_cc_written_in_target_bus(sender_root: Path, org:
     assert any("-to-pm-agent-" in n for n in names)
     assert any("-to-qa-agent-" in n for n in names)
     assert list((sender_root / ".agents" / "bus" / "active").glob("*.md")) == []
+
+
+def test_cc_comma_list_split_into_recipients(sender_root: Path):
+    """landing-agent bug 20260817T115426: `--cc a,b` wrote a CC copy for
+    the literal recipient 'a,b'. Commas now split."""
+    rc = _run_send(sender_root, "cli-agent", "spec-agent", "--cc", "qa-agent,ops-agent")
+    assert rc.returncode == 0, rc.stdout + rc.stderr
+    names = sorted(p.name for p in (sender_root / ".agents" / "bus" / "active").glob("*.md"))
+    assert len(names) == 3  # primary + 2 cc copies
+    assert not any("qa-agent,ops-agent" in n or "qa-agent-ops-agent" in n for n in names)
+    assert any("-to-qa-agent-" in n for n in names)
+    assert any("-to-ops-agent-" in n for n in names)

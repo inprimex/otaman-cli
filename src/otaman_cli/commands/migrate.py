@@ -196,7 +196,23 @@ def cmd_migrate(args: list[str]) -> int:
                 rel = os.path.relpath(maestro_dir.resolve(), repo_dir)
                 rel_posix = Path(rel).as_posix()
                 marker = repo_dir / ".otaman"
-                agent_line = ("agent: " + owner + chr(10)) if owner else ""
+                # Preserve an existing agent: field on rewrite (2026-08-16
+                # clobber incident, plugin-agent 20260816T231146): the old
+                # unconditional overwrite dropped it whenever the config had
+                # no owner. Config owner wins when present; otherwise the
+                # marker's own value survives. Mirrors init.py --update and
+                # otaman-plugin PR #89 semantics.
+                existing_agent = ""
+                if marker.is_file():
+                    try:
+                        for line in marker.read_text(encoding="utf-8").splitlines():
+                            if line.strip().startswith("agent:"):
+                                existing_agent = line.strip()[len("agent:") :].strip()
+                                break
+                    except OSError:
+                        pass
+                effective_agent = owner or existing_agent
+                agent_line = ("agent: " + effective_agent + chr(10)) if effective_agent else ""
                 marker.write_text(
                     f"# Path to otaman folder\n{rel_posix}\n{agent_line}",
                     encoding="utf-8",
