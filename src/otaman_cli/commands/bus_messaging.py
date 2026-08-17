@@ -241,8 +241,16 @@ def cmd_send(args: list[str]) -> int:
     # Strip + drop empties from --cc values (a UX nicety; the ported
     # compute_effective_cc preserves whitespace-only entries because
     # bus_server.py:227 doesn't strip).  cmd_send historically stripped
-    # so keep that behavior at the CLI boundary.
-    stripped_cc = [c.strip() for c in (ns.cc or []) if isinstance(c, str) and c.strip()]
+    # so keep that behavior at the CLI boundary.  Also split each value on
+    # commas (landing-agent bug 20260817T115426: `--cc a,b` used to write a
+    # CC copy addressed to the literal recipient 'a,b').
+    stripped_cc = [
+        part.strip()
+        for c in (ns.cc or [])
+        if isinstance(c, str)
+        for part in c.split(",")
+        if part.strip()
+    ]
     effective_cc = compute_effective_cc(
         to=to_agent,
         priority=ns.priority,
