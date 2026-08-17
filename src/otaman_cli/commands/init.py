@@ -823,11 +823,17 @@ def _scaffold_launcher_after_init(platform_yaml: Path, *, yes: bool) -> None:
         config = {}
     project_name = str(config.get("project") or "otaman-project")
     agent_names: list[str] = []
+    # agent -> repo path relative to the meta dir (first owned repo wins) —
+    # the launch scripts cd each pane into its agent's repo before claude.
+    agent_repos: dict[str, str] = {}
     for r in config.get("repos") or []:
         if isinstance(r, dict) and r.get("owner"):
             owner = str(r["owner"])
             if owner and owner not in agent_names:
                 agent_names.append(owner)
+            repo_path = r.get("path")
+            if owner and owner not in agent_repos and isinstance(repo_path, str) and repo_path:
+                agent_repos[owner] = repo_path
 
     # otaman-init-dev-scaffold amendment #2: detect the orchestration
     # meta-agent declared in platform.yaml (agents[*].role == "orchestration")
@@ -867,7 +873,9 @@ def _scaffold_launcher_after_init(platform_yaml: Path, *, yes: bool) -> None:
         if live:
             preserved_local = text
 
-    result = _generate(settings, output_dir, platform_yaml_source=platform_yaml)
+    result = _generate(
+        settings, output_dir, platform_yaml_source=platform_yaml, agent_repos=agent_repos
+    )
     if preserved_local is not None:
         local_path.write_text(preserved_local, encoding="utf-8")
         UI.muted(f"  preserved existing {local_path.name} (had user content)")

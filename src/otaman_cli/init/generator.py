@@ -81,7 +81,9 @@ def _ruamel_dump(settings: LaunchSettings) -> str:
     return yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
 
 
-def _render_template(name: str, settings: LaunchSettings) -> str:
+def _render_template(
+    name: str, settings: LaunchSettings, agent_repos: dict[str, str] | None = None
+) -> str:
     env = Environment(
         loader=FileSystemLoader(str(_TEMPLATES_DIR)),
         autoescape=select_autoescape(disabled_extensions=("j2", "sh", "ps1")),
@@ -94,6 +96,7 @@ def _render_template(name: str, settings: LaunchSettings) -> str:
         connection=settings.connection,
         agents=settings.agents,
         tmux=settings.tmux,
+        agent_repos=agent_repos or {},
     )
 
 
@@ -102,6 +105,7 @@ def generate(
     output_dir: Path,
     *,
     platform_yaml_source: Path | None = None,
+    agent_repos: dict[str, str] | None = None,
 ) -> GeneratorResult:
     """Write all launcher files to *output_dir* (creates it if missing).
 
@@ -109,6 +113,13 @@ def generate(
     into ``launcher/platform.yaml`` so the folder is self-contained — a
     developer can copy ``launcher/`` to a new machine and have everything
     needed in one place (otaman-init-dev-scaffold amendment #1).
+
+    *agent_repos* maps agent name -> repo path relative to the otaman meta
+    dir (from platform.yaml ``repos[].owner``/``path``); the launch scripts
+    use it so each tmux pane cds into the agent's repo before starting
+    claude. Missing/unknown agents degrade to visible in-pane guidance —
+    never an empty pane (landing-agent 20260817T200932: the previous
+    scripts invoked a nonexistent ``otaman start``).
 
     Existing files OVERWRITTEN; callers responsible for prompting/--force
     gating.
@@ -129,13 +140,15 @@ def generate(
     local_example.write_text(_LOCAL_EXAMPLE, encoding="utf-8")
 
     # 3. launch.sh (POSIX) + chmod +x on POSIX systems
-    launch_sh.write_text(_render_template("launch.sh.j2", settings), encoding="utf-8")
+    launch_sh.write_text(_render_template("launch.sh.j2", settings, agent_repos), encoding="utf-8")
     if os.name == "posix":
         current = launch_sh.stat().st_mode
         launch_sh.chmod(current | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
     # 4. launch.ps1 (Windows)
-    launch_ps1.write_text(_render_template("launch.ps1.j2", settings), encoding="utf-8")
+    launch_ps1.write_text(
+        _render_template("launch.ps1.j2", settings, agent_repos), encoding="utf-8"
+    )
 
     # 5. .gitignore (excludes the local override)
     gitignore.write_text(_GITIGNORE, encoding="utf-8")
