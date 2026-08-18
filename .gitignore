@@ -15,5 +15,25 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Maestro marker file (local pointer to maestro folder)
+# Otaman marker file (local pointer to otaman workspace)
 .otaman
+
+# Otaman orchestration rules — written by `otaman init` to a gitignored file
+# that Claude Code auto-loads after CLAUDE.md; never committed (external-audit
+# remediation: keeps private fleet orchestration out of the public repo).
+CLAUDE.local.md
+
+# Environment and local secrets (canonical block — otaman-core PR #42)
+.env
+.env.*
+!.env.example
+*.env
+secrets.env
+*.secret
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+.maestro/
