@@ -523,10 +523,24 @@ def _cmd_init_update(dry_run: bool = False) -> int:
         UI.muted("  would regenerate agent config (generate-agent-config.py)")
     else:
         print("Regenerating agent config (queues, ownership, CLAUDE.local.md rules)...")
-        gen = run_script("generate-agent-config.py", str(platform_yaml))
-        if gen.returncode != 0:
-            UI.warn("generate-agent-config failed — marker/launch patches above still applied")
-            return gen.returncode
+        # Non-fatal by design: --update's marker/launch patches predate the
+        # generator step and must keep succeeding even where the generator
+        # can't run (e.g. plugin's create_directories collides with
+        # file-shape .otaman metas — reported to plugin-agent). The gate's
+        # step 2 explicitly verifies CLAUDE.local.md exists, so a warned
+        # skip cannot silently pass the migration.
+        try:
+            gen = run_script("generate-agent-config.py", str(platform_yaml))
+            gen_rc = gen.returncode
+        except Exception as exc:
+            UI.warn(f"generate-agent-config crashed: {exc}")
+            gen_rc = 1
+        if gen_rc != 0:
+            UI.warn(
+                "generate-agent-config did not complete — CLAUDE.local.md was NOT "
+                "(re)generated; marker/launch patches above still applied. "
+                "Verify per the migration gate before relying on session rules."
+            )
 
     print()
     UI.kv("Updated", str(updated))

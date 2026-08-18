@@ -102,3 +102,15 @@ def test_update_dry_run_writes_nothing(tmp_path: Path):
     )
     assert r.returncode == 0, r.stdout + r.stderr
     assert not (repo / "CLAUDE.local.md").exists()
+
+
+def test_update_survives_generator_failure_on_file_shape_meta(tmp_path: Path):
+    """A meta with a FILE-shape .otaman marker makes the plugin generator's
+    create_directories collide (mkdir over a file — plugin-agent's to fix).
+    --update must warn and still complete its own patches, not crash."""
+    meta, repo = _workspace(tmp_path)
+    (meta / ".otaman").write_text("agent: human\n", encoding="utf-8")  # file-shape
+    r = _run_update(cwd=repo)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "did not complete" in r.stdout or "crashed" in r.stdout
+    assert "Traceback" not in r.stderr
