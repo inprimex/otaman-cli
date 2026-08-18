@@ -39,6 +39,10 @@ class SSHParams(BaseModel):
     host: str
     user: str
     key_path: str | None = Field(default=None, alias="key_path")
+    # Absolute path of the otaman meta dir ON THE REMOTE HOST — the base the
+    # launcher resolves agent-repo dirs against in ssh mode. Optional: when
+    # unset, panes print run-this-yourself guidance instead of cd'ing blind.
+    remote_root: str | None = Field(default=None, alias="remote_root")
 
     @field_validator("host", "user")
     @classmethod

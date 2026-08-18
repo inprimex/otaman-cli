@@ -41,6 +41,50 @@ started=0
 skipped=0
 failed=0
 
+{% if connection.mode == "ssh" %}
+# Repo base ON THE REMOTE HOST (otaman meta dir there). From
+# launch-settings.yaml connection.ssh.remote_root; override per-run with
+# OTAMAN_REMOTE_REPOS_BASE.
+REMOTE_REPOS_BASE="${OTAMAN_REMOTE_REPOS_BASE:-{{ connection.ssh.remote_root or "" }}}"
+{% else %}
+# Repo paths in platform.yaml are relative to the otaman meta dir, and this
+# launcher/ folder lives inside it — so default the base to the parent of
+# this script. Override with OTAMAN_REPOS_BASE when the folder is copied
+# elsewhere.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPOS_BASE="${OTAMAN_REPOS_BASE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+{% endif %}
+
+# Meta-dir-relative repo path for an agent (from platform.yaml repos[]).
+agent_repo() {
+  case "$1" in
+{% for name, rel in agent_repos.items() %}
+    "{{ name }}") echo "{{ rel }}" ;;
+{% endfor %}
+    *) echo "" ;;
+  esac
+}
+
+# The command each pane runs: cd into the agent's repo and start claude.
+# Unknown agent / missing dir -> visible guidance in the pane, never empty.
+pane_cmd() {
+  local agent="$1" rel
+  rel="$(agent_repo "$agent")"
+  {% if connection.mode == "ssh" %}
+  if [ -n "$rel" ] && [ -n "$REMOTE_REPOS_BASE" ]; then
+    printf 'cd %s/%s && claude' "$REMOTE_REPOS_BASE" "$rel"
+  else
+    printf 'echo "[otaman] set connection.ssh.remote_root in launch-settings.yaml (or OTAMAN_REMOTE_REPOS_BASE), then cd into the %s repo and run: claude"' "$agent"
+  fi
+  {% else %}
+  if [ -n "$rel" ] && [ -d "$REPOS_BASE/$rel" ]; then
+    printf 'cd %q && claude' "$REPOS_BASE/$rel"
+  else
+    printf 'echo "[otaman] no repo dir found for %s (expected $REPOS_BASE/%s) — cd into its repo and run: claude"' "$agent" "${rel:-unmapped}"
+  fi
+  {% endif %}
+}
+
 start_session() {
   local agent="$1"
   local session="$PREFIX-$agent"
@@ -50,7 +94,7 @@ start_session() {
     skipped=$((skipped+1))
     return
   fi
-  if ssh -q $SSH_OPTS "$SSH_HOST" "tmux new-session -d -s $session -x 200 -y 50 && tmux send-keys -t $session 'otaman start $agent' Enter"; then
+  if ssh -q $SSH_OPTS "$SSH_HOST" "tmux new-session -d -s $session -x 200 -y 50 && tmux send-keys -t $session \"$(pane_cmd "$agent")\" Enter"; then
     echo "  [ok]   $session — started on $SSH_HOST"
     started=$((started+1))
   else
@@ -64,7 +108,7 @@ start_session() {
     return
   fi
   if tmux new-session -d -s "$session" -x 200 -y 50; then
-    tmux send-keys -t "$session" "otaman start $agent" Enter
+    tmux send-keys -t "$session" "$(pane_cmd "$agent")" Enter
     echo "  [ok]   $session — started"
     started=$((started+1))
   else

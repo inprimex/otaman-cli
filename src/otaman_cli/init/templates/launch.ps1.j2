@@ -46,6 +46,43 @@ $Started = 0
 $Skipped = 0
 $Failed  = 0
 
+# Meta-dir-relative repo path per agent (from platform.yaml repos[]).
+$AgentRepos = @{
+{% for name, rel in agent_repos.items() %}
+    "{{ name }}" = "{{ rel }}"
+{% endfor %}
+}
+{% if connection.mode == "ssh" %}
+# Repo base ON THE REMOTE HOST (otaman meta dir there); from
+# launch-settings.yaml connection.ssh.remote_root, overridable per-run.
+$RemoteReposBase = if ($env:OTAMAN_REMOTE_REPOS_BASE) { $env:OTAMAN_REMOTE_REPOS_BASE } else { "{{ connection.ssh.remote_root or "" }}" }
+{% else %}
+# launcher/ lives inside the otaman meta dir; repo paths are relative to it.
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ReposBase = if ($env:OTAMAN_REPOS_BASE) { $env:OTAMAN_REPOS_BASE } else { (Resolve-Path (Join-Path $ScriptDir "..")).Path }
+{% endif %}
+
+# The command each pane runs: cd into the agent's repo and start claude.
+# Unknown agent / missing dir -> visible guidance in the pane, never empty.
+function Get-PaneCommand {
+    param([string]$Agent)
+    $Rel = $AgentRepos[$Agent]
+    {% if connection.mode == "ssh" %}
+    if ($Rel -and $RemoteReposBase) {
+        return "cd $RemoteReposBase/$Rel && claude"
+    }
+    return "echo '[otaman] set connection.ssh.remote_root in launch-settings.yaml, then cd into the $Agent repo and run: claude'"
+    {% else %}
+    if ($Rel) {
+        $Dir = Join-Path $ReposBase $Rel
+        if (Test-Path $Dir -PathType Container) {
+            return "cd '$Dir' && claude"
+        }
+    }
+    return "echo '[otaman] no repo dir found for $Agent — cd into its repo and run: claude'"
+    {% endif %}
+}
+
 function Start-AgentSession {
     param([string]$Agent)
     $Session = "$Prefix-$Agent"
@@ -56,7 +93,8 @@ function Start-AgentSession {
         $script:Skipped++
         return
     }
-    & ssh -q $SshOpts.Split(' ') $SshHost "tmux new-session -d -s $Session -x 200 -y 50 && tmux send-keys -t $Session 'otaman start $Agent' Enter"
+    $PaneCmd = Get-PaneCommand $Agent
+    & ssh -q $SshOpts.Split(' ') $SshHost "tmux new-session -d -s $Session -x 200 -y 50 && tmux send-keys -t $Session `"$PaneCmd`" Enter"
     if ($LASTEXITCODE -eq 0) {
         Write-Host "  [ok]   $Session - started on $SshHost"
         $script:Started++
@@ -73,7 +111,7 @@ function Start-AgentSession {
     }
     & tmux new-session -d -s $Session -x 200 -y 50
     if ($LASTEXITCODE -eq 0) {
-        & tmux send-keys -t $Session "otaman start $Agent" Enter
+        & tmux send-keys -t $Session (Get-PaneCommand $Agent) Enter
         Write-Host "  [ok]   $Session - started"
         $script:Started++
     } else {
