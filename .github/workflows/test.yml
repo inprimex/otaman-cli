@@ -116,3 +116,23 @@ jobs:
         if: runner.os != 'Windows'
         working-directory: workspace/otaman-cli
         run: bash ../otaman-core/scripts/audit-maestro-refs.sh src/
+
+  # Branch-protection anchor (fleet ci-ok standard, spec-agent
+  # 20260818T202435; shape mirrors otaman-plugin's reference). The OS
+  # matrix legs are brittle to require individually; require `ci-ok`
+  # instead. `if: always()` + the explicit result gate means a failed or
+  # skipped dependency makes ci-ok FAIL (not skip) — a skipped required
+  # check would otherwise let a broken PR through.
+  ci-ok:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Verify required jobs passed
+        run: |
+          echo "lint=${{ needs.lint.result }} test=${{ needs.test.result }}"
+          if [ "${{ needs.lint.result }}" != "success" ] || [ "${{ needs.test.result }}" != "success" ]; then
+            echo "::error::A required job did not succeed."
+            exit 1
+          fi
+          echo "All required jobs passed."
