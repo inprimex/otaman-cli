@@ -116,11 +116,20 @@ def cmd_check(args: list[str]) -> int:
                     subject = line.strip().replace("## Subject:", "").strip()
                     break
 
+            # task-sequencing-contract 1.2 — advisory waiting-state for
+            # sequenced assignments with unsatisfied depends-on.
+            seq_waiting = None
+            if fm.get("type") == "task-assignment" and fm.get("depends-on"):
+                from otaman_cli.sequencing import waiting_annotation
+
+                seq_waiting = waiting_annotation(fm, body_start)
+
             messages.append(
                 {
                     "id": fm.get("id", "?"),
                     "from": fm.get("from", "?"),
                     "to": str(fm.get("to", "")),
+                    "seq_waiting": seq_waiting,
                     "priority": fm.get("priority", "normal"),
                     "type": fm.get("type", "?"),
                     "status": status,
@@ -191,9 +200,12 @@ def cmd_check(args: list[str]) -> int:
             deadline_label = ""
             if _deadline_imminent(m.get("response_deadline")):
                 deadline_label = f" {C.RED}[DEADLINE {m['response_deadline']}]{C.RESET}"
+            waiting_label = ""
+            if m.get("seq_waiting"):
+                waiting_label = f" {C.YELLOW}[{m['seq_waiting']}]{C.RESET}"
             UI.bullet(
                 f"{m['id']} from {UI.agent(m['from'])} "
-                f"[{UI.priority(m['priority'])}]{broadcast_label}{deadline_label}"
+                f"[{UI.priority(m['priority'])}]{broadcast_label}{deadline_label}{waiting_label}"
             )
             print(f"    {m['subject']}")
             UI.muted(f"{m['type']} | {m['timestamp']} | {m['stem']}")

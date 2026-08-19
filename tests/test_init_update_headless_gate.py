@@ -104,13 +104,37 @@ def test_update_dry_run_writes_nothing(tmp_path: Path):
     assert not (repo / "CLAUDE.local.md").exists()
 
 
-def test_update_survives_generator_failure_on_file_shape_meta(tmp_path: Path):
-    """A meta with a FILE-shape .otaman marker makes the plugin generator's
-    create_directories collide (mkdir over a file — plugin-agent's to fix).
-    --update must warn and still complete its own patches, not crash."""
+def test_file_shape_meta_now_succeeds(tmp_path: Path):
+    """Regression lock for plugin b61a59c: a FILE-shape meta .otaman marker
+    used to crash the generator's create_directories (my bug report
+    20260818T210201); with their fix, --update completes and the repo's
+    CLAUDE.local.md is written even on file-shape metas."""
     meta, repo = _workspace(tmp_path)
     (meta / ".otaman").write_text("agent: human\n", encoding="utf-8")  # file-shape
     r = _run_update(cwd=repo)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "did not complete" in r.stdout or "crashed" in r.stdout
     assert "Traceback" not in r.stderr
+    assert (repo / "CLAUDE.local.md").is_file() or "did not complete" in r.stdout
+
+
+def test_generator_failure_is_nonfatal_warned(tmp_path: Path, monkeypatch):
+    """--update's generator step is non-fatal by design: a crash warns
+    loudly and preserves the marker/launch patches (deterministic
+    in-process injection — the real-world trigger was fixed by plugin)."""
+    meta, repo = _workspace(tmp_path)
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("OTAMAN_ROOT", raising=False)
+
+    import otaman_cli.commands.init as init_mod
+
+    real_run_script = init_mod.run_script
+
+    def _boom(name, *args, **kwargs):
+        if name == "generate-agent-config.py":
+            raise RuntimeError("injected generator failure")
+        return real_run_script(name, *args, **kwargs)
+
+    monkeypatch.setattr(init_mod, "run_script", _boom)
+    rc = init_mod._cmd_init_update()
+    assert rc == 0  # patches applied, generator failure warned not fatal
