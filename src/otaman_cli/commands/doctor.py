@@ -288,6 +288,7 @@ def cmd_doctor(args: list[str]) -> int:
         "maestro_plugin": "Otaman Setup",
         "secrets_leaks": "Secrets Hygiene",
         "git_host": "Git Host PAT",
+        "edition": "Edition (CE/EE identity)",
     }
 
     for check in checks:

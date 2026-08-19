@@ -81,7 +81,13 @@ def call_watchdog(
     path = endpoint_path or DEFAULT_RUNNER_ENDPOINT
     ep = load_runner_endpoint(path)
     if ep is None:
-        return 0, {"error": f"runner endpoint file missing or malformed: {path}"}
+        return 0, {
+            "error": f"runner endpoint file missing or malformed: {path}",
+            # ce-ee-release-channels 3.2 — lets the print path swap the raw
+            # error for the CE explanation (a missing endpoint is the
+            # EXPECTED state on CE; an unreachable runner is not).
+            "endpoint_missing": True,
+        }
     host, port, token, scheme = ep
 
     # F032 Part B — same bearer-token-over-plaintext-HTTP guard as
@@ -205,7 +211,22 @@ def _print_payload_or_error(action: str, status: int, payload: dict, *, json_out
     if status == 0:
         # Endpoint file missing or runner unreachable
         if not json_out:
-            print(f"ERROR: {payload.get('error', 'unknown error')}")
+            # ce-ee-release-channels 3.2 — on a CE install a missing
+            # runner endpoint is the expected state: explain it with the
+            # hosted-tier pointer instead of erroring raw. Edition file
+            # is identity-only; unknown edition keeps the raw error.
+            from otaman_cli.edition import absent_runner_notice
+
+            notice = (
+                absent_runner_notice(f"otaman watchdog {action}")
+                if payload.get("endpoint_missing")
+                else None
+            )
+            if notice:
+                for line in notice:
+                    print(line)
+            else:
+                print(f"ERROR: {payload.get('error', 'unknown error')}")
         return 1
     if not json_out:
         err = payload.get("error", f"HTTP {status}")
