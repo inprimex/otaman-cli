@@ -84,6 +84,15 @@ def cmd_send(args: list[str]) -> int:
         metavar="AGENT",
         help="add a CC recipient; repeat for multiple (bus-cc-routing task 2.1)",
     )
+    # task-sequencing-contract (JTBD-67/D6) — sequencing frontmatter for
+    # multi-step work items; task-assignment only, travels with the body's
+    # coordination sections (validated below).
+    parser.add_argument("--sequence-id", dest="sequence_id", default=None)
+    parser.add_argument("--step", dest="seq_step", default=None, metavar="N/M")
+    parser.add_argument(
+        "--depends-on", dest="depends_on", action="append", default=None, metavar="STEP-OR-ID"
+    )
+    parser.add_argument("--stop-at", dest="stop_at", default=None)
     try:
         ns = parser.parse_args(args)
     except SystemExit:
@@ -136,6 +145,33 @@ def cmd_send(args: list[str]) -> int:
             "`--type outcome-proposal` so strategic agents (CPO, cofounder) "
             "are auto-CC'd via routing rules."
         )
+
+    # task-sequencing-contract — validate the sequencing half before any
+    # resolution work. Fields are a task-assignment contract; sections and
+    # frontmatter are refused apart (Roman's review).
+    from otaman_cli.sequencing import validate_sequencing
+
+    seq_fields = {
+        "sequence-id": ns.sequence_id,
+        "step": ns.seq_step,
+        "depends-on": ns.depends_on,
+        "stop-at": ns.stop_at,
+    }
+    seq_supplied = any(v not in (None, "", []) for v in seq_fields.values())
+    if seq_supplied and ns.msg_type != "task-assignment":
+        UI.error(
+            "Sequencing frontmatter (--sequence-id/--step/--depends-on/--stop-at) "
+            "is a task-assignment contract — not valid with --type "
+            f"{ns.msg_type!r}."
+        )
+        return 2
+    if ns.msg_type == "task-assignment":
+        seq_errors = validate_sequencing(seq_fields, ns.body or "")
+        if seq_errors:
+            UI.error("Sequencing contract violation(s):")
+            for e in seq_errors:
+                UI.muted(f"  - {e}")
+            return 2
 
     root = find_project_root()
     if not root:
@@ -267,6 +303,9 @@ def cmd_send(args: list[str]) -> int:
         fields = envelope_uri_fields(ctx, sender_agent=agent, to_uri=target_uri)
         uri_lines = "".join(f"{k}: {v}\n" for k, v in fields.items())
 
+    from otaman_cli.sequencing import render_frontmatter_lines
+
+    seq_lines = render_frontmatter_lines(seq_fields) if seq_supplied else ""
     cc_line = f"cc: [{', '.join(effective_cc)}]\n" if effective_cc else ""
     content = (
         f"---\n"
@@ -275,6 +314,7 @@ def cmd_send(args: list[str]) -> int:
         f"to: {to_agent}\n"
         f"{cc_line}"
         f"{uri_lines}"
+        f"{seq_lines}"
         f"priority: {ns.priority}\n"
         f"type: {ns.msg_type}\n"
         f"timestamp: {ts_iso}\n"
@@ -403,8 +443,30 @@ def cmd_read(args: list[str]) -> int:
                 UI.muted(f"  Searched: {active_dir.relative_to(root)} + archive/*/")
                 return 1
 
+    # task-sequencing-contract 1.2 — surface stop-at prominently BEFORE the
+    # content: the stop state is the single most action-relevant line of a
+    # sequenced assignment (stop-at is honored over initiative).
+    content = msg_file.read_text(encoding="utf-8")
+    from otaman_cli.sequencing import waiting_annotation as _seq_waiting
+
+    fm_match = re.match(r"^---\n(.+?)\n---", content, re.DOTALL)
+    if fm_match:
+        try:
+            import yaml as _yaml
+
+            fm = _yaml.safe_load(fm_match.group(1))
+        except Exception:
+            fm = None
+        if isinstance(fm, dict) and fm.get("stop-at"):
+            UI.header("STOP-AT")
+            UI.warn(str(fm["stop-at"]))
+            waiting = _seq_waiting(fm, content[fm_match.end() :])
+            if waiting:
+                UI.muted(f"  ({waiting})")
+            print()
+
     # Print the full message content as-is (frontmatter + body)
-    print(msg_file.read_text(encoding="utf-8"))
+    print(content)
     return 0
 
 
