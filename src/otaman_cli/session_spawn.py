@@ -253,11 +253,22 @@ def main(argv=None) -> int:
     # Find runner
     ep = load_runner_endpoint(args.runner_endpoint)
     if ep is None:
-        print(
-            f"ERROR: runner endpoint file missing or malformed: {args.runner_endpoint}. "
-            f"Is otaman-runner running?",
-            file=sys.stderr,
-        )
+        # ce-ee-release-channels 3.2 — on a CE install there is no local
+        # runner by design: explain the CE state with the hosted-tier
+        # pointer instead of erroring raw. Unknown edition keeps the raw
+        # error (edition.yaml is identity-only; probes decide behavior).
+        from otaman_cli.edition import absent_runner_notice
+
+        notice = absent_runner_notice("otaman spawn")
+        if notice:
+            for line in notice:
+                print(line, file=sys.stderr)
+        else:
+            print(
+                f"ERROR: runner endpoint file missing or malformed: {args.runner_endpoint}. "
+                f"Is otaman-runner running?",
+                file=sys.stderr,
+            )
         return 1
     host, port, runner_token, scheme = ep
 

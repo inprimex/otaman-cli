@@ -1302,6 +1302,40 @@ def check_launch_commands_resume(repos: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def check_edition_consistency() -> dict[str, Any]:
+    """ce-ee-release-channels 3.2 — probe-vs-file edition diagnostic.
+
+    Per design Q3a this is a DIAGNOSTIC, never enforcement: edition.yaml
+    identifies the install (ce|ee), the import probe decides capability.
+    A mismatch is a one-line warn so a human notices; nothing is gated.
+    """
+    from otaman_cli.edition import (
+        edition_mismatch_diagnostic,
+        get_edition,
+        runner_package_present,
+    )
+
+    result: dict[str, Any] = {
+        "check": "edition",
+        "status": "ok",
+        "details": {
+            "edition": get_edition(),
+            "runner_package": "present" if runner_package_present() else "absent",
+        },
+    }
+    diagnostic = edition_mismatch_diagnostic()
+    if diagnostic:
+        result["status"] = "warn"
+        result["issues"] = [
+            {
+                "issue": diagnostic,
+                "fix": "No action required — edition.yaml is identity, not enforcement.",
+                "severity": "low",
+            }
+        ]
+    return result
+
+
 def check_human_roster(config: dict[str, Any]) -> dict[str, Any]:
     """human-roster task 5.3 — validate the human-roster block.
 
@@ -1447,6 +1481,7 @@ def run_doctor(project_root: Path) -> dict[str, Any]:
         check_launch_commands_resume(repos),
         check_plugin_doctor(project_root),
         check_human_roster(config),
+        check_edition_consistency(),
     ]
 
     passed = sum(1 for c in checks if c["status"] == "ok")
