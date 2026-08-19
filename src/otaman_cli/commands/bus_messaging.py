@@ -658,13 +658,23 @@ def _file_is_for_agent(stem: str, fm: dict, agent: str) -> bool:
       cc copy (current):  <ts>-<from>-to-<cc-recipient>-<slug>   + x-cc: true
       cc copy (legacy):   <ts>-<from>-to-<orig-to>-cc-<cc-recipient>-<slug>
       broadcast:          to: all in frontmatter
+
+    A CC copy whose stem carries NO designation at all (no ``-to-``/``-cc-``
+    segment — bus-server copies named ``<ts>-<slug>`` per bus-cc-routing
+    task 2.2) falls back to frontmatter ``cc:`` membership: there are no
+    sibling copies to over-match, so the frontmatter is authoritative.
     """
     if f"-cc-{agent}-" in stem or stem.endswith(f"-cc-{agent}"):
         return True  # legacy cc naming — my copy
     if fm.get("x-cc"):
         if "-cc-" in stem:
             return False  # legacy cc naming — another recipient's copy
-        return f"-to-{agent}-" in stem or stem.endswith(f"-to-{agent}")
+        if f"-to-{agent}-" in stem or stem.endswith(f"-to-{agent}"):
+            return True
+        if "-to-" in stem:
+            return False  # designated for another recipient
+        cc_list = fm.get("cc") or []
+        return isinstance(cc_list, list) and agent in cc_list
     if f"-to-{agent}-" in stem or stem.endswith(f"-to-{agent}"):
         return True
     # Comma-tolerant frontmatter fallback: legacy notify-change files carry

@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
+from otaman_cli.commands.bus_messaging import _file_is_for_agent
 from otaman_cli.commands.status_cluster import cmd_fleet_status
 from otaman_cli.identity import find_project_root, resolve_agent_identity
 from otaman_cli.main import UI, C, _get_agent_ack_status, _resolve_bus_paths
@@ -91,20 +92,16 @@ def cmd_check(args: list[str]) -> int:
                 unparseable.append(f.name)
                 continue
 
-            to = fm.get("to", "")
-            # notify-change-fanout: legacy multi-recipient messages carry a
-            # comma-joined `to:` list ("cli-agent, core-agent, ...") which an
-            # exact-equality check never matches — every listed recipient was
-            # blind to the message. Split on commas so those surface; new
-            # notify-change writes per-recipient copies anyway.
-            to_list = [t.strip() for t in str(to).split(",") if t.strip()]
-            # bus-cc-routing task 2.2 — also pick up CC copies addressed to
-            # someone else but with this agent in the `cc:` list (and the
-            # `x-cc: true` marker indicating the bus_server wrote this copy
-            # for a CC recipient).
-            cc_field = fm.get("cc") or []
-            is_cc_copy = bool(fm.get("x-cc")) and isinstance(cc_field, list) and (agent in cc_field)
-            if agent not in to_list and "all" not in to_list and not is_cc_copy:
+            # Per-file recipient designation lives in the FILENAME, not the
+            # frontmatter: CC fan-out copies all carry the full `cc:` list,
+            # so an `agent in cc` test surfaces every OTHER recipient's copy
+            # too — permanently-pending noise this agent can never ack
+            # (`otaman ack` correctly refuses non-own copies). Use the same
+            # predicate ack uses so check and ack agree on ownership; it
+            # keeps the comma-tolerant `to:` fallback for legacy
+            # multi-recipient files (notify-change-fanout) and `to: all`
+            # broadcasts.
+            if not _file_is_for_agent(f.stem, fm, agent):
                 continue
 
             # Per-agent status from ack files

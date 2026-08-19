@@ -284,3 +284,86 @@ def test_check_no_warning_when_all_parseable(project: Path):
     )
     out = _run(project, "cli-agent", "check").stdout
     assert "could not be parsed" not in out
+
+
+# ---------------------------------------------------------------------------
+# check/ack ownership parity — CC fan-out copies (2026-08-19 live-bus find:
+# check surfaced every recipient's copy of a fanned-out CC message because
+# each copy carries the full cc: list; the extra copies were permanently
+# pending — ack correctly refuses them. check now uses _file_is_for_agent.)
+
+
+def test_check_shows_only_own_cc_copy_current_naming(project: Path):
+    fm = {
+        **_BASE_FM,
+        "id": "20260818T143518-spec-age",
+        "from": "spec-agent",
+        "to": "plugin-agent",
+        "cc": "[core-agent, cli-agent]",
+    }
+    primary = "20260818T143518-spec-agent-to-plugin-agent-amendment"
+    theirs = "20260818T143518-spec-agent-to-core-agent-amendment"
+    mine = "20260818T143518-spec-agent-to-cli-agent-amendment"
+    _plant(project, primary, fm)
+    _plant(project, theirs, {**fm, "x-cc": "true"})
+    _plant(project, mine, {**fm, "x-cc": "true"})
+
+    out = _run(project, "cli-agent", "check").stdout
+    assert mine in out, "own CC copy must be visible"
+    assert theirs not in out, "another recipient's CC copy must not surface"
+    assert primary not in out, "the primary recipient's copy must not surface"
+
+
+def test_check_shows_only_own_cc_copy_legacy_naming(project: Path):
+    fm = {
+        **_BASE_FM,
+        "id": "20260818T143518-spec-age",
+        "from": "spec-agent",
+        "to": "plugin-agent",
+        "cc": "[core-agent, cli-agent]",
+        "x-cc": "true",
+    }
+    theirs = "20260818T143518-spec-agent-to-plugin-agent-cc-core-agent-amendment"
+    mine = "20260818T143518-spec-agent-to-plugin-agent-cc-cli-agent-amendment"
+    _plant(project, theirs, fm)
+    _plant(project, mine, fm)
+
+    out = _run(project, "cli-agent", "check").stdout
+    assert mine in out
+    assert theirs not in out
+
+
+def test_check_ack_agree_on_cc_copy_ownership(project: Path):
+    """Everything check surfaces as pending must be ackable by the same
+    agent — the incident was 23 permanently-pending copies ack refused."""
+    fm = {
+        **_BASE_FM,
+        "id": "20260818T143518-spec-age",
+        "from": "spec-agent",
+        "to": "plugin-agent",
+        "cc": "[core-agent, cli-agent]",
+        "x-cc": "true",
+    }
+    mine = "20260818T143518-spec-agent-to-cli-agent-amendment"
+    _plant(project, "20260818T143518-spec-agent-to-core-agent-amendment", fm)
+    _plant(project, mine, fm)
+
+    out = _run(project, "cli-agent", "check").stdout
+    assert mine in out
+    res = _run(project, "cli-agent", "ack", mine)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert _acks(project) == [f"{mine}.cli-agent.ack"]
+
+
+def test_undesignated_cc_copy_with_me_in_cc_is_mine():
+    """bus-server copies named <ts>-<slug> (no -to-/-cc- segment) fall back
+    to frontmatter cc: membership."""
+    assert _file_is_for_agent(
+        "20260608T200000-cc1", {"to": "human", "cc": ["cli-agent"], "x-cc": True}, "cli-agent"
+    )
+
+
+def test_undesignated_cc_copy_without_me_in_cc_is_not_mine():
+    assert not _file_is_for_agent(
+        "20260608T200000-cc1", {"to": "human", "cc": ["core-agent"], "x-cc": True}, "cli-agent"
+    )
