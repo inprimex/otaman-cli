@@ -165,14 +165,21 @@ def cmd_approve(args: list[str]) -> int:
 
     # F012 (security GAP finding, 2026-07-04): approve/reject produce a
     # PRIVILEGED message (spec-change-approved/-rejected, asserts
-    # `from: human`) — gate on a real interactive confirmation first.
+    # `from: human`) — gate on a real human confirmation first.
     # Deliberately no --yes bypass: a Bash-tool-driven agent session has no
     # real TTY and must not be able to satisfy this on its own.
-    from otaman_cli.safety import confirm_human_decision
+    #
+    # hitl-confirmation-adapters 1.1: `approve` is the first HUMAN_DECISION
+    # command, so it confirms through the adapter framework rather than a
+    # direct TTY call. Unconfigured installs select the always-available
+    # TTY adapter, which delegates verbatim to safety.confirm_human_decision
+    # — behavior is byte-identical to before, including the no-TTY refusal.
+    from otaman_cli.hitl.adapters import confirm_human_decision
 
-    if not confirm_human_decision(
+    result = confirm_human_decision(
         f"About to {action} — {target['subject']}\n(proposal: {target['stem']})",
-    ):
+    )
+    if not result.approved:
         UI.error(f"{action.capitalize()} cancelled — not confirmed.")
         return 1
 

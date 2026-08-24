@@ -25,6 +25,36 @@ operations.
 from __future__ import annotations
 
 import sys
+from enum import Enum
+
+
+class SafetyTier(str, Enum):
+    """Command safety classification, weakest → strongest.
+
+    hitl-confirmation-adapters 1.1 adds HUMAN_DECISION as a tier above
+    DESTRUCTIVE_CROSS_DIRECTORY: it is the single point where human
+    authority enters the spec workflow (separation of duties — an agent
+    cannot approve its own proposal), and it routes through the
+    confirmation-adapter framework rather than reinventing per-command
+    guards. `approve` is the first member; future sign-off commands
+    inherit the tier instead of hand-rolling a TTY check.
+    """
+
+    DESTRUCTIVE_CROSS_DIRECTORY = "destructive-cross-directory"
+    HUMAN_DECISION = "human-decision"
+
+
+# Commands whose execution asserts a live human decision. Membership here
+# (not an ad-hoc `confirm_human_decision` call) is what routes a command
+# through the adapter framework.
+HUMAN_DECISION_COMMANDS: frozenset[str] = frozenset({"approve"})
+
+
+def classify_command(name: str) -> SafetyTier | None:
+    """Return the safety tier for *name*, or None if unclassified."""
+    if name in HUMAN_DECISION_COMMANDS:
+        return SafetyTier.HUMAN_DECISION
+    return None
 
 
 def confirm_destructive_operation(
