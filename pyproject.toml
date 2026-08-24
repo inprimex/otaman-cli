@@ -20,6 +20,10 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=7"]
+# Optional terminal-QR rendering for `otaman hitl enroll totp`. TOTP itself
+# is dep-free (stdlib hmac/hashlib); segno is only needed to draw a scannable
+# QR — the otpauth URI is always printed regardless, so QR is never a base dep.
+totp-qr = ["segno>=1.5"]
 
 # Entry point: `otaman` script — created by pip/uv on install. After
 # `pip install otaman-cli` the user gets `otaman` on PATH directly;
