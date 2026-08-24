@@ -5,4 +5,7 @@ from legacy maestro-plugin into this package.  # legacy: plugin repo name Stage 
 skeleton; subsequent sub-stages move per-subcommand modules.
 """
 
-__version__ = "0.1.0"
+# Keep in sync with [project].version in pyproject.toml. The runtime
+# authoritative value is importlib.metadata.version("otaman-cli") (see
+# main._resolve_version); this constant is a fallback/reference only.
+__version__ = "0.4.0"
