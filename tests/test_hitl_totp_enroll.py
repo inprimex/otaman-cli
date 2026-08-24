@@ -14,6 +14,7 @@ the tenant hitl.yaml and secrets.env at tmp, so nothing here touches a real
 
 from __future__ import annotations
 
+import sys
 import time
 from unittest import mock
 
@@ -26,6 +27,11 @@ from otaman_cli.hitl.adapters import TOTPAdapter, TTYAdapter, select_adapter
 from otaman_cli.hitl.totp import totp_now
 
 EMAIL = "roman@inprimex.com"
+
+_POSIX_ONLY = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX-only: 0600 chmod semantics don't apply on Windows",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -130,6 +136,7 @@ def test_enroll_writes_seed_to_dotenv_and_ref_to_hitl(capsys):
     assert seed and seed not in hitl_text
 
 
+@_POSIX_ONLY
 def test_enroll_dotenv_is_0600():
     from otaman_core._secrets import tenant_secrets_path
 
