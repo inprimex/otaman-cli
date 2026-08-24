@@ -37,7 +37,12 @@ def _make_ruamel() -> Any:
     yaml = _YAML()
     yaml.default_flow_style = False
     yaml.preserve_quotes = True
-    yaml.width = 120
+    # width=120 folded long launch 'cmd || cmd' scalars on every --update
+    # re-dump, re-dirtying the owner-managed otaman-meta checkout with no
+    # semantic change (deploy-agent bug report 20260824T125215). Mirror the
+    # ce-bootstrap platform.yaml patcher (width=4096, non-drifting): keep
+    # long command scalars on one line so round-trips are byte-stable.
+    yaml.width = 4096
     return yaml
 
 

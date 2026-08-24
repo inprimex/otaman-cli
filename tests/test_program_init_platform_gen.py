@@ -156,3 +156,51 @@ class TestUpdatePlatformYaml:
         content_after_second = platform.read_text()
         # Core fields should be unchanged
         assert "acme-platform" in content_after_second
+
+
+def test_update_does_not_reflow_long_command_scalar(tmp_path):
+    """`otaman init --update` must not fold long 'cmd || cmd' launch scalars.
+
+    Regression for deploy-agent bug 20260824T125215: width=120 re-wrapped
+    long command scalars on every --update re-dump, re-dirtying the
+    owner-managed otaman-meta checkout with no semantic change. A key
+    present only in the existing file survives the merge untouched, so its
+    long scalar must round-trip byte-identical (single line, no fold).
+    """
+    long_cmd = (
+        "cd ../otaman-cli && claude --dangerously-skip-permissions "
+        "|| echo otaman-cli-pane-failed-to-launch-open-it-manually "
+        "|| tmux kill-pane || sleep 1"
+    )
+    assert len(long_cmd) > 120, "test scalar must exceed the old fold width"
+
+    existing = f"project: testproj\nversion: '1.0'\nlaunch_hint: {long_cmd}\nrepos: []\n"
+    p = tmp_path / "platform.yaml"
+    p.write_text(existing, encoding="utf-8")
+
+    # Minimal answers that do not touch launch_hint (a key _build_platform_yaml
+    # never emits, so the merge leaves it intact).
+    update_platform_yaml({"program_name": "testproj"}, p)
+
+    text = p.read_text(encoding="utf-8")
+    # If the scalar were folded, its single-line form would not be a substring.
+    assert long_cmd in text, "long command scalar was reflowed/folded on --update"
+    # And the value stays on exactly one physical line.
+    hint_lines = [ln for ln in text.splitlines() if ln.startswith("launch_hint:")]
+    assert len(hint_lines) == 1
+    assert hint_lines[0].endswith("sleep 1")
+
+
+def test_update_is_byte_stable_on_noop_rerun(tmp_path):
+    """A second --update with the same answers must not change the file."""
+    long_cmd = "run --a || run --b || run --c || " + "x" * 130
+    existing = f"project: testproj\nversion: '1.0'\nlaunch_hint: {long_cmd}\nrepos: []\n"
+    p = tmp_path / "platform.yaml"
+    p.write_text(existing, encoding="utf-8")
+
+    update_platform_yaml({"program_name": "testproj"}, p)
+    first = p.read_text(encoding="utf-8")
+    update_platform_yaml({"program_name": "testproj"}, p)
+    second = p.read_text(encoding="utf-8")
+
+    assert first == second, "repeated --update drifted the file (non-idempotent write)"
