@@ -36,6 +36,13 @@ try:
 except ImportError:
     yaml = None
 
+# openspec-cli-adoption 2.2 — pin the OpenSpec CLI version everywhere it is
+# suggested. `@latest` would silently drift the whole fleet onto an
+# unvetted release; the adopted, drift-report-validated version is 1.10.0.
+# Bump this single constant on a deliberate cutover, never per-hint.
+OPENSPEC_PINNED_VERSION = "1.10.0"
+OPENSPEC_INSTALL_HINT = f"npm install -g @fission-ai/openspec@{OPENSPEC_PINNED_VERSION}"
+
 
 def _run(cmd: list[str], timeout: int = 10) -> tuple[int, str, str]:
     """Run a command and return (returncode, stdout, stderr).
@@ -631,7 +638,7 @@ def check_openspec(config: dict[str, Any], project_root: Path) -> dict[str, Any]
                 result["issues"] = [
                     {
                         "issue": "OpenSpec available via npx but not as global command",
-                        "fix": "npm install -g @fission-ai/openspec@latest",
+                        "fix": OPENSPEC_INSTALL_HINT,
                         "severity": "low",
                     }
                 ]
@@ -642,7 +649,7 @@ def check_openspec(config: dict[str, Any], project_root: Path) -> dict[str, Any]
             {
                 "issue": "OpenSpec CLI not installed — "
                 "specs.format is 'openspec' but the CLI is missing",
-                "fix": "npm install -g @fission-ai/openspec@latest",
+                "fix": OPENSPEC_INSTALL_HINT,
                 "severity": "high",
             }
         ]
