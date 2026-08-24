@@ -162,11 +162,52 @@ class TOTPAdapter:
         return ConfirmationResult(approved=False, adapter=self.name)
 
 
-# Registry. chat/messenger append via register_adapter() as they land.
-# TTY is always present and is the default fallback; TOTP is registered by
-# default so an enrolled install auto-selects it (it reports unconfigured —
-# and stays out of the way — until a human enrolls).
-_REGISTRY: list[ConfirmationAdapter] = [TTYAdapter(), TOTPAdapter()]
+class TelegramAdapter:
+    """Confirm the HUMAN over Telegram via the bridge (strength 20).
+
+    hitl-confirmation-adapters 2.1. The confirmation MECHANISM lives in
+    otaman-bridge (Telegram transport, timeout, explicit deny — bridge PR
+    #60); this class is the thin cli-side wrapper that owns registration and
+    builds the cli-native `ConfirmationResult`. Dependency direction:
+    otaman-cli depends on otaman-bridge, so the imports are LAZY and GUARDED
+    — a bridge without the telegram extra raises ImportError and the adapter
+    reports unconfigured (transparent no-op), never inverting the dependency.
+
+    Enrollment lives in core's canonical `hitl.yaml`
+    `enrollment[<email>].messenger.{adapter: "telegram", address_ref}` and is
+    read entirely bridge-side (`is_enrolled`) — structurally distinct from
+    TOTP's `totp_secret_ref`, so one human can hold both. Strength 20 < TOTP's
+    30, so when both are enrolled TOTP stays required (no silent downgrade).
+
+    Fail-closed like TOTP: allow → approved+human; deny/timeout/unreachable/
+    unenrolled → not approved. An agent Bash-tool session with no Telegram
+    device cannot satisfy it.
+    """
+
+    name = "telegram"
+    strength = STRENGTH_MESSENGER
+
+    def is_configured(self) -> bool:
+        try:
+            from otaman_bridge.hitl_telegram import is_enrolled
+        except ImportError:
+            return False  # telegram extra / bridge absent → transparent no-op
+        return is_enrolled()
+
+    def confirm(self, description: str, *, expected_phrase: str = "CONFIRM") -> ConfirmationResult:
+        from otaman_bridge.hitl_telegram import confirm_via_telegram
+
+        outcome = confirm_via_telegram(description)
+        return ConfirmationResult(
+            approved=outcome.approved, adapter=self.name, human_id=outcome.human_id
+        )
+
+
+# Registry. chat appends via register_adapter() as it lands. TTY is always
+# present and is the default fallback; TOTP (30) and Telegram (20) are
+# registered by default so an enrolled install auto-selects the strongest.
+# Each reports unconfigured — and stays out of the way — until enrolled.
+_REGISTRY: list[ConfirmationAdapter] = [TTYAdapter(), TOTPAdapter(), TelegramAdapter()]
 
 
 def register_adapter(adapter: ConfirmationAdapter) -> None:
@@ -220,6 +261,7 @@ __all__ = [
     "ConfirmationResult",
     "TOTPAdapter",
     "TTYAdapter",
+    "TelegramAdapter",
     "confirm_human_decision",
     "register_adapter",
     "registered_adapters",
