@@ -261,11 +261,114 @@ def cmd_take(args: dict[str, Any]) -> int:
     return 0
 
 
+def _resolve_enroll_email(explicit: str | None) -> str | None:
+    """Pick the human to enroll: explicit ``--email`` wins; else the sole
+    roster human. Ambiguous/empty roster with no ``--email`` → None (caller
+    prints guidance). Enrollment is keyed by email — the human-roster
+    canonical key — so this never guesses across multiple humans.
+    """
+    if explicit:
+        return explicit.strip()
+    root = find_project_root()
+    if root is None:
+        return None
+    from otaman_core.human_roster import load_human_roster
+
+    roster = load_human_roster(root / "platform.yaml")
+    emails = [h.email for h in roster if getattr(h, "email", None)]
+    return emails[0] if len(emails) == 1 else None
+
+
+def cmd_enroll(args: dict[str, Any]) -> int:
+    """`otaman hitl enroll totp [--email <addr>]` — provision a human's TOTP.
+
+    Generates a fresh RFC 6238 seed, stores it as a REFERENCE: the base32
+    value is written 0600 to the tenant dotenv via core's
+    ``upsert_dotenv_secret`` (the sole dotenv writer), and only
+    ``enrollment[<email>].totp_secret_ref = {type:dotenv, name, scope:tenant}``
+    lands in ``hitl.yaml``. Once enrolled, the TOTP adapter becomes the
+    REQUIRED confirmation for ``otaman approve`` and other HUMAN-DECISION
+    commands. The otpauth URI (which by construction contains the seed) is
+    printed ONCE here — the enrollment site — for the human to load into
+    their authenticator; it is never logged to the bus or agent context.
+    """
+    argv = list(args.get("_argv", []))
+    method = None
+    email_flag: str | None = None
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--email" and i + 1 < len(argv):
+            email_flag = argv[i + 1]
+            i += 2
+        elif not tok.startswith("-") and method is None:
+            method = tok
+            i += 1
+        else:
+            i += 1
+
+    if method != "totp":
+        return _bail("Usage: otaman hitl enroll totp [--email <addr>]")
+
+    email = _resolve_enroll_email(email_flag)
+    if not email:
+        return _bail(
+            "Could not determine which human to enroll. Pass --email <addr> "
+            "(the roster is empty, absent, or has more than one human)."
+        )
+
+    from otaman_core._secrets import tenant_secrets_path, upsert_dotenv_secret
+
+    from otaman_cli.hitl.config import set_totp_enrollment, totp_key_for
+    from otaman_cli.hitl.totp import generate_secret, otpauth_uri
+
+    seed = generate_secret()
+    key = totp_key_for(email)
+    upsert_dotenv_secret(tenant_secrets_path(), key, seed)
+    cfg_path = set_totp_enrollment(email, key)
+    uri = otpauth_uri(seed, account=email, issuer="Otaman")
+
+    UI.header("TOTP enrollment")
+    UI.ok(f"Enrolled {email}")
+    UI.kv("Secret ref", f"dotenv:{key} (scope: tenant)")
+    UI.kv("Config", str(cfg_path))
+    print()
+    UI.info("Add this account to your authenticator app. Scan the QR below, or")
+    UI.info("enter the otpauth URI manually. This is shown ONCE — it will not be")
+    UI.info("printed again (the secret is stored as a reference, never re-echoed).")
+    print()
+    _render_totp_qr(uri)
+    print(uri)
+    print()
+    UI.muted(
+        "From now on, otaman approve (and other human-decision commands) will "
+        "require a code from this authenticator — an agent session cannot satisfy it."
+    )
+    return 0
+
+
+def _render_totp_qr(uri: str) -> None:
+    """Print a terminal QR for *uri* if the optional ``segno`` extra is
+    installed; otherwise a one-line hint. QR support is never a base runtime
+    dependency (install via the ``totp-qr`` extra).
+    """
+    try:
+        import segno
+    except ImportError:
+        UI.muted("(install the 'totp-qr' extra for a scannable QR: pip install otaman[totp-qr])")
+        return
+    try:
+        segno.make(uri).terminal(compact=True)
+    except Exception:
+        UI.muted("(QR render failed; use the otpauth URI below)")
+
+
 # ---------------------------------------------------------------------------
 # Dispatch
 
 
 _ACTIONS = {
+    "enroll": cmd_enroll,
     "list": cmd_list,
     "next": cmd_next,
     "take": cmd_take,
