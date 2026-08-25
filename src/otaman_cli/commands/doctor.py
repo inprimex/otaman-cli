@@ -287,6 +287,7 @@ def cmd_doctor(args: list[str]) -> int:
         "tmux": "tmux (connection resilience)",
         "maestro_plugin": "Otaman Setup",
         "secrets_leaks": "Secrets Hygiene",
+        "connection_value_leaks": "Connection Value Leaks",
         "git_host": "Git Host PAT",
         "edition": "Edition (CE/EE identity)",
     }
