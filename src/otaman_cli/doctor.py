@@ -1111,6 +1111,107 @@ def check_secrets_leaks(project_root: Path) -> dict[str, Any]:
     return result
 
 
+def _render_connection_surfaces(project_root: Path, conns: list) -> dict[str, str]:
+    """Capture the exact stdout of every rendered connection surface.
+
+    Runs `connection list` and `connection show <name>` for each connection
+    and returns ``{surface_label: rendered_text}``. Used only by the no-leak
+    check below — it scans this text for resolved values.
+    """
+    import contextlib
+    import io
+
+    from otaman_cli.commands import connection as _conn
+
+    surfaces: dict[str, str] = {}
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        _conn._cmd_list(project_root, [])
+    surfaces["list"] = buf.getvalue()
+    for c in conns:
+        b = io.StringIO()
+        with contextlib.redirect_stdout(b):
+            _conn._cmd_show(project_root, [c.name])
+        surfaces[f"show:{c.name}"] = b.getvalue()
+    return surfaces
+
+
+def check_connection_value_leaks(project_root: Path) -> dict[str, Any]:
+    """agent-credential-access 3.2 — assert NO secret value leaks into a
+    rendered connection surface (values-never-exposed enforcement gate).
+
+    Resolves each connection's ``secret_ref`` to its actual value AT THE CALL
+    SITE (the value is held only to compare — never printed, even on
+    failure), renders `connection list` / `connection show`, and fails
+    CRITICAL if any resolved value appears in that output. The surfaces store
+    a ``secret_ref`` (the backend key NAME), so a passing run proves the
+    invariant holds; a failure names the surface + ref, never the value.
+    """
+    result: dict[str, Any] = {"check": "connection_value_leaks", "status": "ok", "details": {}}
+    issues: list[dict[str, Any]] = []
+
+    try:
+        from otaman_core._secrets import SecretRef
+        from otaman_core._secrets import resolve as _resolve_secret
+        from otaman_core.connections import resolve_for
+    except ImportError:
+        result["details"]["skipped"] = "otaman_core.connections unavailable"
+        return result
+
+    try:
+        conns = resolve_for(project_root)
+    except Exception as exc:  # noqa: BLE001 - malformed connections.yaml is a different check's job
+        result["details"]["skipped"] = f"could not resolve connections: {exc}"
+        return result
+
+    result["details"]["connections"] = len(conns)
+    if not conns:
+        return result
+
+    # Resolve backed refs to values (call-site; walk tenant then workspace).
+    values: dict[str, str] = {}
+    for c in conns:
+        if not c.secret_ref:
+            continue
+        val = _resolve_secret(
+            SecretRef(
+                [
+                    {"type": "dotenv", "name": c.secret_ref, "scope": "tenant"},
+                    {"type": "dotenv", "name": c.secret_ref},
+                ]
+            ),
+            maestro_root=project_root,
+        )
+        if val:
+            values[c.secret_ref] = val
+    result["details"]["resolvable_secrets"] = len(values)
+    if not values:
+        return result  # nothing resolvable → nothing that could leak
+
+    surfaces = _render_connection_surfaces(project_root, conns)
+    for surface, text in surfaces.items():
+        for ref, val in values.items():
+            if val and val in text:
+                issues.append(
+                    {
+                        "issue": (
+                            f"secret value for '{ref}' appeared in `connection {surface}` "
+                            "output — values-never-exposed violation"
+                        ),
+                        "fix": (
+                            "The surface must render secret_ref (the backend key name), "
+                            "never the resolved value. Resolution belongs at the call site only."
+                        ),
+                        "severity": "critical",
+                    }
+                )
+
+    if issues:
+        result["status"] = "fail"
+        result["issues"] = issues
+    return result
+
+
 def check_git_host(project_root: Path) -> dict[str, Any]:
     """Validate the `git_host:` PAT if configured; summarize detected remotes.
 
@@ -1482,6 +1583,7 @@ def run_doctor(project_root: Path) -> dict[str, Any]:
         check_tmux(),
         check_maestro_plugin(project_root),
         check_secrets_leaks(project_root),
+        check_connection_value_leaks(project_root),
         check_rogue_bus_roots(project_root),
         check_privileged_provenance(project_root),
         check_git_host(project_root),
