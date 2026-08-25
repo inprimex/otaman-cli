@@ -79,6 +79,7 @@ from otaman_cli.commands import (  # noqa: E402
     clone_launcher_setagent as _clone_launcher_setagent,  # noqa: F401
 )
 from otaman_cli.commands import complete as _complete  # noqa: E402,F401
+from otaman_cli.commands import connection as _connection  # noqa: E402,F401
 from otaman_cli.commands import doctor as _doctor  # noqa: E402,F401
 from otaman_cli.commands import emergency_halt as _emergency_halt  # noqa: E402,F401
 from otaman_cli.commands import git_host as _git_host  # noqa: E402,F401

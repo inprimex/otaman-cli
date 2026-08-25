@@ -609,6 +609,7 @@ def cmd_help() -> int:
   {C.GREEN}blocked{C.RESET} --list               List blocked tasks for the current agent
   {C.GREEN}blocked{C.RESET} --clear <slug>        Remove a blocked task entry (idempotent)
   {C.GREEN}hitl{C.RESET} <action> [...]           HITL stack: list pending review requests, next, take <id>
+  {C.GREEN}connection{C.RESET} <action> [...]     Connections: create, list, show, update, delete, check (values-free; secret_ref never a value)
   {C.GREEN}project{C.RESET} <action> [...]        Repo registry: assign / list / show / update / disable / enable / remove
   {C.GREEN}outcome{C.RESET} <action> [...]        Program outcome registry (JTBD); actions: add, list, show, history, promote, demote, retire, request-estimate, accept-cost, reject-cost
   {C.GREEN}solution{C.RESET} <action> [...]       Program solution registry; actions: add, list, show, history, propose, promote-to-complete, discard
