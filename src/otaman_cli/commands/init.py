@@ -184,6 +184,21 @@ def _detect_strategic_agents(doc: dict) -> list[str]:
     return out
 
 
+def _platform_has_project(path: Path) -> bool:
+    """True iff *path* is a PROGRAM platform.yaml (carries a `project` key).
+
+    Used to prefer a real program file in the cwd over find_project_root's
+    upward walk, which can reach a stray org-level platform.yaml (no project).
+    """
+    try:
+        import yaml as _yaml
+
+        data = _yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - unreadable/malformed → not a program file
+        return False
+    return isinstance(data, dict) and bool(data.get("project"))
+
+
 def _ensure_routing_rules(platform_yaml: Path) -> int:
     """bus-cc-routing task 2.5 — ensure `bus.routing_rules` defaults exist.
 
@@ -368,6 +383,19 @@ def _cmd_init_update(dry_run: bool = False) -> int:
     not a called mutation helper is the exact failure mode being fixed.
     """
     root = find_project_root()
+
+    # Resolution precedence fix (spec 20260826T223743): find_project_root's
+    # upward walk can resolve a shallower STRAY ORG-LEVEL platform.yaml even
+    # when the cwd IS a program root with its own valid platform.yaml. So a
+    # PROGRAM platform.yaml (one carrying `project`) in the cwd wins over the
+    # upward-walk result — the org-level file must be unreachable in normal
+    # resolution, not merely rejected once reached (#28). The .otaman marker
+    # chain from a repo dir (cwd has no platform.yaml) still governs that case.
+    cwd = Path.cwd()
+    cwd_pf = cwd / "platform.yaml"
+    if cwd_pf.is_file() and _platform_has_project(cwd_pf):
+        root = cwd
+
     if not root:
         UI.error("Not in an otaman project")
         return 1
