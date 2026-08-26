@@ -165,3 +165,35 @@ def test_org_level_platform_yaml_rejected(tmp_path: Path, monkeypatch, capsys):
     rc = init_mod._cmd_init_update()
     assert rc == 2  # refused before the generator can KeyError on it
     assert "no 'project' key" in capsys.readouterr().out
+
+
+def test_cwd_program_platform_yaml_wins_over_org_stray(tmp_path, monkeypatch):
+    """spec 20260826T223743: run from a program root whose cwd has a valid
+    platform.yaml; even when find_project_root's upward walk resolves a stray
+    ORG-LEVEL platform.yaml, the cwd's program file wins (resolution, not just
+    rejection)."""
+    org = tmp_path / "org"
+    org.mkdir()
+    (org / "platform.yaml").write_text(  # the stray: no project
+        "models:\n  default: sonnet\nbus:\n  transport: file\n", encoding="utf-8"
+    )
+    meta = org / "programs" / "prog" / "prog-meta"
+    (meta / ".agents").mkdir(parents=True)
+    (meta / "platform.yaml").write_text(
+        "project: prog\nversion: '1.0'\nrepos: []\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(meta)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("OTAMAN_ROOT", raising=False)
+
+    import otaman_cli.commands.init as init_mod
+
+    # Simulate the core resolver bug: the upward walk returns the org stray.
+    monkeypatch.setattr(init_mod, "find_project_root", lambda: org)
+    # Stub the generator so we exercise RESOLUTION, not the generator.
+    monkeypatch.setattr(
+        init_mod, "run_script", lambda name, *a, **k: type("R", (), {"returncode": 0})()
+    )
+    rc = init_mod._cmd_init_update()
+    # cwd's program platform.yaml (has project) won → NOT rejected as org-level.
+    assert rc == 0
