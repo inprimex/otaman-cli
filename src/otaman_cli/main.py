@@ -40,6 +40,7 @@ Usage:
     otaman pm <init|configure|status> [args]  PM tool sync (Easy8 / Redmine)
     otaman mcp-config --bridge-url URL  Emit Claude Code .mcp.json for the bridge
     otaman session spawn --agent A --repo R  Spawn a session under the logged-in user
+    otaman -i / --interactive          Open the interactive human console (TUI; needs the 'console' extra)
     otaman help                        Show this help
 
 Options:
@@ -725,6 +726,13 @@ def main() -> int:
     if args[0] in ("-v", "--version"):
         print(f"otaman {VERSION}")
         return 0
+
+    # interactive-human-console: `otaman -i` opens the TTY human console (a
+    # human seat with no LLM in the loop). Optional `console` extra (Textual).
+    if args[0] in ("-i", "--interactive"):
+        from otaman_cli.console.launch import run_console
+
+        return run_console(args[1:])
 
     command = args[0]
     rest = args[1:]
