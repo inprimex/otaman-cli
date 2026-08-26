@@ -23,11 +23,23 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=7"]
+# `test` pulls in [console] so CI (`uv sync --extra test`) exercises the
+# interactive console on every run — the house-rule requirement that the
+# pinned Textual version is tested everywhere.
+test = ["pytest>=7", "otaman-cli[console]"]
 # Optional terminal-QR rendering for `otaman hitl enroll totp`. TOTP itself
 # is dep-free (stdlib hmac/hashlib); segno is only needed to draw a scannable
 # QR — the otpauth URI is always printed regardless, so QR is never a base dep.
 totp-qr = ["segno>=1.5"]
+# Interactive human console (`otaman -i`, interactive-human-console). Textual
+# is EXACT-PINNED per the house rule (a TUI framework's rendering + key-binding
+# behavior is version-sensitive; a floating range would drift the UX and tests).
+# BUMP PROCEDURE: change the pin here only, run the full suite (the console
+# tests drive Textual's App.run_test() pilot), eyeball `otaman -i` manually,
+# then commit the bump as its own PR. Console is an EXTRA (not a base dep) so a
+# plain `pip install otaman-cli` stays light; `otaman -i` prints an install
+# hint when it is absent.
+console = ["textual==8.2.8"]
 
 # Entry point: `otaman` script — created by pip/uv on install. After
 # `pip install otaman-cli` the user gets `otaman` on PATH directly;
