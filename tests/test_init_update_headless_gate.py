@@ -117,10 +117,12 @@ def test_file_shape_meta_now_succeeds(tmp_path: Path):
     assert (repo / "CLAUDE.local.md").is_file() or "did not complete" in r.stdout
 
 
-def test_generator_failure_is_nonfatal_warned(tmp_path: Path, monkeypatch):
-    """--update's generator step is non-fatal by design: a crash warns
-    loudly and preserves the marker/launch patches (deterministic
-    in-process injection — the real-world trigger was fixed by plugin)."""
+def test_generator_failure_is_partial_hard_failure(tmp_path: Path, monkeypatch, capsys):
+    """--update's generator step is a PARTIAL/HARD failure when it can't run
+    (bug 20260826T211138 / spec-agent 20260826T220719): CLAUDE.local.md was NOT
+    regenerated, and the migration gate verifies that file — so --update MUST
+    return non-zero + a FAILED line, not the old `Updated: N` + rc 0 which read
+    as success. The marker/launch patches still apply (the failure is scoped)."""
     meta, repo = _workspace(tmp_path)
     monkeypatch.chdir(repo)
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -137,4 +139,29 @@ def test_generator_failure_is_nonfatal_warned(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(init_mod, "run_script", _boom)
     rc = init_mod._cmd_init_update()
-    assert rc == 0  # patches applied, generator failure warned not fatal
+    assert rc == 1  # generator failure is now a hard/partial failure
+    assert "FAILED" in capsys.readouterr().out
+
+
+def test_org_level_platform_yaml_rejected(tmp_path: Path, monkeypatch, capsys):
+    """--update refuses a stale/partial ORG-LEVEL platform.yaml (no `project`)
+    up front, instead of resolving + passing it to the generator (the crash
+    root-cause, bug 20260826T211138 / plugin 20260826T214437)."""
+    org = tmp_path / "org-otaman"
+    (org / ".agents").mkdir(parents=True)
+    # org-level: only models/bus, NO project/version/repos
+    (org / "platform.yaml").write_text(
+        "models:\n  default: sonnet\nbus:\n  transport: file\n", encoding="utf-8"
+    )
+    repo = tmp_path / "svc"
+    repo.mkdir()
+    (repo / ".otaman").write_text("../org-otaman\nagent: backend-agent\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("OTAMAN_ROOT", raising=False)
+
+    import otaman_cli.commands.init as init_mod
+
+    rc = init_mod._cmd_init_update()
+    assert rc == 2  # refused before the generator can KeyError on it
+    assert "no 'project' key" in capsys.readouterr().out
