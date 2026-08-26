@@ -91,11 +91,16 @@ def cmd_approve(args: list[str]) -> int:
             continue
 
     # Determine action from args if not explicit
+    chat_phrase: str | None = None
     if args and action == "list":
         first = args[0].lower()
-        if first in ("approve", "reject"):
+        if first in ("approve", "reject", "request", "confirm"):
             action = first
             args = args[1:]
+            # `confirm <stem> <phrase>` — capture the echoed phrase before the
+            # stem-matching below consumes args[0] as the pattern.
+            if action == "confirm" and len(args) > 1:
+                chat_phrase = args[1]
         elif first != "list":
             # Treat as message ID for approval
             action = "approve"
@@ -163,6 +168,21 @@ def cmd_approve(args: list[str]) -> int:
             return 1
         target = matches[0]
 
+    # hitl 1.3 — the insecure chat fallback is a TWO-STEP flow (the phrase-echo
+    # is inherently two-turn), so it routes to its own request/confirm handlers
+    # rather than the single-shot adapter confirm() below.
+    if action == "request":
+        return _chat_request(target)
+    if action == "confirm":
+        return _chat_confirm(
+            target,
+            chat_phrase,
+            active_dir=active_dir,
+            acks_dir=acks_dir,
+            root=root,
+            comment=comment,
+        )
+
     # F012 (security GAP finding, 2026-07-04): approve/reject produce a
     # PRIVILEGED message (spec-change-approved/-rejected, asserts
     # `from: human`) — gate on a real human confirmation first.
@@ -193,72 +213,15 @@ def cmd_approve(args: list[str]) -> int:
     from otaman_cli.safety import record_privileged_confirmation
 
     if action == "approve":
-        # Broadcast approval
-        slug = re.sub(r"[^a-z0-9]+", "-", target["subject"].lower()).strip("-")[:30]
-        broadcast_file = active_dir / f"{now_ts}-human-to-all-spec-change-approved.md"
-        comment_section = f"\n### Human comments\n{comment}\n" if comment else ""
-
-        broadcast = f"""---
-id: {now_ts}-approved-{slug}
-from: human
-to: all
-priority: high
-type: spec-change-approved
-timestamp: {now_iso}
-status: pending
----
-
-## Subject: Approved: {target["subject"].replace("Spec change request: ", "")}
-
-The spec-change-request from **{target["fm"].get("from", "?")}** has been **approved**.
-
-**Original proposal**: {target["stem"]}
-{comment_section}
-### Next steps
-1. Specs will be created/updated in the specs repo (via OpenSpec or manually)
-2. All agents will be notified when specs are committed (via post-commit hook)
-3. Affected agents should review updated specs and adapt implementation
-
-Use `/otaman:check` to track updates.
-"""
-        if not record_privileged_confirmation(
-            message_id=f"{now_ts}-approved-{slug}",
-            content=broadcast,
-            command="approve",
-        ):
-            return 1
-
-        # Create approval ack (only after the ledger record exists)
-        ack_file = acks_dir / f"{target['stem']}.human.ack"
-        ack_file.write_text("approved\n", encoding="utf-8")
-
-        broadcast_file.write_text(broadcast, encoding="utf-8")
-
-        UI.header("Proposal Approved")
-        UI.ok(f"Approved: {target['subject']}")
-        UI.kv("From", UI.agent(target["fm"].get("from", "?")))
-        UI.kv("Ack", str(ack_file.relative_to(root)))
-        UI.kv("Broadcast", str(broadcast_file.relative_to(root)))
-
-        # Check if OpenSpec is available
-        config_path = root / "platform.yaml"
-        if config_path.exists():
-            with open(config_path, encoding="utf-8") as f:
-                config = yaml.safe_load(f)
-            specs_format = config.get("specs", {}).get("format", "fallback")
-            specs_path = config.get("specs", {}).get("path", "")
-            if specs_format == "openspec" and specs_path:
-                proposal_title = target["subject"].replace("Spec change request: ", "")
-                print()
-                UI.info("OpenSpec mode: To create the spec, run in the specs repo:")
-                UI.action(f'cd {specs_path} && openspec new change "{proposal_title}"')
-                UI.muted(f'Or use /opsx:new "{proposal_title}" in the specs repo Claude session')
-                UI.muted(
-                    f"Then work on artifacts: openspec instructions <artifact> "
-                    f'--change "{proposal_title}"'
-                )
-
-        return 0
+        return _perform_approval(
+            target,
+            active_dir=active_dir,
+            acks_dir=acks_dir,
+            root=root,
+            comment=comment,
+            now_ts=now_ts,
+            now_iso=now_iso,
+        )
 
     elif action == "reject":
         # Notify the proposing agent
@@ -305,6 +268,304 @@ The spec-change-request has been **rejected**.
         return 0
 
     return 0
+
+
+def _perform_approval(
+    target: dict,
+    *,
+    active_dir,
+    acks_dir,
+    root,
+    comment: str,
+    now_ts: str,
+    now_iso: str,
+) -> int:
+    """Write the PRIVILEGED spec-change-approved broadcast (ledger-gated).
+
+    Extracted so BOTH the normal `approve approve` path (after adapter
+    confirmation) and the chat-fallback `approve confirm` path (after the
+    read-to-confirm phrase-echo) produce the identical privileged message
+    through the identical fail-closed ledger gate — the confirmation method
+    differs, the privileged write does not.
+    """
+    import yaml
+
+    from otaman_cli.safety import record_privileged_confirmation
+
+    slug = re.sub(r"[^a-z0-9]+", "-", target["subject"].lower()).strip("-")[:30]
+    broadcast_file = active_dir / f"{now_ts}-human-to-all-spec-change-approved.md"
+    comment_section = f"\n### Human comments\n{comment}\n" if comment else ""
+
+    broadcast = f"""---
+id: {now_ts}-approved-{slug}
+from: human
+to: all
+priority: high
+type: spec-change-approved
+timestamp: {now_iso}
+status: pending
+---
+
+## Subject: Approved: {target["subject"].replace("Spec change request: ", "")}
+
+The spec-change-request from **{target["fm"].get("from", "?")}** has been **approved**.
+
+**Original proposal**: {target["stem"]}
+{comment_section}
+### Next steps
+1. Specs will be created/updated in the specs repo (via OpenSpec or manually)
+2. All agents will be notified when specs are committed (via post-commit hook)
+3. Affected agents should review updated specs and adapt implementation
+
+Use `/otaman:check` to track updates.
+"""
+    if not record_privileged_confirmation(
+        message_id=f"{now_ts}-approved-{slug}",
+        content=broadcast,
+        command="approve",
+    ):
+        return 1
+
+    ack_file = acks_dir / f"{target['stem']}.human.ack"
+    ack_file.write_text("approved\n", encoding="utf-8")
+    broadcast_file.write_text(broadcast, encoding="utf-8")
+
+    UI.header("Proposal Approved")
+    UI.ok(f"Approved: {target['subject']}")
+    UI.kv("From", UI.agent(target["fm"].get("from", "?")))
+    UI.kv("Ack", str(ack_file.relative_to(root)))
+    UI.kv("Broadcast", str(broadcast_file.relative_to(root)))
+
+    config_path = root / "platform.yaml"
+    if config_path.exists():
+        with open(config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        specs_format = config.get("specs", {}).get("format", "fallback")
+        specs_path = config.get("specs", {}).get("path", "")
+        if specs_format == "openspec" and specs_path:
+            proposal_title = target["subject"].replace("Spec change request: ", "")
+            print()
+            UI.info("OpenSpec mode: To create the spec, run in the specs repo:")
+            UI.action(f'cd {specs_path} && openspec new change "{proposal_title}"')
+            UI.muted(f'Or use /opsx:new "{proposal_title}" in the specs repo Claude session')
+            UI.muted(
+                f"Then work on artifacts: openspec instructions <artifact> "
+                f'--change "{proposal_title}"'
+            )
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# hitl 1.3 — insecure chat-approval fallback (two-step read-to-confirm)
+
+
+def _chat_reason_if_unavailable() -> str | None:
+    """Why chat approval is unavailable, or None if it IS the active path.
+
+    Returns a human-facing refusal reason honoring the design's precedence:
+    autonomous marker > stronger adapter enrolled > flag off.
+    """
+    from otaman_cli.hitl import chat_fallback as cf
+    from otaman_cli.hitl.adapters import STRENGTH_CHAT, registered_adapters
+    from otaman_cli.hitl.config import load_hitl_config
+
+    if cf.is_autonomous_context():
+        return (
+            f"refused: this session is marked autonomous "
+            f"(OTAMAN_SESSION_MODE={cf.session_mode()}). Chat approval requires a "
+            "human-attended session."
+        )
+    if not cf.chat_approval_enabled(load_hitl_config()):
+        return (
+            "chat approval is not enabled. A tenant admin must set "
+            "`allow_insecure_chat_approval: true` in ~/.otaman/hitl.yaml "
+            "(it is insecure by design and tenant-only)."
+        )
+    stronger = [
+        a.name
+        for a in registered_adapters()
+        if a.strength > STRENGTH_CHAT and a.name != "chat" and a.is_configured()
+    ]
+    if stronger:
+        return (
+            f"refused: a stronger confirmation adapter is enrolled "
+            f"({', '.join(sorted(stronger))}); "
+            "chat fallback is disabled while it is configured (no silent downgrade)."
+        )
+    return None
+
+
+def _chat_request(target: dict) -> int:
+    """`approve request <stem>` — mint + append the read-to-confirm phrase."""
+    import secrets
+    import time
+    from datetime import datetime, timezone
+
+    from otaman_cli.hitl import chat_fallback as cf
+    from otaman_cli.hitl.commands import _human_id
+
+    reason = _chat_reason_if_unavailable()
+    if reason is not None:
+        UI.error(reason)
+        return 1
+
+    state = cf.chat_state_path()
+    audit_path = cf.chat_audit_path()
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if cf.daily_cap_reached(state, today):
+        UI.error(
+            f"daily chat-approval limit reached ({cf.DAILY_CAP}/day). Try again tomorrow "
+            "or use a stronger adapter."
+        )
+        return 1
+
+    stem = target["stem"]
+    human = _human_id()
+    sid = cf.session_id()
+    phrase = cf.generate_phrase()
+    nonce_id = secrets.token_hex(4)
+    nonce = cf.ChatNonce(
+        stem=stem,
+        nonce_id=nonce_id,
+        phrase=phrase,
+        human_id=human,
+        session_id=sid,
+        created_at=int(time.time()),
+    )
+    cf.append_phrase_to_proposal(target["file"], phrase, stem=stem, nonce_id=nonce_id)
+    cf.record_request(state, nonce, today=today)
+    cf.audit(
+        audit_path,
+        action="request",
+        stem=stem,
+        nonce_id=nonce_id,
+        human_id=human,
+        session_id=sid,
+        outcome="phrase-minted",
+        timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
+
+    UI.header("Chat approval — confirmation phrase appended")
+    UI.warn("This is the INSECURE chat fallback (friction + audit, not cryptographic proof).")
+    UI.kv("Proposal", str(target["file"]))
+    UI.info(
+        "Open and READ the proposal above. Copy the confirmation phrase from its END, then run:"
+    )
+    UI.action(f"otaman approve confirm {stem} <phrase>")
+    UI.muted(
+        f"The phrase expires in {cf.PHRASE_TTL_SECONDS // 60} min (re-run request for a fresh one)."
+    )
+    UI.muted(
+        "The phrase is intentionally NOT printed here — it lives only in the "
+        "proposal you must read."
+    )
+    return 0
+
+
+def _chat_confirm(
+    target: dict, phrase: str | None, *, active_dir, acks_dir, root, comment: str
+) -> int:
+    """`approve confirm <stem> <phrase>` — verify the echo, then approve."""
+    import time
+    from datetime import datetime, timezone
+
+    from otaman_cli.hitl import chat_fallback as cf
+    from otaman_cli.hitl.commands import _human_id
+
+    state = cf.chat_state_path()
+    audit_path = cf.chat_audit_path()
+    stem = target["stem"]
+    human = _human_id()
+    sid = cf.session_id()
+    pending = cf.pending_nonce(state)
+    nonce_id = pending.nonce_id if pending else "-"
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    if not phrase:
+        UI.error("Usage: otaman approve confirm <stem> <phrase>  (paste the phrase you read).")
+        return 1
+
+    ok, why = cf.verify_phrase(state, stem, phrase, now=int(time.time()))
+    if not ok:
+        # Refusal invalidated the nonce (in verify); clean the block off the doc.
+        _strip_confirm_block(target["file"])
+        cf.audit(
+            audit_path,
+            action="confirm",
+            stem=stem,
+            nonce_id=nonce_id,
+            human_id=human,
+            session_id=sid,
+            outcome="refused",
+            timestamp=now_iso,
+        )
+        UI.error(f"Chat approval refused — {why}")
+        return 1
+
+    # Phrase matched: clean the block, perform the identical privileged approval.
+    _strip_confirm_block(target["file"])
+    now_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    rc = _perform_approval(
+        target,
+        active_dir=active_dir,
+        acks_dir=acks_dir,
+        root=root,
+        comment=comment,
+        now_ts=now_ts,
+        now_iso=now_iso,
+    )
+    outcome = "approved" if rc == 0 else "approval-write-failed"
+    cf.audit(
+        audit_path,
+        action="confirm",
+        stem=stem,
+        nonce_id=nonce_id,
+        human_id=human,
+        session_id=sid,
+        outcome=outcome,
+        timestamp=now_iso,
+    )
+    if rc == 0:
+        _emit_chat_notice(active_dir, stem=stem, human=human, now_ts=now_ts, now_iso=now_iso)
+        UI.muted(
+            "Provenance: this approval used the INSECURE chat fallback — a bus notice was posted."
+        )
+    return rc
+
+
+def _strip_confirm_block(doc_path) -> None:
+    from otaman_cli.hitl import chat_fallback as cf
+
+    try:
+        text = doc_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    doc_path.write_text(cf.strip_phrase_block(text), encoding="utf-8")
+
+
+def _emit_chat_notice(active_dir, *, stem: str, human: str, now_ts: str, now_iso: str) -> None:
+    """Surface on the bus that the insecure chat path was used (design: audit +
+    surfacing). Non-privileged info; distinct from the approval broadcast."""
+    notice = f"""---
+id: {now_ts}-chat-approval-notice
+from: hitl-audit
+to: human
+priority: normal
+type: info
+timestamp: {now_iso}
+status: pending
+---
+
+## Subject: Insecure chat-approval used for {stem}
+
+A spec-change was approved via the INSECURE chat fallback
+(`hitl.allow_insecure_chat_approval`) by **{human}**. This mode is friction +
+audit, not cryptographic proof of humanness. If you did not perform this
+confirmation, review ~/.otaman/hitl-chat-audit.log and rotate trust.
+"""
+    (active_dir / f"{now_ts}-hitl-audit-to-human-chat-approval-notice.md").write_text(
+        notice, encoding="utf-8"
+    )
 
 
 register(
