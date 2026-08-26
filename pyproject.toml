@@ -4,7 +4,7 @@ name = "otaman-cli"
 # product release tag at build time, so the product version is authoritative
 # for tenant installs (a wheel may read a higher version than this line). Bump
 # it when it lags a shipped product release; do not expect it to match tenants.
-version = "0.4.0"
+version = "0.5.0"
 description = "Otaman standalone CLI: subcommand dispatch, local + remote operations, account management"
 requires-python = ">=3.10"
 authors = [{ name = "Otaman platform" }]

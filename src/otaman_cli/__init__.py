@@ -8,4 +8,4 @@ skeleton; subsequent sub-stages move per-subcommand modules.
 # Keep in sync with [project].version in pyproject.toml. The runtime
 # authoritative value is importlib.metadata.version("otaman-cli") (see
 # main._resolve_version); this constant is a fallback/reference only.
-__version__ = "0.4.0"
+__version__ = "0.5.0"
