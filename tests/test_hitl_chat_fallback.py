@@ -244,14 +244,26 @@ def test_chat_unconfigured_without_flag(monkeypatch):
 
 def test_chat_configured_with_flag_and_nothing_stronger(monkeypatch):
     monkeypatch.delenv("OTAMAN_SESSION_MODE", raising=False)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)  # chat is the NON-TTY fallback
     _enable_flag()
     assert ChatAdapter().is_configured() is True
     # it becomes the selected adapter (strongest CONFIGURED; TTY is default-only)
     assert isinstance(select_adapter(), ChatAdapter)
 
 
+def test_interactive_tty_takes_precedence_over_chat(monkeypatch):
+    # Live 4.1 finding (spec PR #232): a human at a real terminal must get the
+    # normal TTY confirmation, NOT the chat two-step — even with the flag set.
+    monkeypatch.delenv("OTAMAN_SESSION_MODE", raising=False)
+    _enable_flag()
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    assert ChatAdapter().is_configured() is False
+    assert isinstance(select_adapter(), TTYAdapter)
+
+
 def test_chat_disabled_in_autonomous_context(monkeypatch):
     _enable_flag()
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     monkeypatch.setenv("OTAMAN_SESSION_MODE", "cron")
     assert ChatAdapter().is_configured() is False
     # falls back to the TTY default (which itself refuses no-TTY)
@@ -261,6 +273,7 @@ def test_chat_disabled_in_autonomous_context(monkeypatch):
 def test_totp_enrollment_disables_chat(monkeypatch):
     # strongest-configured-wins: enrolling TOTP disables chat even with the flag.
     monkeypatch.delenv("OTAMAN_SESSION_MODE", raising=False)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     _enable_flag()
     cfg.set_totp_enrollment("roman@x.io", "HITL_TOTP_roman-x-io")
     assert TOTPAdapter().is_configured() is True
