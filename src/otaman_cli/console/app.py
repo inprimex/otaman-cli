@@ -78,9 +78,14 @@ class PendingListScreen(Screen):
         ("q", "quit", "Quit"),
     ]
 
-    def __init__(self, program: Program) -> None:
+    def __init__(self, program: Program, *, event_source=None) -> None:
         super().__init__()
         self.program = program
+        # Injectable per task 1.3: the console consumes changes through ONE
+        # event-source interface (polling in I1; fswatch/NATS later) with no
+        # console rework. Tests pass a fake source.
+        self._source = event_source
+        self._own_source = event_source is None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -90,6 +95,16 @@ class PendingListScreen(Screen):
 
     def on_mount(self) -> None:
         self._reload()
+        if self._source is None:
+            from otaman_cli.console.events import make_event_source
+
+            self._source = make_event_source(self.program)
+        # Marshal the provider's (possibly off-thread) callback onto the UI.
+        self._source.start(lambda: self.app.call_from_thread(self._reload))
+
+    def on_unmount(self) -> None:
+        if self._source is not None and self._own_source:
+            self._source.stop()
 
     def on_screen_resume(self) -> None:
         # Returning from a ProposalScreen (after approve/reject) → refresh so a
