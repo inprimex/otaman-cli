@@ -91,13 +91,85 @@ def test_human_list_renders_fingerprints_not_keys(capsys):
     assert "PRIVATE KEY" not in out and "ssh-ed25519 AAAA" not in out
 
 
-def test_human_usage_and_unwired_verbs(capsys):
-    assert cmd_human([]) == 1  # usage
-    assert cmd_human(["enroll", "roman", "--key", "x"]) == 2  # honestly not-wired yet
-    assert "not wired yet" in capsys.readouterr().out
+def test_human_usage(capsys):
+    assert cmd_human([]) == 1
+    assert "Usage" in capsys.readouterr().out
 
 
 def test_human_registered_in_help():
     from otaman_cli.commands import get
 
     assert get("human") is not None
+
+
+# ---------------------------------------------------------------------------
+# enroll / remove — shell to deploy's mechanism (mocked; no real sudo)
+
+
+class _Result:
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def test_enroll_shells_to_mechanism_and_parses_output(monkeypatch, capsys):
+    import otaman_cli.commands.human as h
+
+    calls = {}
+
+    def fake(mech_args):
+        calls["args"] = mech_args
+        return _Result(0, "enrolled roman\nFINGERPRINT=SHA256:abc123\nROSTER_ID=roman\n")
+
+    monkeypatch.setattr(h, "run_mechanism", fake)
+    rc = cmd_human(["enroll", "roman", "--key", "/keys/roman.pub", "--tenant", "otaman-dev"])
+    assert rc == 0
+    assert calls["args"] == ["roman", "/keys/roman.pub", "--tenant", "otaman-dev"]
+    out = capsys.readouterr().out
+    assert "Enrolled roman" in out and "SHA256:abc123" in out
+
+
+def test_enroll_requires_roster_id_and_key(capsys):
+    assert cmd_human(["enroll", "roman"]) == 1  # missing --key
+    assert cmd_human(["enroll", "--key", "x"]) == 1  # missing roster-id
+
+
+def test_enroll_surfaces_mechanism_failure(monkeypatch, capsys):
+    import otaman_cli.commands.human as h
+
+    monkeypatch.setattr(
+        h, "run_mechanism", lambda a: _Result(3, "", "[human-enroll] ERROR: bad key")
+    )
+    rc = cmd_human(["enroll", "roman", "--key", "bad"])
+    assert rc == 3
+    assert "ERROR: bad key" in capsys.readouterr().out
+
+
+def test_remove_shells_with_remove_flag(monkeypatch, capsys):
+    import otaman_cli.commands.human as h
+
+    calls = {}
+
+    def fake(mech_args):
+        calls["args"] = mech_args
+        return _Result(0, "removed roman SHA256:abc on otaman-dev (0 keys)\n")
+
+    monkeypatch.setattr(h, "run_mechanism", fake)
+    rc = cmd_human(["remove", "roman", "--fingerprint", "SHA256:abc"])
+    assert rc == 0
+    assert calls["args"] == ["--remove", "roman", "--fingerprint", "SHA256:abc"]
+    assert "removed roman" in capsys.readouterr().out
+
+
+def test_remove_requires_roster_id(capsys):
+    assert cmd_human(["remove"]) == 1
+
+
+def test_mechanism_path_override(monkeypatch):
+    import otaman_cli.commands.human as h
+
+    monkeypatch.setenv("OTAMAN_HUMAN_ENROLL_MECHANISM", "/custom/enroll.sh")
+    assert h._mechanism_path() == "/custom/enroll.sh"
+    monkeypatch.delenv("OTAMAN_HUMAN_ENROLL_MECHANISM", raising=False)
+    assert h._mechanism_path() == h.DEFAULT_MECHANISM

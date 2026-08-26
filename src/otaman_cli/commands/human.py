@@ -11,17 +11,38 @@ shell out to.
 (`/etc/otaman/human-roster.yaml`), which holds key FINGERPRINTS, never raw
 keys. It works standalone (no privileged mechanism needed).
 
-`enroll`/`remove` are gated on deploy-agent confirming the installed mechanism
-path + exact args; until then they print a clear "not yet wired" message
-naming the mechanism, so the surface is discoverable without pretending to work.
+`enroll`/`remove` shell to the mechanism (deploy contract 20260826T221737):
+  sudo /opt/otaman/human-enroll.sh <roster-id> <pubkey> [--tenant <user>]
+  sudo /opt/otaman/human-enroll.sh --remove <roster-id> [--fingerprint <fp>] [--tenant <user>]
+The mechanism auto-detects CE vs EE from edition.yaml, so this surface stays
+edition-agnostic. The installed path is overridable via
+``OTAMAN_HUMAN_ENROLL_MECHANISM`` (other hosts / tests).
 """
 
 from __future__ import annotations
+
+import os
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.main import UI
 
 _ACTIONS = ("list", "enroll", "remove")
+
+MECHANISM_ENV = "OTAMAN_HUMAN_ENROLL_MECHANISM"
+DEFAULT_MECHANISM = "/opt/otaman/human-enroll.sh"
+
+
+def _mechanism_path() -> str:
+    return os.environ.get(MECHANISM_ENV, "").strip() or DEFAULT_MECHANISM
+
+
+def run_mechanism(mech_args: list[str]):
+    """Shell to the sudo-pinned provisioning mechanism (test seam — monkeypatch
+    this to avoid real sudo). Returns a CompletedProcess."""
+    import subprocess
+
+    cmd = ["sudo", _mechanism_path(), *mech_args]
+    return subprocess.run(cmd, capture_output=True, text=True)
 
 
 def cmd_human(args: list[str]) -> int:
@@ -36,7 +57,9 @@ def cmd_human(args: list[str]) -> int:
     action, *rest = args
     if action == "list":
         return _cmd_list(rest)
-    return _cmd_enroll_or_remove(action, rest)
+    if action == "enroll":
+        return _cmd_enroll(rest)
+    return _cmd_remove(rest)
 
 
 def _cmd_list(rest: list[str]) -> int:
@@ -61,21 +84,83 @@ def _cmd_list(rest: list[str]) -> int:
     return 0
 
 
-def _cmd_enroll_or_remove(action: str, rest: list[str]) -> int:
-    # The privileged mechanism (deploy-agent's sudo-pinned human-enroll.sh) is
-    # the sole writer of key↔identity bindings. Wiring is pending deploy-agent's
-    # confirmed installed path + args (bus 20260826T213316); fail honestly
-    # rather than pretend.
-    if not rest:
-        UI.error(f"Usage: otaman human {action} <roster-id> [...]")
+def _extract_flag(rest: list[str], flag: str) -> tuple[list[str], str | None]:
+    """Pull ``--flag value`` out of *rest*; returns (remaining, value|None)."""
+    out: list[str] = []
+    value: str | None = None
+    i = 0
+    while i < len(rest):
+        if rest[i] == flag and i + 1 < len(rest):
+            value = rest[i + 1]
+            i += 2
+        else:
+            out.append(rest[i])
+            i += 1
+    return out, value
+
+
+def _parse_mechanism_result(rc: int, stdout: str, stderr: str, *, what: str) -> int:
+    """Surface the mechanism's outcome; return a shell-appropriate code."""
+    if rc != 0:
+        UI.error(f"{what} failed (mechanism exit {rc}).")
+        for line in (stderr or stdout).splitlines():
+            if line.strip():
+                UI.muted(f"  {line.rstrip()}")
+        return rc or 1
+    return 0
+
+
+def _cmd_enroll(rest: list[str]) -> int:
+    rest, key = _extract_flag(rest, "--key")
+    rest, tenant = _extract_flag(rest, "--tenant")
+    if not rest or key is None:
+        UI.error(
+            "Usage: otaman human enroll <roster-id> --key <pubkey-file-or-string> [--tenant <user>]"
+        )
         return 1
-    UI.error(
-        f"`otaman human {action}` is not wired yet — it must shell to deploy-agent's "
-        "sudo-pinned provisioning mechanism (human-enroll.sh), whose installed path is "
-        "being confirmed. Track: interactive-human-console 2.1."
+    roster_id = rest[0]
+    mech_args = [roster_id, key] + (["--tenant", tenant] if tenant else [])
+    result = run_mechanism(mech_args)
+    rc = _parse_mechanism_result(result.returncode, result.stdout, result.stderr, what="Enroll")
+    if rc != 0:
+        return rc
+    # Parse the mechanism's parseable stdout (FINGERPRINT=... / ROSTER_ID=...).
+    fields = _kv_lines(result.stdout)
+    UI.ok(f"Enrolled {fields.get('ROSTER_ID', roster_id)}")
+    UI.kv("fingerprint", fields.get("FINGERPRINT", "—"))
+    UI.muted("Verify with `otaman human list`; the human's key now sets OTAMAN_HUMAN on SSH login.")
+    return 0
+
+
+def _cmd_remove(rest: list[str]) -> int:
+    rest, fingerprint = _extract_flag(rest, "--fingerprint")
+    rest, tenant = _extract_flag(rest, "--tenant")
+    if not rest:
+        UI.error("Usage: otaman human remove <roster-id> [--fingerprint <fp>] [--tenant <user>]")
+        return 1
+    roster_id = rest[0]
+    mech_args = (
+        ["--remove", roster_id]
+        + (["--fingerprint", fingerprint] if fingerprint else [])
+        + (["--tenant", tenant] if tenant else [])
     )
-    UI.muted("Meanwhile: `otaman human list` reads the roster, and `otaman -i` resolves identity.")
-    return 2
+    result = run_mechanism(mech_args)
+    rc = _parse_mechanism_result(result.returncode, result.stdout, result.stderr, what="Remove")
+    if rc != 0:
+        return rc
+    UI.ok((result.stdout or f"removed {roster_id}").strip())
+    return 0
+
+
+def _kv_lines(text: str) -> dict[str, str]:
+    """Parse ``KEY=value`` lines (the mechanism's parseable output)."""
+    out: dict[str, str] = {}
+    for line in text.splitlines():
+        if "=" in line and not line.startswith(" "):
+            k, _, v = line.partition("=")
+            if k.isupper():
+                out[k.strip()] = v.strip()
+    return out
 
 
 register(
