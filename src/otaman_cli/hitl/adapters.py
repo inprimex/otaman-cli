@@ -228,6 +228,13 @@ class ChatAdapter:
         from otaman_cli.hitl.chat_fallback import chat_approval_enabled, is_autonomous_context
         from otaman_cli.hitl.config import load_hitl_config
 
+        # Interactive TTY takes PRECEDENCE over chat (live 4.1 finding; spec
+        # PR #232). Chat is a NON-TTY fallback — a human at a real terminal is
+        # the strongest context and must get the normal TTY confirmation, not
+        # the chat two-step. So at a TTY, chat is never "configured" regardless
+        # of the flag; it only substitutes when stdin is not a TTY.
+        if sys.stdin.isatty():
+            return False
         if not chat_approval_enabled(load_hitl_config()):
             return False
         if is_autonomous_context():
