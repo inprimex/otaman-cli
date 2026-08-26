@@ -36,6 +36,17 @@ def run_console(argv: list[str], *, _run: bool = True) -> int:
         print(_INSTALL_HINT)
         return 2
 
+    # Self-managing surviving seat (task 1.4): wrap this launch in a tmux
+    # session on the private human server so it survives disconnects and stays
+    # isolated from the fleet default server. Re-exec replaces this process;
+    # inside the seat (or without tmux / with --no-seat) we fall through and
+    # run the app directly.
+    if _run:
+        from otaman_cli.console import seat
+
+        if seat.should_seat(argv):
+            seat.reexec_into_seat(argv)  # exec — does not return on success
+
     from otaman_cli.console.app import OtamanConsole
     from otaman_cli.console.bus import discover_programs
 
