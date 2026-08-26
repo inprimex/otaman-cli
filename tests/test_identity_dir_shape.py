@@ -178,12 +178,22 @@ def test_init_update_dir_shape_leaves_siblings_untouched(tmp_path: Path) -> None
 
 
 def test_init_update_dir_shape_idempotent(tmp_path: Path) -> None:
-    """Running --update twice on dir-shape meta produces same result, no error."""
+    """Running --update twice on dir-shape meta is IDEMPOTENT and leaves the
+    `.otaman` marker correct.
+
+    The marker/launch patch (what this test cares about) applies BEFORE the
+    generator step. Post bug 20260826T211138 a generator that can't process
+    this minimal fixture makes --update a hard/partial failure (rc 1) — that is
+    correct and covered by test_init_update_headless_gate. Here we assert only
+    that the two runs behave IDENTICALLY (idempotent) and the marker is right,
+    independent of the generator's verdict on the fixture.
+    """
     import subprocess
     import sys
 
     meta = _make_dir_shape_project(tmp_path)
 
+    rcs = []
     for _ in range(2):
         r = subprocess.run(
             [sys.executable, "-m", "otaman_cli.main", "init", "--update"],
@@ -192,8 +202,9 @@ def test_init_update_dir_shape_idempotent(tmp_path: Path) -> None:
             cwd=str(meta),
             env=_cli_env(),
         )
-        assert r.returncode == 0
+        rcs.append(r.returncode)
 
+    assert rcs[0] == rcs[1]  # idempotent — same outcome both runs
     agent_file = meta / ".otaman" / "agent"
     assert agent_file.read_text(encoding="utf-8").strip() == "human"
 

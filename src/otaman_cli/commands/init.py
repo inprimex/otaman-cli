@@ -385,6 +385,26 @@ def _cmd_init_update(dry_run: bool = False) -> int:
         UI.error(f"Failed to read platform.yaml: {e}")
         return 2
 
+    # Reject a stale/partial ORG-LEVEL platform.yaml (crash root-cause,
+    # bug 20260826T211138 / plugin 20260826T214437): find_project_root's
+    # upward walk can land on an org-level platform.yaml that has only
+    # models/bus and no `project` — handing THAT to generate-agent-config
+    # KeyError'd on config["project"]. A program platform.yaml always carries
+    # `project` (schema-required), so refuse the wrong file HERE with an
+    # actionable message rather than resolving + passing it downstream.
+    # (Ties to the "org-level roots are dead / untrusted" class, incident
+    # 20260816.)
+    if not isinstance(config, dict) or not config.get("project"):
+        UI.error(
+            f"platform.yaml at {platform_yaml} has no 'project' key — this looks like "
+            "a stale/partial org-level file, not a program platform.yaml."
+        )
+        UI.muted(
+            "Run `otaman init --update` from a program root whose platform.yaml has "
+            "project/version/repos (the .otaman marker chain should resolve it)."
+        )
+        return 2
+
     UI.header("Otaman Init --update" + (" (dry-run)" if dry_run else ""))
     updated = 0
     skipped = 0
@@ -519,16 +539,11 @@ def _cmd_init_update(dry_run: bool = False) -> int:
     # command the migration gate tells owners to run. Regenerate here; the
     # generator resolves everything from the platform.yaml path, cwd-free.
     print()
+    gen_failed = False
     if dry_run:
         UI.muted("  would regenerate agent config (generate-agent-config.py)")
     else:
         print("Regenerating agent config (queues, ownership, CLAUDE.local.md rules)...")
-        # Non-fatal by design: --update's marker/launch patches predate the
-        # generator step and must keep succeeding even where the generator
-        # can't run (e.g. plugin's create_directories collides with
-        # file-shape .otaman metas — reported to plugin-agent). The gate's
-        # step 2 explicitly verifies CLAUDE.local.md exists, so a warned
-        # skip cannot silently pass the migration.
         try:
             gen = run_script("generate-agent-config.py", str(platform_yaml))
             gen_rc = gen.returncode
@@ -536,10 +551,10 @@ def _cmd_init_update(dry_run: bool = False) -> int:
             UI.warn(f"generate-agent-config crashed: {exc}")
             gen_rc = 1
         if gen_rc != 0:
+            gen_failed = True
             UI.warn(
                 "generate-agent-config did not complete — CLAUDE.local.md was NOT "
-                "(re)generated; marker/launch patches above still applied. "
-                "Verify per the migration gate before relying on session rules."
+                "(re)generated; marker/launch patches above still applied."
             )
 
     print()
@@ -547,6 +562,24 @@ def _cmd_init_update(dry_run: bool = False) -> int:
     UI.kv("Skipped", str(skipped))
     if dry_run:
         UI.warn("(dry run — no changes made)")
+        return 0
+
+    # Honest failure reporting (bug 20260826T211138 / spec-agent 20260826T220719):
+    # a generator failure means CLAUDE.local.md was NOT regenerated — the
+    # migration gate's step 2 verifies that file, so this run MUST report a
+    # partial/hard failure (non-zero + a FAILED line) rather than the previous
+    # `Updated: N` + rc 0, which read as success. The marker/launch patches DID
+    # apply; the failure is scoped to regeneration, but it is still a failure of
+    # the command the gate tells owners to run. Supersedes the earlier
+    # "non-fatal by design" stance for the generator step.
+    if gen_failed:
+        UI.error(
+            "FAILED: agent config regeneration did not complete — this --update is a "
+            "PARTIAL failure (marker/launch patches applied, but CLAUDE.local.md was "
+            "NOT regenerated). Fix the error above and re-run before relying on "
+            "session rules / passing the migration gate."
+        )
+        return 1
     return 0
 
 
