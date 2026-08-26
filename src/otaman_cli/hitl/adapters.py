@@ -203,11 +203,59 @@ class TelegramAdapter:
         )
 
 
-# Registry. chat appends via register_adapter() as it lands. TTY is always
-# present and is the default fallback; TOTP (30) and Telegram (20) are
-# registered by default so an enrolled install auto-selects the strongest.
-# Each reports unconfigured — and stays out of the way — until enrolled.
-_REGISTRY: list[ConfirmationAdapter] = [TTYAdapter(), TOTPAdapter(), TelegramAdapter()]
+class ChatAdapter:
+    """Insecure chat-approval fallback (strength 5) — hitl 1.3.
+
+    A guarded RISK ACCEPTANCE, not cryptographic proof of humanness. It is
+    "configured" only when the tenant opted in
+    (``allow_insecure_chat_approval`` in ``~/.otaman/hitl.yaml``) AND no
+    stronger adapter is enrolled (strongest-configured-wins DISABLES chat —
+    configuration rot cannot silently downgrade) AND the session is not
+    positively marked autonomous (``OTAMAN_SESSION_MODE`` headless/cron).
+
+    The real approval is a TWO-STEP read-to-confirm flow via
+    ``otaman approve request``/``confirm`` (commands/approve.py), because the
+    phrase-echo is inherently two-turn. This adapter's single-shot
+    ``confirm()`` therefore never approves — it refuses and points at the
+    two-step flow — so the normal ``approve`` path can't accidentally
+    single-step a chat approval.
+    """
+
+    name = "chat"
+    strength = STRENGTH_CHAT
+
+    def is_configured(self) -> bool:
+        from otaman_cli.hitl.chat_fallback import chat_approval_enabled, is_autonomous_context
+        from otaman_cli.hitl.config import load_hitl_config
+
+        if not chat_approval_enabled(load_hitl_config()):
+            return False
+        if is_autonomous_context():
+            return False  # positive autonomy marker → chat refuses early
+        # Strongest-configured-wins: any enrolled stronger adapter disables chat.
+        return not any(
+            a.strength > STRENGTH_CHAT and a is not self and a.is_configured() for a in _REGISTRY
+        )
+
+    def confirm(self, description: str, *, expected_phrase: str = "CONFIRM") -> ConfirmationResult:
+        print()
+        print(description)
+        print("\nChat approval uses a two-step read-to-confirm flow (not single-step):")
+        print("  1. otaman approve request <stem>   (appends a phrase to the proposal)")
+        print("  2. read the proposal, then: otaman approve confirm <stem> <phrase>")
+        return ConfirmationResult(approved=False, adapter=self.name)
+
+
+# Registry. TTY is always present and is the default fallback; TOTP (30),
+# Telegram (20) and Chat (5) are registered by default so an enrolled/opted-in
+# install auto-selects the strongest. Each reports unconfigured — and stays
+# out of the way — until enrolled/opted-in.
+_REGISTRY: list[ConfirmationAdapter] = [
+    TTYAdapter(),
+    TOTPAdapter(),
+    TelegramAdapter(),
+    ChatAdapter(),
+]
 
 
 def register_adapter(adapter: ConfirmationAdapter) -> None:
@@ -257,6 +305,7 @@ __all__ = [
     "STRENGTH_MESSENGER",
     "STRENGTH_TOTP",
     "STRENGTH_TTY",
+    "ChatAdapter",
     "ConfirmationAdapter",
     "ConfirmationResult",
     "TOTPAdapter",

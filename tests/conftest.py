@@ -45,6 +45,7 @@ def _isolated_tenant_home(tmp_path, monkeypatch):
     import otaman_core.connection_check as _conn_check
 
     import otaman_cli.connections.store as _conn_store
+    import otaman_cli.hitl.chat_fallback as _chat
     import otaman_cli.hitl.config as _config
 
     home = tmp_path / "tenant-home"
@@ -64,8 +65,16 @@ def _isolated_tenant_home(tmp_path, monkeypatch):
     def _tenant_conns_path(arg=None):
         return (arg or home) / ".otaman" / "connections.yaml"
 
+    def _chat_state_path(arg=None):
+        return (arg or home) / ".otaman" / "hitl-chat.json"
+
+    def _chat_audit_path(arg=None):
+        return (arg or home) / ".otaman" / "hitl-chat-audit.log"
+
     monkeypatch.setattr(_config, "hitl_config_path", _hitl_path)
     monkeypatch.setattr(_secrets, "tenant_secrets_path", _secrets_path)
     monkeypatch.setattr(_conn_check, "report_store_path", _report_path)
     monkeypatch.setattr(_conn_store, "tenant_connections_path", _tenant_conns_path)
+    monkeypatch.setattr(_chat, "chat_state_path", _chat_state_path)
+    monkeypatch.setattr(_chat, "chat_audit_path", _chat_audit_path)
     return home
