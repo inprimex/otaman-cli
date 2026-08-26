@@ -209,9 +209,7 @@ def cmd_approve(args: list[str]) -> int:
     now_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
 
     # bus-test-isolation 2.1 — the approved/rejected messages are PRIVILEGED;
-    # ledger-gate before any file is written (fail closed).
-    from otaman_cli.safety import record_privileged_confirmation
-
+    # both helpers below ledger-gate before any file is written (fail closed).
     if action == "approve":
         return _perform_approval(
             target,
@@ -224,48 +222,15 @@ def cmd_approve(args: list[str]) -> int:
         )
 
     elif action == "reject":
-        # Notify the proposing agent
-        proposer = target["fm"].get("from", "all")
-        reject_file = active_dir / f"{now_ts}-human-to-{proposer}-spec-change-rejected.md"
-        reason = comment or "No reason provided."
-
-        reject_msg = f"""---
-id: {now_ts}-rejected
-from: human
-to: {proposer}
-priority: normal
-type: spec-change-rejected
-timestamp: {now_iso}
-status: pending
----
-
-## Subject: Rejected: {target["subject"].replace("Spec change request: ", "")}
-
-The spec-change-request has been **rejected**.
-
-**Reason**: {reason}
-
-**Original proposal**: {target["stem"]}
-"""
-        if not record_privileged_confirmation(
-            message_id=f"{now_ts}-rejected",
-            content=reject_msg,
-            command="approve",
-        ):
-            return 1
-
-        # Create rejection ack (only after the ledger record exists)
-        ack_file = acks_dir / f"{target['stem']}.human.ack"
-        ack_file.write_text("rejected\n", encoding="utf-8")
-
-        reject_file.write_text(reject_msg, encoding="utf-8")
-
-        UI.header("Proposal Rejected")
-        UI.error(f"Rejected: {target['subject']}")
-        UI.kv("From", UI.agent(target["fm"].get("from", "?")))
-        UI.kv("Reason", reason)
-        UI.kv("Notification sent to", UI.agent(proposer))
-        return 0
+        return _perform_rejection(
+            target,
+            active_dir=active_dir,
+            acks_dir=acks_dir,
+            root=root,
+            comment=comment,
+            now_ts=now_ts,
+            now_iso=now_iso,
+        )
 
     return 0
 
@@ -352,6 +317,64 @@ Use `/otaman:check` to track updates.
                 f"Then work on artifacts: openspec instructions <artifact> "
                 f'--change "{proposal_title}"'
             )
+    return 0
+
+
+def _perform_rejection(
+    target: dict,
+    *,
+    active_dir,
+    acks_dir,
+    root,
+    comment: str,
+    now_ts: str,
+    now_iso: str,
+) -> int:
+    """Write the PRIVILEGED spec-change-rejected message (ledger-gated).
+
+    Parallel to :func:`_perform_approval` so both the CLI `reject` path and the
+    interactive console reuse one fail-closed privileged writer.
+    """
+    from otaman_cli.safety import record_privileged_confirmation
+
+    proposer = target["fm"].get("from", "all")
+    reject_file = active_dir / f"{now_ts}-human-to-{proposer}-spec-change-rejected.md"
+    reason = comment or "No reason provided."
+
+    reject_msg = f"""---
+id: {now_ts}-rejected
+from: human
+to: {proposer}
+priority: normal
+type: spec-change-rejected
+timestamp: {now_iso}
+status: pending
+---
+
+## Subject: Rejected: {target["subject"].replace("Spec change request: ", "")}
+
+The spec-change-request has been **rejected**.
+
+**Reason**: {reason}
+
+**Original proposal**: {target["stem"]}
+"""
+    if not record_privileged_confirmation(
+        message_id=f"{now_ts}-rejected",
+        content=reject_msg,
+        command="approve",
+    ):
+        return 1
+
+    ack_file = acks_dir / f"{target['stem']}.human.ack"
+    ack_file.write_text("rejected\n", encoding="utf-8")
+    reject_file.write_text(reject_msg, encoding="utf-8")
+
+    UI.header("Proposal Rejected")
+    UI.error(f"Rejected: {target['subject']}")
+    UI.kv("From", UI.agent(target["fm"].get("from", "?")))
+    UI.kv("Reason", reason)
+    UI.kv("Notification sent to", UI.agent(proposer))
     return 0
 
 

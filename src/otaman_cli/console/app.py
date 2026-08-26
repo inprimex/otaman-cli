@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from textual.app import App, ComposeResult
 from textual.screen import Screen
-from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
+from textual.widgets import Footer, Header, Label, ListItem, ListView, MarkdownViewer, Static
 
 from otaman_cli.console.bus import Program, Proposal, discover_programs, list_pending_proposals
 
@@ -91,6 +91,11 @@ class PendingListScreen(Screen):
     def on_mount(self) -> None:
         self._reload()
 
+    def on_screen_resume(self) -> None:
+        # Returning from a ProposalScreen (after approve/reject) → refresh so a
+        # just-decided proposal drops off the list.
+        self._reload()
+
     def _reload(self) -> None:
         lv = self.query_one("#pending-list", ListView)
         lv.clear()
@@ -110,8 +115,62 @@ class PendingListScreen(Screen):
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         proposal = getattr(event.item, "proposal", None)
         if proposal is not None:
-            # Task 1.2 replaces this with a rendered ProposalScreen + approve/reject.
-            self.app.notify(f"Selected: {proposal.stem} (viewer lands in task 1.2)")
+            self.app.push_screen(ProposalScreen(self.program, proposal))
+
+
+class ProposalScreen(Screen):
+    """Read the rendered proposal and approve/reject it (task 1.2).
+
+    The human's keypress here is the confirmation — no LLM, no adapter prompt.
+    Approve/reject route through the same ledger-gated privileged writer as
+    `otaman approve`, stamped with the SSH-derived identity.
+    """
+
+    BINDINGS = [
+        ("a", "approve", "Approve"),
+        ("x", "reject", "Reject"),
+        ("escape", "back", "Back"),
+        ("q", "quit", "Quit"),
+    ]
+
+    def __init__(self, program: Program, proposal: Proposal) -> None:
+        super().__init__()
+        self.program = program
+        self.proposal = proposal
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=False)
+        yield Static(
+            f"{self.proposal.subject}   —   from {self.proposal.from_agent}",
+            id="proposal-title",
+            markup=False,
+        )
+        yield MarkdownViewer(self.proposal.body, show_table_of_contents=False, id="proposal-body")
+        yield Footer()
+
+    def _decide(self, ok: bool, message: str) -> None:
+        self.app.notify(message, severity="information" if ok else "error", timeout=8)
+        if ok:
+            self.app.pop_screen()  # PendingListScreen.on_screen_resume refreshes
+
+    def action_approve(self) -> None:
+        from otaman_cli.console import decision
+        from otaman_cli.console.identity import resolve_identity
+
+        identity = resolve_identity(self.program.root)
+        ok, message = decision.approve(self.program, self.proposal, identity)
+        self._decide(ok, message)
+
+    def action_reject(self) -> None:
+        from otaman_cli.console import decision
+        from otaman_cli.console.identity import resolve_identity
+
+        identity = resolve_identity(self.program.root)
+        ok, message = decision.reject(self.program, self.proposal, identity)
+        self._decide(ok, message)
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
 
 
 class OtamanConsole(App):
@@ -139,4 +198,5 @@ __all__ = [
     "OtamanConsole",
     "PendingListScreen",
     "ProgramPickerScreen",
+    "ProposalScreen",
 ]
