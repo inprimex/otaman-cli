@@ -45,7 +45,16 @@ def run_console(argv: list[str], *, _run: bool = True) -> int:
         from otaman_cli.console import seat
 
         if seat.should_seat(argv):
+            # If a surviving seat is running an OLDER version, offer to restart
+            # it before we attach — otherwise re-attaching lands on stale code
+            # and the operator would need the kill-session incantation
+            # (spec-agent 20260827T073813 UX item). Best-effort; never blocks.
+            seat.offer_restart_if_stale()
             seat.reexec_into_seat(argv)  # exec — does not return on success
+        if seat.in_seat():
+            # We ARE the seat's inner process: stamp our version into the
+            # session env so the NEXT outer launch can detect staleness.
+            seat.stamp_seat_version()
 
     from otaman_cli.console.app import OtamanConsole
     from otaman_cli.console.bus import discover_programs
