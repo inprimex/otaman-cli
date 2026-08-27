@@ -17,6 +17,10 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+# The operator resolve_identity() reports when OTAMAN_HUMAN is absent (vs a set
+# but unverified value) — the badge uses it to tell "none" from a real value.
+_ABSENT_OPERATOR = "unknown-operator"
+
 
 def tenant_roster_path(home: Path | None = None) -> Path:
     """The provisioning roster deploy-agent's mechanism writes (contract
@@ -106,10 +110,29 @@ def resolve_identity(program_root: Path) -> ConsoleIdentity:
     """
     raw = os.environ.get("OTAMAN_HUMAN", "").strip()
     if not raw:
-        return ConsoleIdentity(operator="unknown-operator", verified=False)
+        return ConsoleIdentity(operator=_ABSENT_OPERATOR, verified=False)
 
     known = _tenant_roster_ids(tenant_roster_path()) | _platform_roster_ids(program_root)
     return ConsoleIdentity(operator=raw, verified=raw in known)
 
 
-__all__ = ["ConsoleIdentity", "resolve_identity", "tenant_roster_path"]
+def identity_badge(identity: ConsoleIdentity) -> str:
+    """The persistent title-bar badge string (Roman's request via deploy 2.1).
+
+    Surfaces resolve_identity()'s verdict BEFORE the human acts — three states:
+    - verified                    → ``✓ Verified(<name>)``
+    - OTAMAN_HUMAN set, no match   → ``⚠ Unverified(<value>)``  (self-diagnosing)
+    - OTAMAN_HUMAN absent          → ``⚠ Unverified(none)``
+
+    Showing the unmatched VALUE in state 2 makes a name-format mismatch (a
+    full display name vs the roster's lowercase handle) obvious at a glance,
+    without log spelunking.
+    """
+    if identity.verified:
+        return f"✓ Verified({identity.operator})"
+    if identity.operator == _ABSENT_OPERATOR:
+        return "⚠ Unverified(none)"
+    return f"⚠ Unverified({identity.operator})"
+
+
+__all__ = ["ConsoleIdentity", "identity_badge", "resolve_identity", "tenant_roster_path"]

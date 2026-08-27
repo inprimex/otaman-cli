@@ -10,6 +10,8 @@ is task 1.4.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
@@ -17,12 +19,33 @@ from textual.widgets import Footer, Header, Label, ListItem, ListView, MarkdownV
 
 from otaman_cli.console.bus import Program, Proposal, discover_programs, list_pending_proposals
 
+# A path that can never be a program root — used to resolve the identity badge
+# on the picker (no program picked yet) without a cwd platform.yaml false-match.
+_NO_PROGRAM_ROOT = Path("/nonexistent-otaman-console-picker")
+
 
 def _header() -> Header:
     # icon="" removes the default HeaderIcon glyph (⭘), which rendered as a
     # stray 'c' top-left in some terminals (5.1 finding #2.1). The command
     # palette is still reachable via ctrl+p.
     return Header(show_clock=False, icon="")
+
+
+def _identity_badge_widget(program_root: Path) -> Static:
+    """A persistent top-right badge showing whether the operator is VERIFIED
+    against *program_root*'s roster (Roman's request via deploy 2.1). Pure
+    render of resolve_identity() — no new identity logic. markup=False so the
+    OTAMAN_HUMAN value can't be parsed as console markup; colour comes from the
+    verified/unverified CSS class, not inline markup."""
+    from otaman_cli.console.identity import identity_badge, resolve_identity
+
+    ident = resolve_identity(program_root)
+    return Static(
+        identity_badge(ident),
+        id="identity-badge",
+        markup=False,
+        classes="verified" if ident.verified else "unverified",
+    )
 
 
 class _ProgramItem(ListItem):
@@ -60,6 +83,9 @@ class ProgramPickerScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield _header()
+        # Resolve the badge against the first program's roster (best-effort at
+        # the picker; a picked program re-resolves against its own root).
+        yield _identity_badge_widget(self._programs[0].root if self._programs else _NO_PROGRAM_ROOT)
         if self._programs:
             yield Static("Select a program (Enter):", id="picker-hint")
             yield ListView(*[_ProgramItem(p) for p in self._programs], id="program-list")
@@ -103,6 +129,7 @@ class PendingListScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield _header()
+        yield _identity_badge_widget(self.program.root)
         yield Static(f"Program: {self.program.name}", id="prog-header", markup=False)
         yield ListView(id="pending-list")
         yield Footer()
@@ -194,6 +221,7 @@ class ProposalScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield _header()
+        yield _identity_badge_widget(self.program.root)
         yield Static(
             f"{self.proposal.subject}   —   from {self.proposal.from_agent}",
             id="proposal-title",
@@ -231,6 +259,21 @@ class OtamanConsole(App):
     """`otaman -i` — the human console shell."""
 
     TITLE = "Otaman Console"
+
+    # The identity badge sits on an overlay layer docked top-right, so it rides
+    # over the header's right corner on every screen (deploy 2.1 / Roman).
+    CSS = """
+    Screen { layers: base overlay; }
+    #identity-badge {
+        layer: overlay;
+        dock: top;
+        height: 1;
+        content-align-horizontal: right;
+        padding: 0 2 0 0;
+    }
+    #identity-badge.verified { color: $success; }
+    #identity-badge.unverified { color: $warning; }
+    """
 
     def __init__(self, programs: list[Program], *, search_root=None) -> None:
         super().__init__()

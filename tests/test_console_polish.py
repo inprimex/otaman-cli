@@ -158,3 +158,56 @@ def test_theme_restored_from_prefs_and_persisted_on_change(tmp_path, monkeypatch
 
     asyncio.run(go())
     assert prefs.load_prefs()["theme"] == "gruvbox"  # persisted for next session
+
+
+def _program_with_roster(tmp_path):
+    from otaman_cli.console import bus
+
+    root = tmp_path / "prog"
+    (root / ".agents" / "bus" / "active" / "acks").mkdir(parents=True)
+    root.joinpath("platform.yaml").write_text(
+        "project: p\nversion: '1.0'\nrepos: []\n"
+        "human-roster:\n  - name: roman\n    email: roman@example.com\n    roles: [founder]\n",
+        encoding="utf-8",
+    )
+    return bus.Program(name="p", root=root)
+
+
+@_textual
+def test_identity_badge_persists_and_reflects_verification(tmp_path, monkeypatch):
+    # Roman's request (deploy 2.1): a persistent top-right badge that shows,
+    # before the human acts, whether their approvals will stamp VERIFIED.
+    program = _program_with_roster(tmp_path)
+    from otaman_cli.console.app import OtamanConsole, PendingListScreen
+
+    def badge(app):
+        w = app.screen.query_one("#identity-badge")
+        return str(w.render()), set(w.classes)
+
+    async def go():
+        monkeypatch.setenv("OTAMAN_HUMAN", "roman")  # matches roster name
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            text, classes = badge(app)  # picker screen
+            assert text == "✓ Verified(roman)" and "verified" in classes
+
+            app.push_screen(PendingListScreen(program))
+            await pilot.pause()
+            text, classes = badge(app)  # program screen — still verified
+            assert text == "✓ Verified(roman)" and "verified" in classes
+
+            monkeypatch.setenv("OTAMAN_HUMAN", "Ada Lovelace")  # name-format mismatch
+            app.push_screen(PendingListScreen(program))
+            await pilot.pause()
+            text, classes = badge(app)
+            assert text == "⚠ Unverified(Ada Lovelace)" and "unverified" in classes
+
+            monkeypatch.delenv("OTAMAN_HUMAN", raising=False)
+            app.push_screen(PendingListScreen(program))
+            await pilot.pause()
+            text, classes = badge(app)
+            assert text == "⚠ Unverified(none)" and "unverified" in classes
+            await app.action_quit()
+
+    asyncio.run(go())
