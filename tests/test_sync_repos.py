@@ -69,6 +69,31 @@ def test_dry_run_reports_plan_and_writes_nothing(tmp_path, capsys):
     assert not (tmp_path / "probe-svc").exists()  # nothing materialized
 
 
+def test_dry_run_materialized_repo_is_not_flagged_stale(tmp_path, capsys):
+    # spec-agent gate note 2: a present, fully-materialized repo must read as
+    # "no action", NOT "would regenerate" (which looked like false staleness).
+    meta = _program(tmp_path, "  - name: docs\n    path: ../docs\n    owner: cli-agent\n")
+    repo = (tmp_path / "docs").resolve()
+    repo.mkdir()
+    (repo / ".otaman").write_text("../meta\nagent: cli-agent\n", encoding="utf-8")
+    (repo / "CLAUDE.local.md").write_text("rules\n", encoding="utf-8")
+    rc = cmd_sync_repos(["--dry-run", "--path", str(meta)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "present and materialized (no action)" in out
+    assert "would regenerate" not in out
+    assert "already materialized" in out
+
+
+def test_dry_run_flags_present_but_unmaterialized(tmp_path, capsys):
+    meta = _program(tmp_path, "  - name: bare\n    path: ../bare\n    owner: cli-agent\n")
+    (tmp_path / "bare").mkdir()  # present but no marker/rules
+    rc = cmd_sync_repos(["--dry-run", "--path", str(meta)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "would materialize bare (marker/rules missing)" in out
+
+
 # ---------------------------------------------------------------------------
 # the spec's key scenario: an absent repo is fully materialized
 
