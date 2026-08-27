@@ -81,6 +81,31 @@ def _platform_roster_ids(program_root: Path) -> set[str]:
     return ids
 
 
+def roster_drift(program_root: Path, *, tenant_path: Path | None = None) -> list[dict]:
+    """Enrolled identities that CANNOT be verified (console-roster-verification 1.2).
+
+    The two rosters must stay connected: every enrolled fingerprint's
+    ``roster_id`` in the tenant enrollment store
+    (``/etc/otaman/human-roster.yaml``) SHALL have a matching entry
+    (name/email) in the program platform.yaml ``human-roster`` — otherwise the
+    human is enrolled-but-unverifiable (Roman's exact failure: sshd-set
+    OTAMAN_HUMAN=roman against an EMPTY platform.yaml roster → unverified).
+
+    Returns one ``{roster_id, fingerprint}`` per drifted enrollment. Empty when
+    the tenant store is absent (CE/self-serve) or fully in sync.
+    """
+    entries = tenant_roster_entries(tenant_path or tenant_roster_path())
+    if not entries:
+        return []
+    verifiable = _platform_roster_ids(program_root)
+    drift: list[dict] = []
+    for e in entries:
+        rid = str(e.get("roster_id") or "")
+        if rid and rid not in verifiable:
+            drift.append({"roster_id": rid, "fingerprint": str(e.get("fingerprint") or "")})
+    return drift
+
+
 @dataclass(frozen=True)
 class ConsoleIdentity:
     """Who the console attributes an approval to."""
@@ -135,4 +160,11 @@ def identity_badge(identity: ConsoleIdentity) -> str:
     return f"⚠ Unverified({identity.operator})"
 
 
-__all__ = ["ConsoleIdentity", "identity_badge", "resolve_identity", "tenant_roster_path"]
+__all__ = [
+    "ConsoleIdentity",
+    "identity_badge",
+    "resolve_identity",
+    "roster_drift",
+    "tenant_roster_entries",
+    "tenant_roster_path",
+]
