@@ -296,6 +296,45 @@ def _print_repo_materialization_report(results: list[dict]) -> None:
             print(f"        fix: {hint}")
 
 
+def _check_roster_sync(root: Path) -> tuple[int, list[dict]]:
+    """console-roster-verification 1.2 — two-roster drift.
+
+    Flags enrolled fingerprints (tenant ``/etc/otaman/human-roster.yaml``)
+    whose ``roster_id`` has no matching platform.yaml ``human-roster`` entry —
+    i.e. enrolled-but-unverifiable. WARN-only (rc stays 0); returns the drift
+    rows. Absent tenant store (CE/self-serve) → no rows.
+    """
+    try:
+        from otaman_cli.console.identity import roster_drift
+
+        return 0, roster_drift(root)
+    except Exception as exc:  # noqa: BLE001 - never crash the whole doctor run
+        return 0, [{"status": "error", "error": f"roster-sync check failed: {exc}"}]
+
+
+def _print_roster_sync_report(drift: list[dict]) -> None:
+    """Pretty-print roster drift (1.2); nothing when in sync."""
+    if not drift:
+        return
+    print()
+    UI.header("Roster Sync")
+    for d in drift:
+        if d.get("status") == "error":
+            UI.error(d.get("error", "unknown error"))
+            continue
+        rid = d.get("roster_id", "")
+        fp = d.get("fingerprint", "")
+        fp_tail = f"  [fingerprint {fp[:16]}…]" if fp else ""
+        print(
+            f"  {UI.badge('WARN', C.YELLOW)}  enrolled '{rid}' is unverifiable: "
+            f"no platform.yaml human-roster entry{fp_tail}"
+        )
+        print(
+            f"        fix: add `- name: {rid}` to platform.yaml human-roster "
+            "(or remove the enrollment)"
+        )
+
+
 def cmd_doctor(args: list[str]) -> int:
     """Check environment readiness — git, runtimes, CLI tools, MCP.
 
@@ -507,6 +546,11 @@ def cmd_doctor(args: list[str]) -> int:
     mat_rc, mat_results = _check_repo_materialization(root)
     _print_repo_materialization_report(mat_results)
     base_rc = 1 if (base_rc or mat_rc) else 0
+
+    # console-roster-verification 1.2 — two-roster drift (enrolled-but-
+    # unverifiable). WARN-only, so it doesn't change the exit code.
+    _rs_rc, rs_drift = _check_roster_sync(root)
+    _print_roster_sync_report(rs_drift)
 
     # ce-bootstrap-harness-deps task 3.1 — additive `--org` harness check
     if org:
