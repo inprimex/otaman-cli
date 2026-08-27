@@ -145,6 +145,16 @@ def cmd_project_assign(
     )
     if rc != 0:
         UI.warn(f"git commit failed (file written): {out.strip()[:120]}")
+
+    # repo-registration-materialization 1.3: registration is a platform.yaml
+    # edit, not a checkout. On any host where this repo's path is absent, the
+    # local tree + agent artifacts must be materialized — point the operator at
+    # the command so the drift doesn't sit silently (doctor also flags it, 1.2).
+    UI.muted(
+        "Note: registration records the repo in platform.yaml; it does not create "
+        "the checkout on other hosts. Run `otaman sync-repos` there to clone + "
+        "materialize it."
+    )
     return 0
 
 

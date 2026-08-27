@@ -202,6 +202,16 @@ def test_assign_existing_git_repo_with_origin(project: Path):
     assert "url" not in entry
 
 
+def test_assign_output_carries_materialization_reminder(project: Path):
+    """repo-registration-materialization 1.3: assign output names the
+    materialization command, so the operator knows registration != checkout."""
+    new_repo = _make_local_git_repo(project.parent, "remind-svc")
+    rc = _run(project, "project", "assign", str(new_repo), "--owner", "ops-agent")
+    assert rc.returncode == 0, rc.stderr or rc.stdout
+    assert "otaman sync-repos" in rc.stdout
+    assert "does not create the checkout" in rc.stdout
+
+
 def test_assign_runs_otaman_init_and_writes_dot_otaman_marker(project: Path):
     """Spec scenario 10.5: AND `otaman init` runs in `../my-service`.
 
