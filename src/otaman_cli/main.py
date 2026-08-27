@@ -592,6 +592,7 @@ def cmd_help() -> int:
   {C.GREEN}validate-messages{C.RESET} [file]      Validate bus message files
   {C.GREEN}install-cli{C.RESET} [--prefix DIR]     Install ``otaman`` shim on PATH (so launchers find it)
   {C.GREEN}upgrade{C.RESET} [--dry-run] [--yes]    Walk launcher registry: git pull + otaman init each
+  {C.GREEN}sync-repos{C.RESET} [--dry-run]          Clone registered-but-absent repos + regenerate their agent artifacts
   {C.GREEN}compliance{C.RESET} [--format F]        Generate compliance audit report (HIPAA / ISO / GDPR)
 
 {C.BOLD}Bus & messages:{C.RESET}

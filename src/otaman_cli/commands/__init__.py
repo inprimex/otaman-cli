@@ -99,4 +99,5 @@ from otaman_cli.commands import scan as _scan  # noqa: E402,F401
 from otaman_cli.commands import simple_dispatch as _simple_dispatch  # noqa: E402,F401
 from otaman_cli.commands import solution as _solution  # noqa: E402,F401
 from otaman_cli.commands import status_cluster as _status_cluster  # noqa: E402,F401
+from otaman_cli.commands import sync_repos as _sync_repos  # noqa: E402,F401
 from otaman_cli.commands import upgrade as _upgrade  # noqa: E402,F401
