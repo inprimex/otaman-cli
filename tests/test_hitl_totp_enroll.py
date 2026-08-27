@@ -51,7 +51,7 @@ def _isolated_registry():
 
 
 def test_email_slug_lowercases_and_replaces_nonalnum():
-    assert cfg.email_slug("Roman.Starikov@Inprimex.com") == "roman-starikov-inprimex-com"
+    assert cfg.email_slug("Ada.Lovelace@Example.com") == "ada-lovelace-example-com"
 
 
 def test_totp_key_prefixes_slug():

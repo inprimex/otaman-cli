@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from otaman_cli.console import bus, decision
-from otaman_cli.console.identity import resolve_identity
+from otaman_cli.console.identity import ConsoleIdentity, identity_badge, resolve_identity
 
 _HAS_TEXTUAL = importlib.util.find_spec("textual") is not None
 _textual = pytest.mark.skipif(not _HAS_TEXTUAL, reason="needs the 'console' extra (Textual)")
@@ -72,6 +72,37 @@ def test_identity_unverified_when_not_in_roster(program, monkeypatch):
 def test_identity_absent_is_unknown_unverified(program):
     ident = resolve_identity(program.root)
     assert ident.operator == "unknown-operator" and ident.verified is False
+
+
+# --- identity_badge: title-bar badge string (Roman req via deploy 2.1) -------
+
+
+def test_identity_badge_verified_shows_name():
+    assert identity_badge(ConsoleIdentity(operator="roman", verified=True)) == "✓ Verified(roman)"
+
+
+def test_identity_badge_unverified_shows_value_for_self_diagnosis():
+    # the whole point: a name-format mismatch is visible, not just "unverified"
+    assert (
+        identity_badge(ConsoleIdentity(operator="Ada Lovelace", verified=False))
+        == "⚠ Unverified(Ada Lovelace)"
+    )
+
+
+def test_identity_badge_absent_shows_none():
+    assert (
+        identity_badge(ConsoleIdentity(operator="unknown-operator", verified=False))
+        == "⚠ Unverified(none)"
+    )
+
+
+def test_identity_badge_matches_resolve_identity_end_to_end(program, monkeypatch):
+    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
+    assert identity_badge(resolve_identity(program.root)) == "✓ Verified(roman)"
+    monkeypatch.setenv("OTAMAN_HUMAN", "Ada Lovelace")  # not in roster
+    assert identity_badge(resolve_identity(program.root)) == "⚠ Unverified(Ada Lovelace)"
+    monkeypatch.delenv("OTAMAN_HUMAN", raising=False)
+    assert identity_badge(resolve_identity(program.root)) == "⚠ Unverified(none)"
 
 
 # ---------------------------------------------------------------------------
