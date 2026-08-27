@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_program_root
 from otaman_cli.main import UI
 
 # The two artifacts that constitute a materialized repo (spec: `.otaman`
@@ -102,7 +102,7 @@ def cmd_sync_repos(args: list[str]) -> int:
             positional.append(a)
         i += 1
 
-    root = Path(positional[0]).resolve() if positional else find_project_root()
+    root = Path(positional[0]).resolve() if positional else find_program_root()
     if not root:
         UI.error("Not in an otaman project (no platform.yaml found)")
         return 1

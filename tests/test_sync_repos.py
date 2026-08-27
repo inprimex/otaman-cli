@@ -190,3 +190,19 @@ def test_no_repos_registered_is_noop(tmp_path, capsys):
     rc = cmd_sync_repos(["--path", str(meta)])
     assert rc == 0
     assert "nothing to materialize" in capsys.readouterr().out.lower()
+
+
+def test_resolves_from_program_dir_without_explicit_path(tmp_path, monkeypatch, capsys):
+    # gate note 1: launched from the PROGRAM dir (which holds the meta but has
+    # no marker of its own), sync-repos resolves via the single-child fallback
+    # instead of erroring "Not in an otaman project".
+    monkeypatch.delenv("OTAMAN_ROOT", raising=False)
+    monkeypatch.delenv("MAESTRO_ROOT", raising=False)
+    progdir = tmp_path / "programs" / "prog"
+    meta = progdir / "prog-meta"
+    (meta / ".agents" / "bus" / "active" / "acks").mkdir(parents=True)
+    (meta / "platform.yaml").write_text("project: p\nversion: '1.0'\nrepos: []\n", encoding="utf-8")
+    monkeypatch.chdir(progdir)
+    rc = cmd_sync_repos([])  # no --path → find_program_root() → the child meta
+    assert rc == 0
+    assert "nothing to materialize" in capsys.readouterr().out.lower()
