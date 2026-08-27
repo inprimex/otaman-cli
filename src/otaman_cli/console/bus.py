@@ -91,26 +91,89 @@ def _program_meta(platform_yaml: Path) -> dict | None:
     return data
 
 
-def discover_programs(search_root: Path, *, max_depth: int = 4) -> list[Program]:
-    """Distinct PROGRAM roots under *search_root* for the picker.
+def _canonical_bases(search_root: Path) -> list[Path]:
+    """CE-layout bases (the dir that holds ``orgs/``) reachable from
+    *search_root* — either because it IS a base or because it sits inside one.
 
-    Canonical discovery (5.1 finding #1, spec 20260827T065715): a candidate
-    must have full program shape + a bus (`_program_meta`); fixture/launcher/
-    example subtrees are skipped; a candidate nested inside another program's
-    tree is dropped; and candidates are deduped by program IDENTITY (`project`),
-    keeping the shallowest root — so one program never appears twice.
+    The canonical CE layout is ``<base>/orgs/<org>/programs/<program>/<meta>``
+    (uniform-ce-directory-layout canon). A human launches the console from
+    their home dir (a base) or from inside a program (below a base); both must
+    enumerate every program, so we derive the base from either position.
+    """
+    bases: list[Path] = []
+    if (search_root / "orgs").is_dir():
+        bases.append(search_root)
+    parts = search_root.parts
+    if "orgs" in parts:
+        idx = parts.index("orgs")
+        base = Path(*parts[:idx]) if idx > 0 else Path(search_root.anchor)
+        if base not in bases:
+            bases.append(base)
+    return bases
+
+
+def _canonical_meta_dirs(search_root: Path) -> list[Path]:
+    """Program meta dirs under the canonical CE layout beneath *search_root*'s
+    base(s): ``orgs/<org>/programs/<program>/<meta>`` holding a platform.yaml.
+
+    This reaches the meta dir directly (it sits 5 levels below ``$HOME``, past
+    the bounded walk's ``max_depth``) — the fix for 5.1 finding #3: launched
+    from home, the walk found nothing, so the picker showed "No programs
+    found". The full-shape/bus gate still runs on each candidate.
+    """
+    out: list[Path] = []
+    for base in _canonical_bases(search_root):
+        try:
+            for org in (base / "orgs").iterdir():
+                programs = org / "programs"
+                if not (org.is_dir() and not org.name.startswith(".") and programs.is_dir()):
+                    continue
+                for program in programs.iterdir():
+                    if not program.is_dir() or program.name.startswith("."):
+                        continue
+                    for meta in program.iterdir():
+                        if meta.is_dir() and (meta / "platform.yaml").is_file():
+                            out.append(meta)
+        except OSError:
+            continue
+    return out
+
+
+def discover_programs(
+    search_root: Path, *, max_depth: int = 4, cwd: Path | None = None
+) -> list[Program]:
+    """Distinct PROGRAM roots for the picker, deduped by identity.
+
+    Three candidate sources, unioned then deduped (5.1 findings #1 and #3):
+
+    1. A bounded recursive walk under *search_root* — handles an explicit
+       ``--path`` and non-canonical layouts; skips fixture/launcher/example
+       subtrees and drops nested copies (finding #1).
+    2. The canonical CE directory layout under *search_root*'s base(s) —
+       ``orgs/<org>/programs/<program>/<meta>`` — so a home-dir launch (the
+       human's natural entry point) enumerates every program even though the
+       meta sits below the walk's ``max_depth`` (finding #3).
+    3. When *cwd* is given, the program resolved from its marker chain — so
+       launching from inside a one-off checkout outside the standard base
+       still surfaces that program (finding #3, "union the cwd marker chain").
+
+    Every candidate must pass the full-shape + bus gate (`_program_meta`);
+    candidates are deduped by program IDENTITY (`project`), keeping the
+    shallowest root — so one program never appears twice.
     """
     candidates: list[Program] = []
     root = search_root.resolve()
 
+    def _add(meta_root: Path) -> None:
+        meta = _program_meta(meta_root / "platform.yaml")
+        if meta is not None:
+            candidates.append(Program(name=str(meta["project"]), root=meta_root.resolve()))
+
     def walk(d: Path, depth: int) -> None:
         if depth > max_depth:
             return
-        pf = d / "platform.yaml"
-        if pf.is_file():
-            meta = _program_meta(pf)
-            if meta is not None:
-                candidates.append(Program(name=str(meta["project"]), root=d.resolve()))
+        if (d / "platform.yaml").is_file():
+            _add(d)
         try:
             children = [
                 c
@@ -123,6 +186,22 @@ def discover_programs(search_root: Path, *, max_depth: int = 4) -> list[Program]
             walk(child, depth + 1)
 
     walk(root, 0)
+
+    # 2. Canonical CE layout under the base(s) — the finding #3 fix.
+    for meta_dir in _canonical_meta_dirs(root):
+        _add(meta_dir)
+
+    # 3. cwd marker-chain union (only when a cwd is supplied — keeps the
+    #    function a pure read of the filesystem for tests that don't pass one).
+    if cwd is not None:
+        from otaman_cli.identity import find_project_root
+
+        try:
+            cwd_root = find_project_root(cwd)
+        except Exception:  # noqa: BLE001 - a broken/unsafe marker must not kill the picker
+            cwd_root = None
+        if cwd_root is not None:
+            _add(cwd_root)
 
     # Drop any candidate nested inside another candidate's tree (a stray copy
     # under a program's repos/subdirs is not its own program).
