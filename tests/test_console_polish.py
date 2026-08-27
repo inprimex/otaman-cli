@@ -107,6 +107,41 @@ def test_async_load_shows_loading_then_fills(tmp_path, monkeypatch):
 
 
 @_textual
+def test_back_navigation_renders_from_cache_instantly(tmp_path, monkeypatch):
+    # 5.1 finding #5: returning from a proposal must paint the cached list
+    # SYNCHRONOUSLY — no rescan on navigation. A thread worker can only deliver
+    # results at an await point, so if the cached item is present immediately
+    # after on_screen_resume() (with no await in between), it came from the
+    # cache, not a rescan.
+    program = _program(tmp_path, monkeypatch)
+    from otaman_cli.console.app import OtamanConsole, PendingListScreen, _ProposalItem
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            screen = PendingListScreen(program)
+            app.push_screen(screen)
+            await pilot.pause()
+            await app.workers.wait_for_complete()  # first load fills the cache
+            await pilot.pause()
+            lv = screen.query_one("#pending-list")
+            assert len([c for c in lv.children if isinstance(c, _ProposalItem)]) == 1
+            assert screen._cache is not None and len(screen._cache) == 1  # cache filled
+
+            # Spy the paint: on_screen_resume must paint from the cache
+            # synchronously (a thread worker can only deliver at an await point,
+            # so a synchronous paint here proves back-nav renders from cache).
+            painted: list[list] = []
+            monkeypatch.setattr(screen, "_paint", lambda proposals: painted.append(list(proposals)))
+            screen.on_screen_resume()
+            assert painted and len(painted[0]) == 1  # painted the cached list, no rescan
+            await app.action_quit()
+
+    asyncio.run(go())
+
+
+@_textual
 def test_theme_restored_from_prefs_and_persisted_on_change(tmp_path, monkeypatch):
     program = _program(tmp_path, monkeypatch, with_proposal=False)
     prefs.save_prefs({"theme": "nord"})  # a saved preference

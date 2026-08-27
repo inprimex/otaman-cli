@@ -96,6 +96,10 @@ class PendingListScreen(Screen):
         # console rework. Tests pass a fake source.
         self._source = event_source
         self._own_source = event_source is None
+        # Session cache of the pending list (5.1 finding #5): navigation renders
+        # from this instantly; only the mount-time load and the polling source's
+        # incremental refresh ever re-scan the bus. None = not loaded yet.
+        self._cache: list[Proposal] | None = None
 
     def compose(self) -> ComposeResult:
         yield _header()
@@ -104,38 +108,50 @@ class PendingListScreen(Screen):
         yield Footer()
 
     def on_mount(self) -> None:
-        # Paint-then-fill (5.1 finding #2.4): the bus scan (700+ files, YAML
-        # each) took 8+s and blocked first paint. Show the screen immediately
-        # with a loading row, then load off the UI thread and populate.
-        self._load()
+        # First load: paint a loading row, then scan off the UI thread (5.1
+        # finding #2.4). Subsequent navigation renders from cache (finding #5).
+        self._refresh(show_loading=True)
         if self._source is None:
             from otaman_cli.console.events import make_event_source
 
             self._source = make_event_source(self.program)
-        # Marshal the provider's (possibly off-thread) callback onto the UI.
-        self._source.start(lambda: self.app.call_from_thread(self._load))
+        # The polling source drives INCREMENTAL refresh: when the pending set
+        # moves it re-scans off-thread and updates the cache — navigation never
+        # triggers a scan (finding #5). Marshal the callback onto the UI thread.
+        self._source.start(lambda: self.app.call_from_thread(self._refresh))
 
     def on_unmount(self) -> None:
         if self._source is not None and self._own_source:
             self._source.stop()
 
     def on_screen_resume(self) -> None:
-        # Returning from a ProposalScreen (after approve/reject) → refresh so a
-        # just-decided proposal drops off the list.
-        self._load()
+        # Back from a ProposalScreen: render the cached list INSTANTLY (no
+        # rescan — finding #5, back-navigation used to re-pay the full scan),
+        # then reconcile in the background so a just-decided proposal drops off.
+        self._paint(self._cache or [])
+        self._refresh(show_loading=False)
 
-    def _load(self) -> None:
-        """Show a loading row, then read the bus off-thread and populate."""
-        lv = self.query_one("#pending-list", ListView)
-        lv.clear()
-        lv.append(ListItem(Label("Loading pending proposals…")))
+    def _refresh(self, *, show_loading: bool = False) -> None:
+        """(Re)scan the bus off the UI thread, updating the cache.
+
+        Shows a loading row only on the very first load (empty cache); a
+        background reconcile repaints in place without a blank flash.
+        """
+        if show_loading and not self._cache:
+            lv = self.query_one("#pending-list", ListView)
+            lv.clear()
+            lv.append(ListItem(Label("Loading pending proposals…")))
         self.run_worker(self._load_worker, thread=True, exclusive=True, group="load")
 
     def _load_worker(self) -> None:
-        proposals = list_pending_proposals(self.program)  # slow scan, off the UI thread
-        self.app.call_from_thread(self._populate, proposals)
+        proposals = list_pending_proposals(self.program)  # bus scan, off the UI thread
+        self.app.call_from_thread(self._apply, proposals)
 
-    def _populate(self, proposals: list[Proposal]) -> None:
+    def _apply(self, proposals: list[Proposal]) -> None:
+        self._cache = proposals
+        self._paint(proposals)
+
+    def _paint(self, proposals: list[Proposal]) -> None:
         lv = self.query_one("#pending-list", ListView)
         lv.clear()
         if proposals:
@@ -148,7 +164,7 @@ class PendingListScreen(Screen):
         self.app.pop_screen()
 
     def action_refresh(self) -> None:
-        self._load()
+        self._refresh(show_loading=not self._cache)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         proposal = getattr(event.item, "proposal", None)

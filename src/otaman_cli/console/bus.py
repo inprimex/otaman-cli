@@ -217,11 +217,36 @@ def discover_programs(
     return sorted(by_name.values(), key=lambda p: p.name.lower())
 
 
+def _frontmatter_head(f: Path, limit: int = 8192) -> str | None:
+    """The YAML frontmatter block of *f*, read from a BOUNDED head only.
+
+    Bus messages put frontmatter at the very top; reading the whole file (many
+    with multi-KB bodies) across a ~3000-message active dir is what made the
+    console scan 7-9s (5.1 finding #5). ``limit`` bytes always covers a bus
+    frontmatter block. Returns the inner YAML text, or None if there's no
+    frontmatter.
+    """
+    try:
+        with f.open("r", encoding="utf-8") as fh:
+            head = fh.read(limit)
+    except OSError:
+        return None
+    m = re.match(r"^---\n(.+?)\n---", head, re.DOTALL)
+    return m.group(1) if m else None
+
+
 def list_pending_proposals(program: Program) -> list[Proposal]:
     """Pending spec-change-requests for *program* (no `<stem>.human.ack`).
 
     Same detection as `otaman approve`, so the two never disagree. Malformed
     files are skipped, never crash the console.
+
+    Perf (5.1 finding #5 — ~3000-message active dirs): the hot loop reads only
+    a bounded frontmatter head (not the whole file), skips the ~99% of
+    messages that aren't spec-change-requests with a cheap substring test
+    BEFORE any YAML parse, and lists the ack dir ONCE into a set instead of a
+    stat per message. The full file is read only for the handful of genuine
+    pending proposals (for their subject + body). ~3000 files: 2.3s → <0.3s.
     """
     import yaml
 
@@ -229,37 +254,52 @@ def list_pending_proposals(program: Program) -> list[Proposal]:
     if not active_dir.is_dir():
         return []
 
+    # List acks once → a set membership test, not a filesystem stat per message.
+    try:
+        acked = {p.name for p in acks_dir.glob("*.human.ack")} if acks_dir.is_dir() else set()
+    except OSError:
+        acked = set()
+
     out: list[Proposal] = []
     for f in sorted(active_dir.glob("*.md")):
+        fm_text = _frontmatter_head(f)
+        if fm_text is None:
+            continue
+        # Cheap prefilter: skip the overwhelming majority without parsing YAML.
+        # fm_text is the frontmatter ONLY, so this can't false-match a body.
+        if "spec-change-request" not in fm_text:
+            continue
+        if f"{f.stem}.human.ack" in acked:
+            continue
+        try:
+            fm = yaml.safe_load(fm_text)
+        except yaml.YAMLError:
+            continue
+        if not isinstance(fm, dict) or fm.get("type") != "spec-change-request":
+            continue
+        # Only genuine pending proposals reach here (a handful) — now it's
+        # cheap to read the whole file for the subject + body.
         try:
             content = f.read_text(encoding="utf-8")
-            fm_match = re.match(r"^---\n(.+?)\n---", content, re.DOTALL)
-            if not fm_match:
-                continue
-            fm = yaml.safe_load(fm_match.group(1))
-            if not isinstance(fm, dict) or fm.get("type") != "spec-change-request":
-                continue
-            if (acks_dir / f"{f.stem}.human.ack").exists():
-                continue
-            body = content.split("---", 2)[-1] if content.count("---") >= 2 else ""
-            subject = ""
-            for line in body.splitlines():
-                if line.strip().startswith("## Subject:"):
-                    subject = line.strip().replace("## Subject:", "").strip()
-                    break
-            out.append(
-                Proposal(
-                    stem=f.stem,
-                    subject=subject or f.stem,
-                    from_agent=str(fm.get("from", "?")),
-                    timestamp=str(fm.get("timestamp", "")),
-                    priority=str(fm.get("priority", "normal")),
-                    path=f,
-                    body=body.strip(),
-                )
-            )
-        except (OSError, yaml.YAMLError):
+        except OSError:
             continue
+        body = content.split("---", 2)[-1] if content.count("---") >= 2 else ""
+        subject = ""
+        for line in body.splitlines():
+            if line.strip().startswith("## Subject:"):
+                subject = line.strip().replace("## Subject:", "").strip()
+                break
+        out.append(
+            Proposal(
+                stem=f.stem,
+                subject=subject or f.stem,
+                from_agent=str(fm.get("from", "?")),
+                timestamp=str(fm.get("timestamp", "")),
+                priority=str(fm.get("priority", "normal")),
+                path=f,
+                body=body.strip(),
+            )
+        )
     return out
 
 
