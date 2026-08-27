@@ -113,6 +113,68 @@ def test_discover_excludes_nested_and_dedupes_by_identity(ws):
     assert progs[0].root == (ws / "prog").resolve()  # the shallowest/canonical root won
 
 
+def _canonical_program(base: Path, org: str, program: str, project: str) -> Path:
+    """Build base/orgs/<org>/programs/<program>/<program>-meta with full shape."""
+    meta = base / "orgs" / org / "programs" / program / f"{program}-meta"
+    _full_program(meta, project)
+    return meta
+
+
+def test_discover_finds_canonical_layout_from_home_base(ws):
+    # 5.1 finding #3: the meta sits 5 levels below the base ($HOME), past the
+    # bounded walk's max_depth — canonical enumeration must still find it.
+    meta = _canonical_program(ws, "otaman-dev", "otaman-dev", "otaman-dev")
+    progs = bus.discover_programs(ws, max_depth=4)
+    assert [p.name for p in progs] == ["otaman-dev"]
+    assert progs[0].root == meta.resolve()
+
+
+def test_discover_canonical_is_cross_program_from_inside_a_program(ws):
+    # Launched from inside one program, the picker still enumerates every
+    # program under the shared base (the picker's purpose is cross-program).
+    _canonical_program(ws, "otaman-dev", "alpha", "alpha")
+    _canonical_program(ws, "otaman-dev", "beta", "beta")
+    inside = ws / "orgs" / "otaman-dev" / "programs" / "alpha" / "alpha-meta"
+    progs = bus.discover_programs(inside)
+    assert [p.name for p in progs] == ["alpha", "beta"]
+
+
+def test_discover_unions_cwd_marker_chain(tmp_path, monkeypatch):
+    # A one-off program outside any orgs/ base: the walk + canonical layout
+    # find nothing, but the cwd marker chain resolves it (finding #3). The
+    # core marker resolver refuses tmp markers pointing outside $HOME, so we
+    # stub it to return the meta the chain would resolve — this exercises the
+    # union + the full-shape gate, which is the console-side logic under test.
+    meta = tmp_path / "meta"
+    _full_program(meta, "oneoff")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+
+    import otaman_cli.identity as _identity
+
+    monkeypatch.setattr(_identity, "find_project_root", lambda start=None: meta)
+    # Without cwd the marker chain is never consulted (pure filesystem read).
+    assert bus.discover_programs(empty) == []
+    # With cwd the resolved program surfaces.
+    progs = bus.discover_programs(empty, cwd=tmp_path / "repo")
+    assert [p.name for p in progs] == ["oneoff"]
+    assert progs[0].root == meta.resolve()
+
+
+def test_discover_cwd_union_survives_marker_resolution_error(tmp_path, monkeypatch):
+    # A broken/unsafe marker makes find_project_root raise — the picker must
+    # not crash; it just yields no cwd-union candidate.
+    import otaman_cli.identity as _identity
+
+    def _boom(start=None):
+        raise RuntimeError("unsafe marker")
+
+    monkeypatch.setattr(_identity, "find_project_root", _boom)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert bus.discover_programs(empty, cwd=tmp_path / "repo") == []
+
+
 def test_list_pending_proposals(ws):
     prog_root = _make_program(ws / "p", "p")
     _stage_proposal(prog_root, "20260101T000000-a-to-human-spec-change-request", subject="one")

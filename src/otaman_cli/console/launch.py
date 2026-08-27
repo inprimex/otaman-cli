@@ -51,7 +51,10 @@ def run_console(argv: list[str], *, _run: bool = True) -> int:
     from otaman_cli.console.bus import discover_programs
 
     search_root = _resolve_search_root(argv)
-    programs = discover_programs(search_root)
+    # Pass cwd so discovery can union the marker-chain program when launched
+    # from inside a one-off checkout (5.1 finding #3); canonical CE-layout
+    # enumeration handles the standard home-dir launch.
+    programs = discover_programs(search_root, cwd=Path.cwd())
     app = OtamanConsole(programs, search_root=search_root)
     if _run:  # pragma: no cover - the blocking TUI loop is not unit-tested
         app.run()
