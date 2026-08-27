@@ -41,44 +41,101 @@ class Proposal:
     body: str
 
 
-def _program_name(root: Path) -> str:
+# Directories that never hold a distinct PROGRAM root: heavy build dirs, the
+# bus itself, and — the 5.1 picker finding (spec 20260827T065715) — fixture /
+# launcher / example subtrees whose platform.yaml is a sample or a nested copy,
+# not a program.
+_SKIP_DIRS = frozenset(
+    {
+        ".git",
+        "node_modules",
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".agents",
+        "dist",
+        "build",
+        "site-packages",
+        "examples",
+        "example",
+        "launcher",
+        "test",
+        "tests",
+        "fixtures",
+        "sample",
+        "samples",
+    }
+)
+
+
+def _program_meta(platform_yaml: Path) -> dict | None:
+    """Parsed platform.yaml IFF *platform_yaml* is a real PROGRAM root.
+
+    A program root (not a repo-local file, org stray, or fixture) has the FULL
+    program shape — `project` + `version` + a `repos` list — AND a bus
+    (`.agents/` beside it). This is the picker's canonical-discovery gate
+    (5.1 finding #1); it rejects the "trust any platform.yaml" behavior.
+    """
     try:
         import yaml
 
-        cfg = yaml.safe_load((root / "platform.yaml").read_text(encoding="utf-8"))
-        if isinstance(cfg, dict) and cfg.get("project"):
-            return str(cfg["project"])
-    except Exception:  # noqa: BLE001 - fall back to dir name
-        pass
-    return root.name
+        data = yaml.safe_load(platform_yaml.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - unreadable/malformed → not a program
+        return None
+    if not isinstance(data, dict):
+        return None
+    if not (data.get("project") and data.get("version") and isinstance(data.get("repos"), list)):
+        return None
+    if not (platform_yaml.parent / ".agents").is_dir():
+        return None  # a program has a bus; a repo-local platform.yaml does not
+    return data
 
 
 def discover_programs(search_root: Path, *, max_depth: int = 4) -> list[Program]:
-    """Programs found under *search_root* — each directory with a platform.yaml.
+    """Distinct PROGRAM roots under *search_root* for the picker.
 
-    Bounded-depth scan (a program is a platform.yaml + bus; a tenant has
-    several). Sorted by name; deduped by resolved root. `.git`/hidden and
-    common heavy dirs are skipped so the picker stays fast.
+    Canonical discovery (5.1 finding #1, spec 20260827T065715): a candidate
+    must have full program shape + a bus (`_program_meta`); fixture/launcher/
+    example subtrees are skipped; a candidate nested inside another program's
+    tree is dropped; and candidates are deduped by program IDENTITY (`project`),
+    keeping the shallowest root — so one program never appears twice.
     """
-    skip = {".git", "node_modules", ".venv", "venv", "__pycache__", ".agents", "dist", "build"}
-    found: dict[Path, Program] = {}
+    candidates: list[Program] = []
     root = search_root.resolve()
 
     def walk(d: Path, depth: int) -> None:
         if depth > max_depth:
             return
-        if (d / "platform.yaml").is_file():
-            rp = d.resolve()
-            found.setdefault(rp, Program(name=_program_name(d), root=rp))
+        pf = d / "platform.yaml"
+        if pf.is_file():
+            meta = _program_meta(pf)
+            if meta is not None:
+                candidates.append(Program(name=str(meta["project"]), root=d.resolve()))
         try:
-            children = [c for c in d.iterdir() if c.is_dir() and c.name not in skip]
+            children = [
+                c
+                for c in d.iterdir()
+                if c.is_dir() and c.name not in _SKIP_DIRS and not c.name.startswith(".")
+            ]
         except OSError:
             return
         for child in children:
             walk(child, depth + 1)
 
     walk(root, 0)
-    return sorted(found.values(), key=lambda p: p.name.lower())
+
+    # Drop any candidate nested inside another candidate's tree (a stray copy
+    # under a program's repos/subdirs is not its own program).
+    roots = {p.root for p in candidates}
+    candidates = [
+        p for p in candidates if not any(o != p.root and o in p.root.parents for o in roots)
+    ]
+
+    # Dedupe by program identity; the shallowest root wins (the canonical one).
+    by_name: dict[str, Program] = {}
+    for p in sorted(candidates, key=lambda x: len(x.root.parts)):
+        by_name.setdefault(p.name, p)
+    return sorted(by_name.values(), key=lambda p: p.name.lower())
 
 
 def list_pending_proposals(program: Program) -> list[Proposal]:

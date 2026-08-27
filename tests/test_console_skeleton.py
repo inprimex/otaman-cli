@@ -30,8 +30,12 @@ def ws(tmp_path):
 
 
 def _make_program(root: Path, name: str) -> Path:
+    # Full program shape (project+version+repos) + a bus — what canonical
+    # discovery requires (5.1 picker finding).
     (root / ".agents" / "bus" / "active" / "acks").mkdir(parents=True)
-    (root / "platform.yaml").write_text(f"project: {name}\n", encoding="utf-8")
+    (root / "platform.yaml").write_text(
+        f"project: {name}\nversion: '1.0'\nrepos: []\n", encoding="utf-8"
+    )
     return root
 
 
@@ -69,6 +73,44 @@ def test_discover_skips_heavy_dirs(ws):
     (nm / "platform.yaml").write_text("project: junk\n", encoding="utf-8")
     progs = bus.discover_programs(ws)
     assert [p.name for p in progs] == ["app"]
+
+
+def _full_program(root: Path, name: str, *, bus: bool = True) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    if bus:
+        (root / ".agents").mkdir(exist_ok=True)
+    (root / "platform.yaml").write_text(
+        f"project: {name}\nversion: '1.0'\nrepos: []\n", encoding="utf-8"
+    )
+    return root
+
+
+def test_discover_requires_full_shape_and_bus(ws):
+    # 5.1 finding #1: canonical discovery, not "trust any platform.yaml".
+    _full_program(ws / "real", "real")  # full shape + bus → discovered
+    # project-only (org-level shape) → excluded
+    org = ws / "org"
+    (org / ".agents").mkdir(parents=True)
+    (org / "platform.yaml").write_text("project: org\nmodels: {}\n", encoding="utf-8")
+    # full shape but NO bus (repo-local platform.yaml) → excluded
+    _full_program(ws / "repo-local", "repo-local", bus=False)
+    assert [p.name for p in bus.discover_programs(ws)] == ["real"]
+
+
+def test_discover_skips_fixture_and_launcher_dirs(ws):
+    _full_program(ws / "real", "real")
+    _full_program(ws / "plugin" / "examples" / "example-platform", "example-platform")
+    _full_program(ws / "real" / "launcher", "otaman-dev")  # nested copy under launcher/
+    assert [p.name for p in bus.discover_programs(ws)] == ["real"]
+
+
+def test_discover_excludes_nested_and_dedupes_by_identity(ws):
+    _full_program(ws / "prog", "otaman-dev")  # the real one (shallowest)
+    _full_program(ws / "prog" / "sub" / "copy", "otaman-dev")  # nested copy, same identity
+    _full_program(ws / "elsewhere" / "dupe", "otaman-dev")  # same identity, separate tree
+    progs = bus.discover_programs(ws)
+    assert [p.name for p in progs] == ["otaman-dev"]  # exactly one 'otaman-dev'
+    assert progs[0].root == (ws / "prog").resolve()  # the shallowest/canonical root won
 
 
 def test_list_pending_proposals(ws):
