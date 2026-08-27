@@ -67,6 +67,71 @@ def find_project_root(start: Path | None = None) -> Path | None:
     return find_maestro_root(start)
 
 
+def _is_program_root(directory: Path) -> bool:
+    """True when *directory* is a PROGRAM meta: a ``platform.yaml`` with a
+    ``project`` key AND a ``.agents/`` bus beside it.
+
+    The bus requirement is what separates the real meta from (a) a stale/partial
+    ORG-LEVEL platform.yaml (models/bus only, no ``project`` — "org-level roots
+    are dead", incident 20260816) and (b) a REPO that merely ships its own
+    ``platform.yaml`` (e.g. otaman-deploy) but has no bus. Same gate the console
+    picker uses for canonical discovery.
+    """
+    import yaml
+
+    pf = directory / "platform.yaml"
+    if not pf.is_file() or not (directory / ".agents").is_dir():
+        return False
+    try:
+        data = yaml.safe_load(pf.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - unreadable/malformed → not a program
+        return False
+    return isinstance(data, dict) and bool(data.get("project"))
+
+
+def _single_child_program_root(base: Path) -> Path | None:
+    """The one immediate child of *base* that is a PROGRAM root, or None.
+
+    Returns the child only when there is EXACTLY one — zero or several is
+    ambiguous, so we don't guess. Pure filesystem read (no env), kept separate
+    for testability.
+    """
+    try:
+        children = sorted(base.iterdir())
+    except OSError:
+        return None
+    metas = [
+        c.resolve()
+        for c in children
+        if c.is_dir() and not c.name.startswith(".") and _is_program_root(c)
+    ]
+    return metas[0] if len(metas) == 1 else None
+
+
+def find_program_root(start: Path | None = None) -> Path | None:
+    """``find_project_root`` with a CE-layout child fallback for the program dir.
+
+    Materialization/diagnostic tools (`otaman sync-repos`, `otaman doctor`) are
+    naturally launched from the PROGRAM dir
+    ``orgs/<org>/programs/<program>/`` — which carries no marker of its own but
+    CONTAINS the program meta (and marker-bearing repos). From there the
+    standard walk-up either finds nothing OR climbs past the program to a
+    stale ORG-LEVEL ``platform.yaml`` (no ``project``) — both surfaced as a
+    resolution error (repo-materialization gate note 1). In either case, look
+    for the single child of the launch dir that IS a program root and use it;
+    otherwise behave exactly as ``find_project_root``.
+    """
+    base = start or Path.cwd()
+    root = find_project_root(start)
+    if root is not None and _is_program_root(root):
+        return root
+    # root is None, or it resolved to a non-program (org-level/stale) dir.
+    child = _single_child_program_root(base)
+    if child is not None:
+        return child
+    return root  # preserve standard behavior (None, or the projectless dir)
+
+
 def _read_otaman_agent_field(cwd: Path) -> str | None:
     """Walk up from *cwd* looking for agent identity in ``.otaman`` (file or dir shape).
 

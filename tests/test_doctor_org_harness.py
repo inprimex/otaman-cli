@@ -311,7 +311,7 @@ class TestDoctorOrgAdditive:
             stderr = ""
 
         monkeypatch.setattr(m, "run_script", lambda *a, **kw: _StubResult())
-        monkeypatch.setattr(m, "find_project_root", lambda: fake_root)
+        monkeypatch.setattr(m, "find_program_root", lambda: fake_root)
 
         rc = cmd_doctor([])
         assert rc == 0

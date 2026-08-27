@@ -13,7 +13,7 @@ import subprocess
 from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_program_root
 from otaman_cli.main import UI, C, run_script
 
 try:
@@ -315,7 +315,7 @@ def cmd_doctor(args: list[str]) -> int:
             positional.append(args[i])
             i += 1
 
-    root = Path(positional[0]).resolve() if positional else find_project_root()
+    root = Path(positional[0]).resolve() if positional else find_program_root()
     if not root:
         UI.error("Not in an otaman project")
         return 1
