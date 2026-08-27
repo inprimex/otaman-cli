@@ -142,17 +142,23 @@ def cmd_sync_repos(args: list[str]) -> int:
     if dry_run:
         for e in to_clone:
             UI.info(f"would clone {e['name']} ← {e['remote']} → {e['rel']}")
+        # Only present repos that are actually MISSING artifacts need work;
+        # a fully-materialized repo is reported as up-to-date (not "would
+        # regenerate", which read as false staleness — spec-agent gate note 2).
+        present_materialized = 0
         for e in present:
-            missing = not _is_materialized(e["dir"])
-            UI.muted(
-                f"would regenerate artifacts for {e['name']}"
-                + ("  (marker/rules missing)" if missing else "")
-            )
+            if _is_materialized(e["dir"]):
+                present_materialized += 1
+                UI.muted(f"{e['name']}: present and materialized (no action)")
+            else:
+                UI.info(f"would materialize {e['name']} (marker/rules missing)")
         for e in no_remote:
             UI.error(f"cannot materialize {e['name']}: registered path absent and no remote set")
+        present_needs_work = len(present) - present_materialized
         UI.muted(
-            f"\nPlan: {len(to_clone)} to clone, {len(present)} present, "
-            f"{len(no_remote)} un-materializable. Re-run without --dry-run to apply."
+            f"\nPlan: {len(to_clone)} to clone, {present_needs_work} to (re)materialize, "
+            f"{present_materialized} already materialized, {len(no_remote)} un-materializable. "
+            "Re-run without --dry-run to apply."
         )
         return 1 if no_remote else 0
 
