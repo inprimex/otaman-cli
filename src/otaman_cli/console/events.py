@@ -60,13 +60,23 @@ class PollingEventSource:
         return tuple(p.stem for p in self.snapshot())
 
     def start(self, on_change: Callable[[], None]) -> None:
-        self._last = self._stems()
+        # start() MUST NOT scan the bus on the calling thread: the console
+        # calls it from Screen.on_mount, and a synchronous scan there blocks
+        # the screen's FIRST PAINT (5.1 finding #4 — a 700+ file bus read sat
+        # between picker-Enter and the "Loading…" row appearing). The baseline
+        # is established inside the poll thread instead; the console's own
+        # mount-time worker paints the initial list, so deferring the baseline
+        # loses no change.
+        self._last = None
         self._stop.clear()
 
         def loop() -> None:
             # wait() returns True on stop, False on timeout → poll after each gap
             while not self._stop.wait(self.interval):
                 stems = self._stems()
+                if self._last is None:
+                    self._last = stems  # first in-thread scan sets the baseline
+                    continue
                 if stems != self._last:
                     self._last = stems
                     try:

@@ -10,12 +10,28 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import threading
+import time
 from pathlib import Path
 
 import pytest
 
 from otaman_cli.console import bus
+from otaman_cli.console import events as _events
 from otaman_cli.console.events import EventSource, PollingEventSource, make_event_source
+
+
+def _await_baseline(src: PollingEventSource, timeout: float = 2.0) -> None:
+    """Wait until the poll thread has taken its first (baseline) scan.
+
+    The baseline is established IN the poll thread (5.1 finding #4: start()
+    must not scan on the calling thread), so a test that mutates the bus must
+    first let that baseline settle or the mutation is folded into it.
+    """
+    deadline = time.monotonic() + timeout
+    while src._last is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert src._last is not None, "poll thread never established its baseline"
+
 
 _HAS_TEXTUAL = importlib.util.find_spec("textual") is not None
 _textual = pytest.mark.skipif(not _HAS_TEXTUAL, reason="needs the 'console' extra (Textual)")
@@ -59,6 +75,7 @@ def test_polling_fires_on_new_proposal(program):
     fired = threading.Event()
     src.start(lambda: fired.set())
     try:
+        _await_baseline(src)  # let the empty-bus baseline settle first
         _stage(program, "20260101T000000-a-to-human-spec-change-request")
         assert fired.wait(2.0), "on_change not fired for a new proposal"
     finally:
@@ -72,11 +89,37 @@ def test_polling_fires_on_removal(program):
     fired = threading.Event()
     src.start(lambda: fired.set())
     try:
+        _await_baseline(src)  # baseline includes the staged proposal
         # ack it → drops out of pending → set changes → fire
         (program.root / ".agents" / "bus" / "active" / "acks" / f"{stem}.human.ack").write_text(
             "approved\n", encoding="utf-8"
         )
         assert fired.wait(2.0)
+    finally:
+        src.stop()
+
+
+def test_start_does_not_scan_on_calling_thread(program, monkeypatch):
+    # 5.1 finding #4: start() is called from Screen.on_mount; a synchronous
+    # bus scan there blocks the screen's first paint. start() must return
+    # WITHOUT scanning on the caller — the baseline is taken in the poll thread.
+    main = threading.current_thread().name
+    seen: dict[str, str] = {}
+    orig = _events.list_pending_proposals
+
+    def spy(prog):
+        seen.setdefault("thread", threading.current_thread().name)
+        return orig(prog)
+
+    monkeypatch.setattr(_events, "list_pending_proposals", spy)
+    src = PollingEventSource(program, interval=0.2)
+    src.start(lambda: None)
+    try:
+        assert "thread" not in seen, "start() scanned the bus on the calling thread"
+        deadline = time.monotonic() + 2.0
+        while "thread" not in seen and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert seen.get("thread") and seen["thread"] != main  # scanned off-thread
     finally:
         src.stop()
 
