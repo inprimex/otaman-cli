@@ -46,6 +46,7 @@ def _isolated_tenant_home(tmp_path, monkeypatch):
 
     import otaman_cli.connections.store as _conn_store
     import otaman_cli.console.identity as _console_identity
+    import otaman_cli.console.prefs as _console_prefs
     import otaman_cli.hitl.chat_fallback as _chat
     import otaman_cli.hitl.config as _config
 
@@ -75,7 +76,11 @@ def _isolated_tenant_home(tmp_path, monkeypatch):
     def _tenant_roster_path(arg=None):
         return (arg or home) / "etc" / "otaman" / "human-roster.yaml"
 
+    def _console_prefs_path(arg=None):
+        return (arg or home) / ".otaman" / "console-prefs.json"
+
     monkeypatch.setattr(_console_identity, "tenant_roster_path", _tenant_roster_path)
+    monkeypatch.setattr(_console_prefs, "console_prefs_path", _console_prefs_path)
     monkeypatch.setattr(_config, "hitl_config_path", _hitl_path)
     monkeypatch.setattr(_secrets, "tenant_secrets_path", _secrets_path)
     monkeypatch.setattr(_conn_check, "report_store_path", _report_path)

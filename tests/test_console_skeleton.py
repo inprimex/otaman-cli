@@ -209,6 +209,8 @@ def test_selecting_program_shows_pending_list(ws):
             app.push_screen(PendingListScreen(progs[0]))
             await pilot.pause()
             assert isinstance(app.screen, PendingListScreen)
+            await app.workers.wait_for_complete()  # paint-then-fill async load
+            await pilot.pause()
             lv = app.screen.query_one("#pending-list")
             items = [c for c in lv.children if isinstance(c, _ProposalItem)]
             assert len(items) == 1
@@ -229,6 +231,8 @@ def test_empty_program_shows_no_pending(ws):
         async with app.run_test() as pilot:
             await pilot.pause()
             app.push_screen(PendingListScreen(progs[0]))
+            await pilot.pause()
+            await app.workers.wait_for_complete()
             await pilot.pause()
             lv = app.screen.query_one("#pending-list")
             assert not [c for c in lv.children if isinstance(c, _ProposalItem)]

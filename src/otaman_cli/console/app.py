@@ -11,10 +11,18 @@ is task 1.4.
 from __future__ import annotations
 
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Label, ListItem, ListView, MarkdownViewer, Static
 
 from otaman_cli.console.bus import Program, Proposal, discover_programs, list_pending_proposals
+
+
+def _header() -> Header:
+    # icon="" removes the default HeaderIcon glyph (⭘), which rendered as a
+    # stray 'c' top-left in some terminals (5.1 finding #2.1). The command
+    # palette is still reachable via ctrl+p.
+    return Header(show_clock=False, icon="")
 
 
 class _ProgramItem(ListItem):
@@ -39,9 +47,11 @@ class _ProposalItem(ListItem):
 class ProgramPickerScreen(Screen):
     """Pick which program's bus to work on (one bus at a time — Q8)."""
 
+    # priority=True so plain q/r fire even when the ListView has focus
+    # (5.1 finding #2.2: plain keys previously did nothing; only ctrl+ worked).
     BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("r", "rescan", "Rescan"),
+        Binding("q", "quit", "Quit", priority=True),
+        Binding("r", "rescan", "Rescan", priority=True),
     ]
 
     def __init__(self, programs: list[Program]) -> None:
@@ -49,7 +59,7 @@ class ProgramPickerScreen(Screen):
         self._programs = programs
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=False)
+        yield _header()
         if self._programs:
             yield Static("Select a program (Enter):", id="picker-hint")
             yield ListView(*[_ProgramItem(p) for p in self._programs], id="program-list")
@@ -73,9 +83,9 @@ class PendingListScreen(Screen):
     """Pending spec-change-requests for the picked program."""
 
     BINDINGS = [
-        ("escape", "back", "Back"),
-        ("r", "refresh", "Refresh"),
-        ("q", "quit", "Quit"),
+        Binding("escape", "back", "Back", priority=True),
+        Binding("r", "refresh", "Refresh", priority=True),
+        Binding("q", "quit", "Quit", priority=True),
     ]
 
     def __init__(self, program: Program, *, event_source=None) -> None:
@@ -88,19 +98,22 @@ class PendingListScreen(Screen):
         self._own_source = event_source is None
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=False)
+        yield _header()
         yield Static(f"Program: {self.program.name}", id="prog-header", markup=False)
         yield ListView(id="pending-list")
         yield Footer()
 
     def on_mount(self) -> None:
-        self._reload()
+        # Paint-then-fill (5.1 finding #2.4): the bus scan (700+ files, YAML
+        # each) took 8+s and blocked first paint. Show the screen immediately
+        # with a loading row, then load off the UI thread and populate.
+        self._load()
         if self._source is None:
             from otaman_cli.console.events import make_event_source
 
             self._source = make_event_source(self.program)
         # Marshal the provider's (possibly off-thread) callback onto the UI.
-        self._source.start(lambda: self.app.call_from_thread(self._reload))
+        self._source.start(lambda: self.app.call_from_thread(self._load))
 
     def on_unmount(self) -> None:
         if self._source is not None and self._own_source:
@@ -109,12 +122,22 @@ class PendingListScreen(Screen):
     def on_screen_resume(self) -> None:
         # Returning from a ProposalScreen (after approve/reject) → refresh so a
         # just-decided proposal drops off the list.
-        self._reload()
+        self._load()
 
-    def _reload(self) -> None:
+    def _load(self) -> None:
+        """Show a loading row, then read the bus off-thread and populate."""
         lv = self.query_one("#pending-list", ListView)
         lv.clear()
-        proposals = list_pending_proposals(self.program)
+        lv.append(ListItem(Label("Loading pending proposals…")))
+        self.run_worker(self._load_worker, thread=True, exclusive=True, group="load")
+
+    def _load_worker(self) -> None:
+        proposals = list_pending_proposals(self.program)  # slow scan, off the UI thread
+        self.app.call_from_thread(self._populate, proposals)
+
+    def _populate(self, proposals: list[Proposal]) -> None:
+        lv = self.query_one("#pending-list", ListView)
+        lv.clear()
         if proposals:
             for p in proposals:
                 lv.append(_ProposalItem(p))
@@ -125,7 +148,7 @@ class PendingListScreen(Screen):
         self.app.pop_screen()
 
     def action_refresh(self) -> None:
-        self._reload()
+        self._load()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         proposal = getattr(event.item, "proposal", None)
@@ -142,10 +165,10 @@ class ProposalScreen(Screen):
     """
 
     BINDINGS = [
-        ("a", "approve", "Approve"),
-        ("x", "reject", "Reject"),
-        ("escape", "back", "Back"),
-        ("q", "quit", "Quit"),
+        Binding("a", "approve", "Approve", priority=True),
+        Binding("x", "reject", "Reject", priority=True),
+        Binding("escape", "back", "Back", priority=True),
+        Binding("q", "quit", "Quit", priority=True),
     ]
 
     def __init__(self, program: Program, proposal: Proposal) -> None:
@@ -154,7 +177,7 @@ class ProposalScreen(Screen):
         self.proposal = proposal
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=False)
+        yield _header()
         yield Static(
             f"{self.proposal.subject}   —   from {self.proposal.from_agent}",
             id="proposal-title",
@@ -199,7 +222,26 @@ class OtamanConsole(App):
         self._search_root = search_root
 
     def on_mount(self) -> None:
+        # Restore the operator's saved theme (5.1 finding #2.3: the command
+        # palette's theme choice didn't persist across sessions).
+        from otaman_cli.console.prefs import load_prefs
+
+        saved = load_prefs().get("theme")
+        if saved:
+            try:
+                self.theme = saved
+            except Exception:  # noqa: BLE001 - unknown/removed theme → default
+                pass
         self.push_screen(ProgramPickerScreen(self._programs))
+
+    def watch_theme(self, theme: str) -> None:
+        # Persist whenever the theme changes (e.g. via the ctrl+p palette).
+        from otaman_cli.console.prefs import load_prefs, save_prefs
+
+        prefs = load_prefs()
+        if prefs.get("theme") != theme:
+            prefs["theme"] = theme
+            save_prefs(prefs)
 
     def rescan_programs(self) -> None:
         if self._search_root is not None:
