@@ -194,6 +194,34 @@ def test_list_pending_empty_when_no_bus(tmp_path):
     assert bus.list_pending_proposals(program) == []
 
 
+def test_scan_prefilter_is_frontmatter_only(ws):
+    # 5.1 finding #5: the fast-path substring prefilter reads the FRONTMATTER
+    # head only, so an info message that merely mentions "spec-change-request"
+    # in its BODY must not be mistaken for a pending proposal.
+    prog_root = _make_program(ws / "p", "p")
+    active = prog_root / ".agents" / "bus" / "active"
+    (active / "20260101T000000-a-to-human-info.md").write_text(
+        "---\nfrom: a\nto: human\npriority: normal\ntype: info\n"
+        "timestamp: t\nstatus: pending\n---\n\n"
+        "## Subject: talking about spec-change-request handling\n\n"
+        "the body mentions spec-change-request several times\n",
+        encoding="utf-8",
+    )
+    _stage_proposal(prog_root, "20260102T000000-b-to-human-spec-change-request", subject="real")
+    program = bus.discover_programs(ws)[0]
+    pending = bus.list_pending_proposals(program)
+    assert [p.subject for p in pending] == ["Spec change request: real"]
+
+
+def test_frontmatter_head_is_bounded(tmp_path):
+    # A huge body must not defeat frontmatter extraction (bounded head read).
+    f = tmp_path / "m.md"
+    f.write_text("---\ntype: info\nfrom: a\n---\n\n" + ("x" * 200_000), encoding="utf-8")
+    fm = bus._frontmatter_head(f)
+    assert fm is not None and "type: info" in fm
+    assert bus._frontmatter_head(tmp_path / "absent.md") is None
+
+
 # ---------------------------------------------------------------------------
 # launch.py — the extra gate + context resolution
 
