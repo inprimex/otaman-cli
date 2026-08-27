@@ -222,6 +222,80 @@ def _print_org_harness_report(org_name: str, results: list[dict]) -> None:
             print(f"  {UI.badge('FAIL', C.RED)}  {hid}  {binary}  {status}: {r.get('error', '')}")
 
 
+def _check_repo_materialization(root: Path) -> tuple[int, list[dict]]:
+    """repo-registration-materialization 1.2 — registration/materialization drift.
+
+    For each repo registered in platform.yaml: a missing path FAILs (registered
+    but never checked out); a present path missing its `.otaman` marker or
+    generated `CLAUDE.local.md` rules WARNs. Both carry `otaman sync-repos` as
+    the fix hint. Returns (rc, results) — rc is 1 if any repo FAILs.
+    """
+    import yaml as _yaml
+
+    platform_yaml = root / "platform.yaml"
+    if not platform_yaml.is_file():
+        return 0, []  # no project here → nothing to check (doctor bails earlier anyway)
+    try:
+        config = _yaml.safe_load(platform_yaml.read_text(encoding="utf-8")) or {}
+    except Exception as exc:  # noqa: BLE001 - report, don't crash the whole doctor run
+        return 0, [{"status": "error", "error": f"failed to parse platform.yaml: {exc}"}]
+
+    results: list[dict] = []
+    any_fail = False
+    for repo in config.get("repos") or []:
+        if not isinstance(repo, dict):
+            continue
+        rel = repo.get("path") or ""
+        if not rel:
+            continue
+        name = repo.get("name") or rel
+        repo_dir = (root / rel).resolve()
+        if not repo_dir.is_dir():
+            any_fail = True
+            results.append({"name": name, "path": rel, "status": "missing"})
+            continue
+        missing_artifacts = [
+            a for a in (".otaman", "CLAUDE.local.md") if not (repo_dir / a).is_file()
+        ]
+        if missing_artifacts:
+            results.append(
+                {
+                    "name": name,
+                    "path": rel,
+                    "status": "unmaterialized",
+                    "missing": missing_artifacts,
+                }
+            )
+        else:
+            results.append({"name": name, "path": rel, "status": "ok"})
+    return (1 if any_fail else 0), results
+
+
+def _print_repo_materialization_report(results: list[dict]) -> None:
+    """Pretty-print the repo-materialization check (1.2)."""
+    if not results:
+        return
+    print()
+    UI.header("Repo Materialization")
+    hint = "otaman sync-repos"
+    for r in results:
+        if r.get("status") == "error":
+            UI.error(r.get("error", "unknown error"))
+            continue
+        name = r.get("name", "")
+        path = r.get("path", "")
+        status = r.get("status", "")
+        if status == "ok":
+            print(f"  {UI.badge('OK', C.GREEN)}  {name}  ({path})")
+        elif status == "missing":
+            print(f"  {UI.badge('FAIL', C.RED)}  {name}  registered path absent: {path}")
+            print(f"        fix: {hint}")
+        elif status == "unmaterialized":
+            missing = ", ".join(r.get("missing", []))
+            print(f"  {UI.badge('WARN', C.YELLOW)}  {name}  present but missing: {missing}")
+            print(f"        fix: {hint}")
+
+
 def cmd_doctor(args: list[str]) -> int:
     """Check environment readiness — git, runtimes, CLI tools, MCP.
 
@@ -427,6 +501,12 @@ def cmd_doctor(args: list[str]) -> int:
         UI.error(f"{p} passed, {w} warnings, {f_} failed — fix issues above")
 
     base_rc = 1 if report["summary"]["failed"] > 0 else 0
+
+    # repo-registration-materialization 1.2 — additive registration/
+    # materialization drift check (always runs; registration ≠ checkout).
+    mat_rc, mat_results = _check_repo_materialization(root)
+    _print_repo_materialization_report(mat_results)
+    base_rc = 1 if (base_rc or mat_rc) else 0
 
     # ce-bootstrap-harness-deps task 3.1 — additive `--org` harness check
     if org:
