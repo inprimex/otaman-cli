@@ -335,6 +335,83 @@ def _print_roster_sync_report(drift: list[dict]) -> None:
         )
 
 
+def _hitl_configured() -> bool:
+    """True when any human is enrolled in a HITL confirmation adapter."""
+    try:
+        from otaman_cli.hitl.config import load_hitl_config
+
+        return bool(load_hitl_config().get("enrollment"))
+    except Exception:  # noqa: BLE001 - best-effort signal, never crash doctor
+        return False
+
+
+def _has_pending_proposals(root: Path) -> bool:
+    """True if any un-acked spec-change-request sits in the bus (same detection
+    as `otaman approve`)."""
+    import re
+
+    try:
+        import yaml
+
+        from otaman_cli.main import _resolve_bus_paths
+
+        active_dir, acks_dir = _resolve_bus_paths(root)
+    except Exception:  # noqa: BLE001
+        return False
+    if not active_dir.is_dir():
+        return False
+    for f in active_dir.glob("*.md"):
+        try:
+            m = re.match(r"^---\n(.+?)\n---", f.read_text(encoding="utf-8")[:8192], re.DOTALL)
+            if not m:
+                continue
+            fm = yaml.safe_load(m.group(1))
+            if not isinstance(fm, dict) or fm.get("type") != "spec-change-request":
+                continue
+            if not (acks_dir / f"{f.stem}.human.ack").exists():
+                return True
+        except Exception:  # noqa: BLE001 - a malformed file is not a pending proposal
+            continue
+    return False
+
+
+def _check_approver_config(root: Path) -> tuple[int, list[dict]]:
+    """hitl-default-approver 1.2/2.x — the missing-approver ERROR, surfaced.
+
+    Calls core's ``check_approver_config`` UNCONDITIONALLY: ``load_human_roster``
+    returns ``[]`` for an absent/empty roster, and an empty roster while the
+    approval path is live (HITL adapters configured OR pending proposals) is an
+    ERROR. This must NOT short-circuit on "no roster" — that absent-roster state
+    is exactly deploy's opt-out tenant, where the ERROR has to appear.
+    """
+    try:
+        from otaman_core.human_roster import check_approver_config, load_human_roster
+    except Exception:  # noqa: BLE001 - core primitive unavailable → skip
+        return 0, []
+    try:
+        roster = load_human_roster(root / "platform.yaml")
+    except Exception:  # noqa: BLE001 - unreadable/malformed roster → treat as empty
+        roster = []
+    findings = check_approver_config(
+        roster,
+        hitl_configured=_hitl_configured(),
+        pending_proposals=_has_pending_proposals(root),
+    )
+    results = [{"level": f.level, "message": f.message} for f in findings]
+    return (1 if any(f.level == "error" for f in findings) else 0), results
+
+
+def _print_approver_config_report(findings: list[dict]) -> None:
+    """Pretty-print approver-coverage findings (nothing when the path is fine)."""
+    if not findings:
+        return
+    print()
+    UI.header("Approver Coverage")
+    for f in findings:
+        badge = UI.badge("FAIL", C.RED) if f.get("level") == "error" else UI.badge("WARN", C.YELLOW)
+        print(f"  {badge}  {f.get('message', '')}")
+
+
 def cmd_doctor(args: list[str]) -> int:
     """Check environment readiness — git, runtimes, CLI tools, MCP.
 
@@ -551,6 +628,13 @@ def cmd_doctor(args: list[str]) -> int:
     # unverifiable). WARN-only, so it doesn't change the exit code.
     _rs_rc, rs_drift = _check_roster_sync(root)
     _print_roster_sync_report(rs_drift)
+
+    # hitl-default-approver conformance — the missing-approver ERROR. Runs
+    # UNCONDITIONALLY (an absent human-roster + a live approval path is the
+    # exact opt-out state that must FAIL doctor); folds into the exit code.
+    ap_rc, ap_findings = _check_approver_config(root)
+    _print_approver_config_report(ap_findings)
+    base_rc = 1 if (base_rc or ap_rc) else 0
 
     # ce-bootstrap-harness-deps task 3.1 — additive `--org` harness check
     if org:
