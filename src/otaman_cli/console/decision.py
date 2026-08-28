@@ -35,12 +35,31 @@ def _target(proposal: Proposal) -> dict:
     }
 
 
+def _approver_refusal(program: Program) -> str | None:
+    """The named refusal iff the acting human is a resolved non-approver.
+
+    hitl-default-approver 2.2 — the console decision path shares the SAME
+    eligibility resolution as HITL (`otaman hitl take`), so "may approve" and
+    "may confirm" are one grant. An unresolved OTAMAN_HUMAN returns None (its
+    existing unverified-stamp behavior is unchanged); only a roster human who
+    lacks the `approver` role is refused.
+    """
+    from otaman_cli.approver_eligibility import refusal_message, resolve_eligibility
+
+    elig = resolve_eligibility(program.root / "platform.yaml")
+    return refusal_message(elig) if elig.refused else None
+
+
 def approve(program: Program, proposal: Proposal, identity: ConsoleIdentity) -> tuple[bool, str]:
     """Approve *proposal* through the privileged writer, stamped with identity.
 
     Returns ``(ok, message)`` — never raises into the TUI.
     """
     from otaman_cli.commands.approve import _perform_approval
+
+    refusal = _approver_refusal(program)
+    if refusal is not None:
+        return False, f"Approval refused — {refusal}."
 
     active_dir, acks_dir = program.bus_paths()
     now_iso, now_ts = _now()
@@ -65,6 +84,10 @@ def reject(
 ) -> tuple[bool, str]:
     """Reject *proposal* through the privileged writer, stamped with identity."""
     from otaman_cli.commands.approve import _perform_rejection
+
+    refusal = _approver_refusal(program)
+    if refusal is not None:
+        return False, f"Rejection refused — {refusal}."
 
     active_dir, acks_dir = program.bus_paths()
     now_iso, now_ts = _now()

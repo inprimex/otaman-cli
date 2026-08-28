@@ -456,5 +456,6 @@ class TestDoctorRosterChecks:
 
 class TestValidRoles:
     def test_valid_roles_constant(self):
-        # The 4 roles from spec
-        assert set(_VALID_ROSTER_ROLES) == {"cofounder", "cto", "cpo", "developer"}
+        # `approver` (hitl-default-approver 2.3) is the proposal-rights grant;
+        # the rest are the original org roles.
+        assert set(_VALID_ROSTER_ROLES) == {"approver", "cofounder", "cto", "cpo", "developer"}

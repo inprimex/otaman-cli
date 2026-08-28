@@ -6,7 +6,13 @@ import argparse
 
 import pytest
 
-from otaman_cli.onboard.program_init.runner import run_program_init
+from otaman_cli.onboard.program_init.runner import _VALID_ROSTER_ROLES, run_program_init
+
+
+def test_approver_is_a_valid_human_roster_role():
+    # hitl-default-approver 2.3: the wizard writes roster roles including
+    # `approver` (the proposal-rights grant), not a parallel vocabulary.
+    assert "approver" in _VALID_ROSTER_ROLES
 
 
 def _args(**kw) -> argparse.Namespace:
