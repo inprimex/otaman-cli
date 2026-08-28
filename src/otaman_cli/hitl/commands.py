@@ -216,6 +216,17 @@ def cmd_take(args: dict[str, Any]) -> int:
     ):
         return _bail("Refusing to record a decision without an interactive terminal.")
 
+    # hitl-default-approver 2.1 — the acting human must hold the roster
+    # `approver` role (the single "may work with proposals" grant, shared with
+    # the console approval path). A resolved-but-non-approver identity is
+    # refused, naming the entry + role; an unresolved OTAMAN_HUMAN keeps today's
+    # behavior (the confirmation-ledger + TTY gates above still apply).
+    from otaman_cli.approver_eligibility import refusal_message, resolve_eligibility
+
+    elig = resolve_eligibility(_root / "platform.yaml")
+    if elig.refused:
+        return _bail(f"Refusing to record the decision — {refusal_message(elig)}.")
+
     UI.header(f"HITL — taking {req.msg_stem}")
     print(f"  From:          {req.from_agent}")
     print(f"  Priority:      {req.priority}")

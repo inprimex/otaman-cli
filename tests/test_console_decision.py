@@ -29,10 +29,25 @@ def program(tmp_path, monkeypatch):
     root.joinpath("platform.yaml").write_text(
         "project: demo\n"
         "human-roster:\n"
-        "  - name: roman\n    email: roman@x.io\n    roles: [cofounder]\n",
+        # roman holds `approver` — the grant required to action proposals in the
+        # console (hitl-default-approver 2.2). Refusal of a non-approver is
+        # covered by the dedicated tests below.
+        "  - name: roman\n    email: roman@x.io\n    roles: [cofounder, approver]\n",
         encoding="utf-8",
     )
     monkeypatch.delenv("OTAMAN_HUMAN", raising=False)
+    return bus.Program(name="demo", root=root)
+
+
+def _program_with_roles(tmp_path, roles: str):
+    """A program whose sole roster human `roman` holds *roles* (e.g. '[developer]')."""
+    root = tmp_path / "prog-roles"
+    (root / ".agents" / "bus" / "active" / "acks").mkdir(parents=True)
+    root.joinpath("platform.yaml").write_text(
+        "project: demo\nhuman-roster:\n  - name: roman\n"
+        f"    email: roman@x.io\n    roles: {roles}\n",
+        encoding="utf-8",
+    )
     return bus.Program(name="demo", root=root)
 
 
@@ -144,6 +159,45 @@ def test_reject_writes_rejection_and_stamps_identity(program, monkeypatch):
     assert rj and "not now" in rj[0].read_text("utf-8")
     assert "Rejected in otaman -i by roman" in rj[0].read_text("utf-8")
     assert bus.list_pending_proposals(program) == []
+
+
+# --- 2.2: console approval requires the roster `approver` role ----------------
+
+
+def test_approve_refuses_resolved_non_approver(tmp_path, monkeypatch):
+    program = _program_with_roles(tmp_path, "[developer]")  # roman resolves, no approver
+    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
+    proposal = _stage(program)
+    ident = resolve_identity(program.root)
+    ok, msg = decision.approve(program, proposal, ident)
+    assert ok is False
+    assert "approver" in msg and "roman" in msg  # named refusal
+    # nothing written: no broadcast, no ack, proposal still pending
+    assert _broadcasts(program, "spec-change-approved") == []
+    acks = program.root / ".agents" / "bus" / "active" / "acks"
+    assert list(acks.glob("*.human.ack")) == []
+    assert len(bus.list_pending_proposals(program)) == 1
+
+
+def test_reject_refuses_resolved_non_approver(tmp_path, monkeypatch):
+    program = _program_with_roles(tmp_path, "[developer]")
+    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
+    proposal = _stage(program)
+    ident = resolve_identity(program.root)
+    ok, msg = decision.reject(program, proposal, ident, reason="nope")
+    assert ok is False
+    assert "approver" in msg
+    assert _broadcasts(program, "spec-change-rejected") == []
+    assert len(bus.list_pending_proposals(program)) == 1
+
+
+def test_approve_unresolved_human_proceeds_unchanged(tmp_path, monkeypatch):
+    program = _program_with_roles(tmp_path, "[approver]")  # roster has roman, but…
+    monkeypatch.setenv("OTAMAN_HUMAN", "ghost")  # …OTAMAN_HUMAN matches no entry
+    proposal = _stage(program)
+    ident = resolve_identity(program.root)
+    ok, _ = decision.approve(program, proposal, ident)
+    assert ok is True  # unresolved → today's behavior (stamps unverified), not refused
 
 
 # ---------------------------------------------------------------------------

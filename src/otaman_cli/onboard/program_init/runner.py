@@ -371,7 +371,12 @@ _TECH_STARTUP_IDENTITY_NOTE = (
 )
 
 
-_VALID_ROSTER_ROLES = ("cofounder", "cto", "cpo", "developer")
+# human-roster roles the wizard offers. `approver` is the single authoritative
+# "may work with proposals" grant (HITL confirmation + `otaman -i` spec approval
+# resolve eligibility through it — hitl-default-approver 2.3). This is the
+# roster vocabulary, NOT terminal.users/onboard-user RBAC (web-terminal-only,
+# which never grants proposal rights on its own).
+_VALID_ROSTER_ROLES = ("approver", "cofounder", "cto", "cpo", "developer")
 
 
 def _prompt_human_roster(answers: dict[str, Any], *, dry_run: bool) -> None:
@@ -398,6 +403,7 @@ def _prompt_human_roster(answers: dict[str, Any], *, dry_run: bool) -> None:
     print("─" * 64)
     print("  Map people to roles so the bridge can assign PM issues to humans.")
     print("  Valid roles: " + ", ".join(_VALID_ROSTER_ROLES))
+    print("  `approver` grants working with proposals (HITL + `otaman -i` approval).")
     print("─" * 64)
 
     try:
@@ -422,7 +428,7 @@ def _prompt_human_roster(answers: dict[str, Any], *, dry_run: bool) -> None:
             break
         try:
             email = input("    Email: ").strip()
-            roles_raw = input("    Roles (comma-separated; e.g. cofounder,cto): ").strip()
+            roles_raw = input("    Roles (comma-separated; e.g. approver,cto): ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             break
