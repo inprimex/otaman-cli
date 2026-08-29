@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from unittest import mock
 
@@ -17,6 +18,12 @@ import pytest
 
 from otaman_cli.commands import program as _program
 from otaman_cli.commands.program import cmd_program
+
+# The wired-seam tests run a `#!/bin/sh` stub program-archive.sh; that's a POSIX
+# shell script Windows can't exec (deploy's real mechanism is Linux-only too).
+_posix_only = pytest.mark.skipif(
+    sys.platform == "win32", reason="stub program-archive.sh is a POSIX shell script"
+)
 
 
 @pytest.fixture
@@ -217,6 +224,7 @@ def test_archive_gated_when_folder_mechanism_absent(org, monkeypatch):
     assert _state(tmp) == "active"  # not recorded — gated before mutation
 
 
+@_posix_only
 def test_archive_wired_records_and_calls_seam(org, monkeypatch):
     tmp, meta = org
     monkeypatch.setenv("OTAMAN_HUMAN", "roman")
@@ -229,6 +237,7 @@ def test_archive_wired_records_and_calls_seam(org, monkeypatch):
     assert bc and "active → archived" in bc[0].read_text(encoding="utf-8")
 
 
+@_posix_only
 def test_archive_folder_failure_is_surfaced(org, monkeypatch):
     tmp, _ = org
     monkeypatch.setenv("OTAMAN_HUMAN", "roman")
@@ -247,6 +256,7 @@ def test_archive_without_confirmation_refused(org, monkeypatch):
     assert _state(tmp) == "active"  # not recorded
 
 
+@_posix_only
 def test_unarchive_wired_restores(org, monkeypatch):
     tmp, _ = org
     _make_archived(tmp)
