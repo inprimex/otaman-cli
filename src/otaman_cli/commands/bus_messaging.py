@@ -44,6 +44,11 @@ MESSAGE_TYPES: frozenset[str] = frozenset(
         "review-request",
         "proposal",
         "outcome-proposal",
+        # program-lifecycle-states D4: the audit broadcast for a lifecycle
+        # transition. Not privileged — the transition itself is authority-gated
+        # in `otaman program`; this message only records it. Registered in
+        # otaman-core VALID_TYPES + _BROADCAST_TYPES (PR #31).
+        "lifecycle-change",
     }
 )
 
