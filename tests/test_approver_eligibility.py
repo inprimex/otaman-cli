@@ -42,6 +42,17 @@ def test_resolved_non_approver_is_refused_and_named(tmp_path):
     assert "roman" in msg and "approver" in msg
 
 
+def test_refusal_is_actionable_naming_the_fix(tmp_path):
+    # mgmt-agent rollout-gap report: the refusal must say HOW to fix it, not
+    # just which role is missing (Roman hit a fail-closed refusal with no next
+    # step). The hint names the remedy + the exact roster file.
+    pf = _platform(tmp_path, _entry("roman", "[founder]"))
+    msg = refusal_message(resolve_eligibility(pf, "roman"))
+    assert "add 'approver'" in msg
+    assert "roles" in msg
+    assert str(pf) in msg  # points at the exact platform.yaml to edit
+
+
 def test_unknown_human_is_unresolved(tmp_path):
     pf = _platform(tmp_path, _entry("roman", "[approver]"))
     e = resolve_eligibility(pf, "ghost")
