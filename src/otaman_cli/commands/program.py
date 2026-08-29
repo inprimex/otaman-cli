@@ -24,7 +24,7 @@ from otaman_cli.identity import find_project_root
 from otaman_cli.main import UI
 
 _TRANSITIONS = ("limit", "suspend", "resume", "archive", "unarchive")
-_ACTIONS = ("status", *_TRANSITIONS)
+_ACTIONS = ("status", "enforce", *_TRANSITIONS)
 # action → the target lifecycle state it records.
 _TARGET_STATE = {
     "limit": "limited",
@@ -87,6 +87,67 @@ def _acting_human(program_root: Path) -> tuple[str | None, str | None]:
     if elig.refused:
         return None, refusal_message(elig)
     return (elig.entry_name or os.environ.get("OTAMAN_HUMAN", "").strip()), None
+
+
+def _enforce_lifecycle(program: str) -> None:
+    """Ask the runner to apply state-driven enforcement for *program* (runner
+    program-lifecycle-states 2.1: POST /lifecycle/enforce). Called after a
+    transition — the runner re-reads the registry and closes sessions /
+    deregisters per the new state; idempotent. Best-effort per the runner
+    contract:
+    - no runner endpoint  → CE-without-runner (launcher gate + doctor cover it,
+      D5 advisory) — silent.
+    - runner unreachable/errored → WARN + hint to re-run or restart the runner.
+    - 200 → print sessions closed + whether it deregistered.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    try:
+        from otaman_cli.session_spawn import (
+            DEFAULT_RUNNER_ENDPOINT,
+            _validate_spawn_target,
+            load_runner_endpoint,
+        )
+
+        ep = load_runner_endpoint(DEFAULT_RUNNER_ENDPOINT)
+    except Exception:  # noqa: BLE001 - endpoint machinery unavailable → treat as no runner
+        ep = None
+    if not ep:
+        return  # CE-without-runner: expected, not an error
+    host, port, token, scheme = ep
+    if _validate_spawn_target(
+        host, scheme
+    ):  # F032: no bearer over plaintext to a non-loopback host
+        return
+
+    req = urllib.request.Request(
+        f"{scheme}://{host}:{port}/lifecycle/enforce",
+        data=json.dumps({"program": program}).encode(),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            payload = json.loads(resp.read() or b"{}")
+    except (urllib.error.URLError, ValueError, OSError) as exc:
+        UI.warn(
+            f"runner enforcement not applied ({exc}). "
+            f"Re-run `otaman program enforce {program}`, or restart the runner."
+        )
+        return
+    closed = payload.get("sessions_closed") or []
+    if closed:
+        UI.muted(f"  runner: closed {len(closed)} session(s): {', '.join(map(str, closed))}")
+    if payload.get("deregistered"):
+        UI.muted("  runner: deregistered the program")
+    if not closed and not payload.get("deregistered"):
+        UI.muted("  runner: no session action for this state")
 
 
 def _cmd_status(org_root: Path, program: str, *, as_json: bool) -> int:
@@ -179,13 +240,13 @@ def _archive_plan_lines(action: str, org: str, program: str) -> list[str]:
     if action == "archive":
         return [
             f"1. stop + disable bridge unit `{bridge}`",
-            "2. deregister from runner/fswatch/router  [pending consumer 2.x]",
+            "2. deregister: runner via /lifecycle/enforce; fswatch/router [pending 2.4/2.5]",
             f"3. (deploy) {move}",
             "4. record registry → archived + broadcast lifecycle-change",
         ]
     return [
         f"1. (deploy) restore ~/orgs/{org}/archive/{program}-<date>/ → programs/{program}/",
-        "2. re-register with runner/fswatch/router  [pending consumer 2.x]",
+        "2. re-register: runner via reconcile; fswatch/router [pending 2.4/2.5]",
         f"3. re-enable bridge unit `{bridge}`",
         "4. record registry → active + broadcast lifecycle-change",
     ]
@@ -283,7 +344,8 @@ def _do_archive(ctx, action: str, program: str, *, reason: str, dry_run: bool) -
     if action == "archive":
         record_transition(registry, program, "archived", by=by, reason=reason or None)
         _broadcast_transition(program_root, program, from_state, "archived", by, reason)
-        _teardown_services(program)  # bridge stop/disable (+ deregister pending)
+        _teardown_services(program)  # bridge stop/disable
+        _enforce_lifecycle(program)  # runner: close sessions + deregister (state-driven, 2.1)
         rc = _run_folder_mechanism(script, "archive", org, program, by)
         if rc != 0:
             UI.warn("Registry is `archived` and services torn down, but the folder move failed.")
@@ -294,9 +356,12 @@ def _do_archive(ctx, action: str, program: str, *, reason: str, dry_run: bool) -
     rc = _run_folder_mechanism(script, "unarchive", org, program, by)
     if rc != 0:
         return 1
-    _restore_services(program)  # re-register (pending) + bridge re-enable
+    _restore_services(program)  # bridge re-enable (+ fswatch/router re-register pending)
     record_transition(registry, program, "active", by=by, reason=reason or None)
     _broadcast_transition(program_root, program, from_state, "active", by, reason)
+    _enforce_lifecycle(
+        program
+    )  # runner re-reads state (active → no session action; reconcile re-registers)
     UI.ok(f"{program}: archived → active (by {by})")
     return 0
 
@@ -305,11 +370,11 @@ def _teardown_services(program: str) -> None:
     """Stop + disable the program's bridge unit (best-effort; deregister legs
     are the consumers' in-flight 2.x — noted pending, not driven yet)."""
     _bridge_unit(program, enable=False)
-    UI.muted("  runner/fswatch/router deregister: pending consumer 2.x")
+    UI.muted("  fswatch/router deregister: pending 2.4/2.5 (runner via /lifecycle/enforce)")
 
 
 def _restore_services(program: str) -> None:
-    UI.muted("  runner/fswatch/router re-register: pending consumer 2.x")
+    UI.muted("  fswatch/router re-register: pending 2.4/2.5 (runner via reconcile)")
     _bridge_unit(program, enable=True)
 
 
@@ -385,6 +450,9 @@ def _do_transition(action: str, program: str, *, reason: str, dry_run: bool) -> 
     )
     UI.ok(f"{program}: {from_state} → {target} (by {by})")
     _broadcast_transition(ctx.program_root, program, from_state, target, by, reason)
+    _enforce_lifecycle(
+        program
+    )  # runner applies the new state (suspend → close sessions; else no-op)
     return 0
 
 
@@ -429,6 +497,17 @@ def cmd_program(args: list[str]) -> int:
         if ctx is None:
             return 1
         return _cmd_status(ctx.org_root, program or ctx.program, as_json=as_json)
+    if action == "enforce":
+        # Re-apply the current registry state via the runner (idempotent
+        # reconcile; changes no lifecycle state, so no authority gate). Also the
+        # hint we print when enforcement couldn't be applied at transition time.
+        ctx = _resolve_context()
+        if ctx is None:
+            return 1
+        target = program or ctx.program
+        UI.header(f"Enforce lifecycle: {target}")
+        _enforce_lifecycle(target)
+        return 0
     return _do_transition(action, program, reason=reason, dry_run=dry_run)
 
 

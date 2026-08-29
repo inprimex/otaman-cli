@@ -209,7 +209,8 @@ def test_archive_dry_run_prints_plan(org, monkeypatch, capsys):
     assert cmd_program(["archive", "--dry-run"]) == 0
     out = capsys.readouterr().out
     assert "teardown plan" in out
-    assert "bridge" in out and "pending consumer 2.x" in out and "ARCHIVED.yaml" in out
+    assert "bridge" in out and "pending 2.4/2.5" in out and "ARCHIVED.yaml" in out
+    assert "/lifecycle/enforce" in out  # runner deregister leg is now wired
     assert _state(tmp) == "active"  # nothing mutated
 
 
@@ -274,3 +275,60 @@ def test_archive_non_approver_refused(org, monkeypatch):
     monkeypatch.setenv("OTAMAN_HUMAN", "roman")
     assert cmd_program(["archive"]) != 0
     assert _state(tmp) == "active"
+
+
+# --- runner /lifecycle/enforce wiring (runner 2.1) ---------------------------
+
+
+def test_enforce_no_runner_is_silent(org, monkeypatch, capsys):
+    # CE-without-runner: endpoint absent → no error, no warning (D5 advisory).
+    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
+    monkeypatch.setattr("otaman_cli.session_spawn.load_runner_endpoint", lambda *_a, **_k: None)
+    assert cmd_program(["enforce"]) == 0
+    out = capsys.readouterr().out
+    assert "not applied" not in out and "closed" not in out
+
+
+def test_enforce_prints_runner_result(org, monkeypatch, capsys):
+    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
+    monkeypatch.setattr(
+        "otaman_cli.session_spawn.load_runner_endpoint",
+        lambda *_a, **_k: ("127.0.0.1", 8765, "tok", "http"),
+    )
+    monkeypatch.setattr("otaman_cli.session_spawn._validate_spawn_target", lambda *_a: None)
+
+    class _Resp:
+        def read(self):
+            return json.dumps(
+                {"program": "shop", "state": "suspended", "sessions_closed": ["s1", "s2"]}
+            ).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_k: _Resp())
+    assert cmd_program(["enforce"]) == 0
+    out = capsys.readouterr().out
+    assert "closed 2 session(s)" in out and "s1" in out
+
+
+def test_enforce_runner_unreachable_warns_with_hint(org, monkeypatch, capsys):
+    import urllib.error
+
+    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
+    monkeypatch.setattr(
+        "otaman_cli.session_spawn.load_runner_endpoint",
+        lambda *_a, **_k: ("127.0.0.1", 8765, "tok", "http"),
+    )
+    monkeypatch.setattr("otaman_cli.session_spawn._validate_spawn_target", lambda *_a: None)
+
+    def _boom(*_a, **_k):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr("urllib.request.urlopen", _boom)
+    assert cmd_program(["enforce"]) == 0  # best-effort — never fails the command
+    out = capsys.readouterr().out
+    assert "not applied" in out and "otaman program enforce" in out
