@@ -9,11 +9,13 @@ recorded via core's registry (read back through it) and never invented here.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
+from otaman_cli.commands import program as _program
 from otaman_cli.commands.program import cmd_program
 
 
@@ -158,11 +160,107 @@ def test_agent_session_categorically_refused(org, monkeypatch, capsys):
 # --- archived guard + archive/unarchive not-yet ------------------------------
 
 
-def test_archive_and_unarchive_not_available_yet(org, monkeypatch):
-    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
-    assert cmd_program(["archive"]) == 2
-    assert cmd_program(["unarchive"]) == 2
-
-
 def test_unknown_action_errors(org):
     assert cmd_program(["frobnicate"]) != 0
+
+
+# --- archive / unarchive (HUMAN-DECISION tier + folder-move seam) -------------
+
+
+def _fake_archive_script(tmp_path: Path, monkeypatch, *, code: int = 0) -> Path:
+    """A stub deploy `program-archive.sh` on PATH: --dry-run prints a plan and
+    exits 0; a real run exits *code*."""
+    bindir = tmp_path / "fakebin"
+    bindir.mkdir(exist_ok=True)
+    s = bindir / "program-archive.sh"
+    s.write_text(
+        "#!/bin/sh\n"
+        'for a in "$@"; do\n'
+        '  if [ "$a" = "--dry-run" ]; then\n'
+        '    echo "plan.$1: move X -> Y ; write ARCHIVED.yaml"; exit 0\n'
+        "  fi\n"
+        "done\n"
+        f"exit {code}\n",
+        encoding="utf-8",
+    )
+    s.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bindir) + os.pathsep + os.environ.get("PATH", ""))
+    return s
+
+
+def _make_archived(tmp: Path) -> None:
+    from otaman_core.lifecycle import lifecycle_registry_path, record_transition
+
+    record_transition(
+        lifecycle_registry_path(tmp / "orgs" / "acme"), "shop", "archived", by="roman"
+    )
+
+
+def test_archive_dry_run_prints_plan(org, monkeypatch, capsys):
+    tmp, _ = org
+    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
+    assert cmd_program(["archive", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "teardown plan" in out
+    assert "bridge" in out and "pending consumer 2.x" in out and "ARCHIVED.yaml" in out
+    assert _state(tmp) == "active"  # nothing mutated
+
+
+def test_archive_gated_when_folder_mechanism_absent(org, monkeypatch):
+    tmp, _ = org
+    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
+    monkeypatch.setattr("otaman_cli.safety.confirm_human_decision", lambda *_a, **_k: True)
+    # ensure no program-archive.sh on PATH
+    monkeypatch.setenv("PATH", str(tmp / "empty-bin"))
+    (tmp / "empty-bin").mkdir(exist_ok=True)
+    assert cmd_program(["archive"]) == 2
+    assert _state(tmp) == "active"  # not recorded — gated before mutation
+
+
+def test_archive_wired_records_and_calls_seam(org, monkeypatch):
+    tmp, meta = org
+    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
+    monkeypatch.setattr("otaman_cli.safety.confirm_human_decision", lambda *_a, **_k: True)
+    monkeypatch.setattr(_program, "_bridge_unit", lambda *_a, **_k: None)
+    _fake_archive_script(tmp, monkeypatch, code=0)
+    assert cmd_program(["archive", "--reason", "eol"]) == 0
+    assert _state(tmp) == "archived"
+    bc = _broadcasts(meta)
+    assert bc and "active → archived" in bc[0].read_text(encoding="utf-8")
+
+
+def test_archive_folder_failure_is_surfaced(org, monkeypatch):
+    tmp, _ = org
+    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
+    monkeypatch.setattr("otaman_cli.safety.confirm_human_decision", lambda *_a, **_k: True)
+    monkeypatch.setattr(_program, "_bridge_unit", lambda *_a, **_k: None)
+    _fake_archive_script(tmp, monkeypatch, code=5)  # move failed
+    assert cmd_program(["archive"]) == 1  # failure surfaced, not silent success
+
+
+def test_archive_without_confirmation_refused(org, monkeypatch):
+    tmp, _ = org
+    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
+    monkeypatch.setattr("otaman_cli.safety.confirm_human_decision", lambda *_a, **_k: False)
+    _fake_archive_script(tmp, monkeypatch, code=0)
+    assert cmd_program(["archive"]) != 0
+    assert _state(tmp) == "active"  # not recorded
+
+
+def test_unarchive_wired_restores(org, monkeypatch):
+    tmp, _ = org
+    _make_archived(tmp)
+    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
+    monkeypatch.setattr("otaman_cli.safety.confirm_human_decision", lambda *_a, **_k: True)
+    monkeypatch.setattr(_program, "_bridge_unit", lambda *_a, **_k: None)
+    _fake_archive_script(tmp, monkeypatch, code=0)
+    assert cmd_program(["unarchive"]) == 0
+    assert _state(tmp) == "active"
+
+
+def test_archive_non_approver_refused(org, monkeypatch):
+    tmp, meta = org
+    _set_roles(meta, "[developer]")
+    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
+    assert cmd_program(["archive"]) != 0
+    assert _state(tmp) == "active"
