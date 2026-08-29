@@ -149,6 +149,192 @@ def _broadcast_transition(
         UI.warn("lifecycle-change broadcast could not be written (transition already recorded).")
 
 
+# deploy-agent's folder-move mechanism (contract 20260828T104334) — the last
+# leg of archive / the first leg of unarchive. Absent until deploy 3.1 ships.
+_ARCHIVE_SCRIPT = "program-archive.sh"
+
+
+def _folder_mechanism() -> str | None:
+    import shutil
+
+    return shutil.which(_ARCHIVE_SCRIPT)
+
+
+def _archive_plan_lines(action: str, org: str, program: str) -> list[str]:
+    """The ordered teardown (archive) / restore (unarchive) plan for --dry-run.
+
+    Consumer deregister legs (runner/fswatch/router) are their in-flight 2.x;
+    marked pending until those callable seams land. The folder step is deploy's
+    (invoked via program-archive.sh) — described from its known target when the
+    script isn't installed yet.
+    """
+    from datetime import datetime, timezone
+
+    date = datetime.now(timezone.utc).strftime("%Y%m%d")
+    bridge = f"otaman-bridge@{program}"
+    move = (
+        f"move ~/orgs/{org}/programs/{program} → ~/orgs/{org}/archive/{program}-{date}/"
+        " ; write ARCHIVED.yaml"
+    )
+    if action == "archive":
+        return [
+            f"1. stop + disable bridge unit `{bridge}`",
+            "2. deregister from runner/fswatch/router  [pending consumer 2.x]",
+            f"3. (deploy) {move}",
+            "4. record registry → archived + broadcast lifecycle-change",
+        ]
+    return [
+        f"1. (deploy) restore ~/orgs/{org}/archive/{program}-<date>/ → programs/{program}/",
+        "2. re-register with runner/fswatch/router  [pending consumer 2.x]",
+        f"3. re-enable bridge unit `{bridge}`",
+        "4. record registry → active + broadcast lifecycle-change",
+    ]
+
+
+def _run_folder_mechanism(script: str, action: str, org: str, program: str, by: str) -> int:
+    """Invoke deploy's program-archive.sh; return its exit code (0 = ok)."""
+    import subprocess
+
+    r = subprocess.run(
+        [script, action, "--org", org, "--program", program, "--by", by],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        detail = {3: "source not found", 4: "target already exists", 5: "move failed"}.get(
+            r.returncode, f"exit {r.returncode}"
+        )
+        UI.error(f"folder step failed ({detail}): {(r.stderr or r.stdout or '').strip()[:200]}")
+    return r.returncode
+
+
+def _do_archive(ctx, action: str, program: str, *, reason: str, dry_run: bool) -> int:
+    """`archive` / `unarchive` — HUMAN-DECISION tier + teardown orchestration (D3).
+
+    The folder move itself is deploy's ``program-archive.sh`` (invoked as the
+    last leg of archive / first leg of unarchive); cli owns authority, the
+    registry transition, the broadcast, and the service teardown ordering.
+    """
+    from otaman_core.lifecycle import (
+        lifecycle_registry_path,
+        read_program_state,
+        record_transition,
+    )
+
+    org, org_root, program_root = ctx.org, ctx.org_root, ctx.program_root
+    from_state = read_program_state(org_root, program)
+    target = _TARGET_STATE[action]
+
+    if action == "archive" and from_state == "archived":
+        UI.info(f"{program} is already archived — nothing to do.")
+        return 0
+    if action == "unarchive" and from_state != "archived":
+        return _bail(f"{program} is {from_state}, not archived — nothing to unarchive.")
+
+    # Authority (D3): a roster approver human (agents refused categorically).
+    by, refusal = _acting_human(program_root)
+    if refusal is not None:
+        return _bail(f"Refused — {refusal}")
+
+    # --dry-run always works, mutates nothing, needs no confirmation.
+    if dry_run:
+        UI.header(f"[dry-run] {action} {program} — teardown plan")
+        for line in _archive_plan_lines(action, org, program):
+            UI.muted("  " + line)
+        script = _folder_mechanism()
+        if script is not None:
+            import subprocess
+
+            r = subprocess.run(
+                [script, action, "--org", org, "--program", program, "--dry-run"],
+                capture_output=True,
+                text=True,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                UI.muted("  deploy: " + r.stdout.strip().splitlines()[0])
+        else:
+            UI.muted(f"  (folder step: {_ARCHIVE_SCRIPT} not installed yet — deploy 3.1)")
+        return 0
+
+    # HUMAN-DECISION tier (D3): HITL confirmation, no --yes escape.
+    from otaman_cli.safety import confirm_human_decision
+
+    if not confirm_human_decision(
+        f"About to {action.upper()} program `{program}` ({from_state} → {target}). "
+        "This tears down its per-program services"
+        + (
+            " and moves its folder to the org archive."
+            if action == "archive"
+            else " and restores it."
+        )
+    ):
+        return _bail(f"Refusing to {action} without human confirmation.")
+
+    # The folder move is deploy's mechanism; gate real-run on its presence.
+    script = _folder_mechanism()
+    if script is None:
+        return _bail(
+            f"folder mechanism not wired yet ({_ARCHIVE_SCRIPT} absent — deploy 3.1 pending). "
+            f"Use `otaman program {action} --dry-run` to preview the plan.",
+            code=2,
+        )
+
+    registry = lifecycle_registry_path(org_root)
+    if action == "archive":
+        record_transition(registry, program, "archived", by=by, reason=reason or None)
+        _broadcast_transition(program_root, program, from_state, "archived", by, reason)
+        _teardown_services(program)  # bridge stop/disable (+ deregister pending)
+        rc = _run_folder_mechanism(script, "archive", org, program, by)
+        if rc != 0:
+            UI.warn("Registry is `archived` and services torn down, but the folder move failed.")
+            return 1
+        UI.ok(f"{program}: {from_state} → archived (by {by})")
+        return 0
+    # unarchive: folder restore FIRST, then re-register/re-enable, then record.
+    rc = _run_folder_mechanism(script, "unarchive", org, program, by)
+    if rc != 0:
+        return 1
+    _restore_services(program)  # re-register (pending) + bridge re-enable
+    record_transition(registry, program, "active", by=by, reason=reason or None)
+    _broadcast_transition(program_root, program, from_state, "active", by, reason)
+    UI.ok(f"{program}: archived → active (by {by})")
+    return 0
+
+
+def _teardown_services(program: str) -> None:
+    """Stop + disable the program's bridge unit (best-effort; deregister legs
+    are the consumers' in-flight 2.x — noted pending, not driven yet)."""
+    _bridge_unit(program, enable=False)
+    UI.muted("  runner/fswatch/router deregister: pending consumer 2.x")
+
+
+def _restore_services(program: str) -> None:
+    UI.muted("  runner/fswatch/router re-register: pending consumer 2.x")
+    _bridge_unit(program, enable=True)
+
+
+def _bridge_unit(program: str, *, enable: bool) -> None:
+    import shutil
+    import subprocess
+
+    if shutil.which("systemctl") is None:
+        return
+    unit = f"otaman-bridge@{program}"
+    cmds = (
+        (["--user", "enable", "--now", unit],)
+        if enable
+        else (
+            ["--user", "stop", unit],
+            ["--user", "disable", unit],
+        )
+    )
+    for c in cmds:
+        try:
+            subprocess.run(["systemctl", *c], capture_output=True, text=True, timeout=15)
+        except Exception:  # noqa: BLE001 - best-effort; unit may not exist in this env
+            pass
+
+
 def _do_transition(action: str, program: str, *, reason: str, dry_run: bool) -> int:
     from otaman_core.lifecycle import (
         lifecycle_registry_path,
@@ -163,12 +349,7 @@ def _do_transition(action: str, program: str, *, reason: str, dry_run: bool) -> 
     program = program or current_program
 
     if action in ("archive", "unarchive"):
-        # HUMAN-DECISION tier + teardown orchestration land in the follow-up.
-        return _bail(
-            f"`otaman program {action}` is not available yet — the HITL-confirmed "
-            "teardown orchestration lands in a follow-up (program-lifecycle-states 2.3, part 2).",
-            code=2,
-        )
+        return _do_archive(ctx, action, program, reason=reason, dry_run=dry_run)
 
     target = _TARGET_STATE[action]
     from_state = read_program_state(org_root, program)
