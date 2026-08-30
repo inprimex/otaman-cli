@@ -119,6 +119,12 @@ def cmd_complete(args: list[str]) -> int:
     message is sent unconditionally; spec-agent's session-start sweep applies
     the ticks asynchronously (Part B).
     """
+    from otaman_cli import acting_guard
+
+    rc = acting_guard.enforce("complete")
+    if rc is not None:
+        return rc
+
     tasks_spec = ""
     mark_all = False
     positional: list[str] = []

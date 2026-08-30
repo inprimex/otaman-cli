@@ -33,6 +33,12 @@ def cmd_set_status(args: list[str]) -> int:
     Heartbeat: re-calling with the same state preserves `since`; only
     `updated_at` advances.
     """
+    from otaman_cli import acting_guard
+
+    rc = acting_guard.enforce("set-status")
+    if rc is not None:
+        return rc
+
     import argparse
 
     parser = argparse.ArgumentParser(prog="otaman set-status", add_help=False)
