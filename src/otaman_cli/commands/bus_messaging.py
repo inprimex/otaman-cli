@@ -73,6 +73,12 @@ def cmd_send(args: list[str]) -> int:
 
     `to` is the recipient agent name, "all" for broadcast, or "human".
     """
+    from otaman_cli import acting_guard
+
+    rc = acting_guard.enforce("send")
+    if rc is not None:
+        return rc
+
     import argparse
 
     parser = argparse.ArgumentParser(prog="otaman send", add_help=False)
@@ -477,6 +483,12 @@ def cmd_read(args: list[str]) -> int:
 
 def cmd_ack(args: list[str]) -> int:
     """Acknowledge a bus message for the current agent."""
+    from otaman_cli import acting_guard
+
+    rc = acting_guard.enforce("ack")
+    if rc is not None:
+        return rc
+
     status = "resolved"
     positional: list[str] = []
     i = 0
