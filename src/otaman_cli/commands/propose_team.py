@@ -17,6 +17,19 @@ from otaman_cli.identity import find_project_root, resolve_agent_identity
 from otaman_cli.main import UI, C, _resolve_bus_paths
 
 
+def _help_requested(args: list[str]) -> bool:
+    """True if `-h`/`--help` appears anywhere in args.
+
+    `propose` and `team` turn their positional into content (the proposal
+    title / the feature description) with no required flag to gate them, so a
+    bare `--help` would otherwise be swallowed as the title and the verb would
+    perform its side effect — a real `spec-change-request` on the bus, or a
+    workflow orchestration — on a bogus "--help" value. Help must win over
+    positional parsing here (post-mortem, Roman 2026-08-31).
+    """
+    return any(a in ("-h", "--help") for a in args)
+
+
 def _parse_desc(args: list[str]) -> tuple[str, list[str]]:
     """Extract `-d`/`--desc VALUE` from args, returning (desc, remaining)."""
     desc = ""
@@ -34,6 +47,10 @@ def _parse_desc(args: list[str]) -> tuple[str, list[str]]:
 
 def cmd_propose(args: list[str]) -> int:
     """Create a spec-change-request on the bus for human approval."""
+    if _help_requested(args):
+        UI.muted('Usage: otaman propose "add user pagination" [-d "Detailed description"]')
+        return 0
+
     desc, args = _parse_desc(args)
 
     if not args:
@@ -127,6 +144,13 @@ TODO: Concrete suggestions for what the spec should say.
 
 def cmd_team(args: list[str]) -> int:
     """Orchestrate a cross-repo feature."""
+    if _help_requested(args):
+        UI.muted("Usage: otaman team <workflow-or-description> [-d details]")
+        UI.muted("Examples:")
+        UI.muted('  otaman team api-change -d "Add pagination to /users"')
+        UI.muted('  otaman team "Add user authentication flow"')
+        return 0
+
     desc, args = _parse_desc(args)
 
     UI.header("Otaman Team Orchestration")
