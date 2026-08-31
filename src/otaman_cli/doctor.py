@@ -1450,7 +1450,7 @@ def check_human_roster(config: dict[str, Any]) -> dict[str, Any]:
     Rules (per spec):
       ERROR  — pm-sync configured but human-roster is absent or empty
       WARN   — roster entry missing pm-user-id (run `otaman pm init --roster`)
-      WARN   — roster entry has a role not in {cofounder, cto, cpo, developer}
+      WARN   — roster entry has a role not in {cofounder, cto, cpo, developer, approver}
       WARN   — roster entry missing email (resolution can't proceed)
     """
     issues: list[dict[str, Any]] = []
@@ -1482,7 +1482,10 @@ def check_human_roster(config: dict[str, Any]) -> dict[str, Any]:
             "issues": [],
         }
 
-    valid_roles = {"cofounder", "cto", "cpo", "developer"}
+    # `approver` is a well-known role per the human-roster approver contract
+    # (conformance-2026-09 D9) — it must not draw a spurious "unknown role"
+    # warning. Arbitrary additional role strings are still accepted unchanged.
+    valid_roles = {"cofounder", "cto", "cpo", "developer", "approver"}
     entries_with_missing_id = 0
     entries_with_unknown_role = 0
     entries_with_missing_email = 0

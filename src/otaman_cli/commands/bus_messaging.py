@@ -157,6 +157,16 @@ def cmd_send(args: list[str]) -> int:
             "are auto-CC'd via routing rules."
         )
 
+    # shared-contracts (conformance-2026-09 D5) — task-complete is a
+    # point-to-point signal to the assigner, not a fleet announcement.
+    # Broadcasting it to `all` floods every agent's bus; warn (do NOT block)
+    # and point at targeted routing.
+    if ns.msg_type == "task-complete" and ns.to == "all":
+        UI.warn(
+            "task-complete should not broadcast; use targeted routing "
+            "(send it to the assigner, or let `otaman complete` route it)."
+        )
+
     # task-sequencing-contract — validate the sequencing half before any
     # resolution work. Fields are a task-assignment contract; sections and
     # frontmatter are refused apart (Roman's review).
