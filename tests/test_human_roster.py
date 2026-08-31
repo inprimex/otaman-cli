@@ -418,6 +418,24 @@ class TestDoctorRosterChecks:
         msgs = [i["message"] for i in result["issues"]]
         assert any("sales-lead" in m for m in msgs)
 
+    def test_approver_role_not_flagged(self):
+        """conformance-2026-09 D9: `approver` is a well-known role and must NOT
+        draw an 'unknown role' warning from doctor's roster check."""
+        config = {
+            "pm-sync": {"provider": "easy8"},
+            "human-roster": [
+                {
+                    "name": "Alice",
+                    "email": "a@x.com",
+                    "roles": ["approver", "cofounder"],
+                    "pm-user-id": 7,
+                },
+            ],
+        }
+        result = check_human_roster(config)
+        msgs = [i["message"] for i in result["issues"]]
+        assert not any("unknown role" in m for m in msgs), msgs
+
     def test_missing_email_warns(self):
         config = {
             "pm-sync": {"provider": "easy8"},
