@@ -14,15 +14,18 @@ Implemented verbs:
 - ``otaman policy diff`` — per repo, the branch protection the effective git
   policy wants vs what is live on the host (read-only; D4a failure-mode
   classification). Exit non-zero when any repo drifts.
+- ``otaman policy apply [--dry-run]`` — generate-and-diff the branch protection
+  from the effective git policy; ``cto`` role gate (D5); HUMAN-DECISION when it
+  would tighten a human-owned branch; writes the plan to
+  ``policy/generated/branch-protection.json`` for deploy (step 3) to push live —
+  cli never PUTs protection itself (STOP-AT). ``--dry-run`` previews the plan
+  without the gates or the write.
 - ``otaman policy validate`` — every selected policy parses and composes with no
   refused loosening; non-zero exit on any structural error or loosening.
 
 The remaining verbs land in follow-up PRs (kept out of the dispatcher until then
-so the surface never advertises a verb it can't honor): ``apply`` (generate-and-
-diff + ``cto`` role gate + HUMAN-DECISION when tightening a human-owned branch;
-emits the plan for deploy to push live — cli never PUTs protection itself),
-``check-merge`` (the agent-into-human-owned-branch merge guard), and the 4.2
-observability surface.
+so the surface never advertises a verb it can't honor): ``check-merge`` (the
+agent-into-human-owned-branch merge guard) and the 4.2 observability surface.
 """
 
 from __future__ import annotations
@@ -262,12 +265,14 @@ def _diff_protection(desired: dict, live: dict | None) -> tuple[list[str], str]:
     return changes, "update"
 
 
-def _diff_repos(root, config: dict):
-    """Yield (repo_name, branch, owner_kind, changes, mode) per resolvable repo.
+def _plan_repos(root, config: dict):
+    """Yield one plan-record dict per repo in platform.yaml — the shared basis of
+    `diff` and `apply`.
 
-    Emits a synthetic ('name', None, 'skip', [reason], 'skip') row for a repo
-    with no resolvable GitHub remote so the caller can report it, never silently
-    drop it (no-silent-caps).
+    keys: ``repo, slug, branch, kind, desired, changes, mode``. ``kind`` is
+    ``human``/``agent`` for a resolved repo, or ``skip``/``error``. A repo with
+    no resolvable GitHub remote yields ``kind='skip'`` — reported, never dropped
+    (no-silent-caps).
     """
     from otaman_core.git_host import detect_remote_for_repo
     from otaman_core.policy import PolicyError, effective_policy
@@ -280,7 +285,15 @@ def _diff_repos(root, config: dict):
         repo_dir = (root / path).resolve() if path else None
         info = detect_remote_for_repo(repo_dir) if repo_dir and repo_dir.exists() else None
         if info is None or info.provider != "github":
-            yield (name, None, "skip", ["no GitHub remote resolved"], "skip")
+            yield {
+                "repo": name,
+                "slug": None,
+                "branch": None,
+                "kind": "skip",
+                "desired": None,
+                "changes": ["no GitHub remote resolved"],
+                "mode": "skip",
+            }
             continue
         slug = info.slug
         branch = _default_branch(slug) or "main"
@@ -288,13 +301,29 @@ def _diff_repos(root, config: dict):
         try:
             eff, _v = effective_policy(root, config, "git", repo=name)
         except PolicyError as exc:
-            yield (name, branch, "error", [f"policy error: {exc}"], "error")
+            yield {
+                "repo": name,
+                "slug": slug,
+                "branch": branch,
+                "kind": "error",
+                "desired": None,
+                "changes": [f"policy error: {exc}"],
+                "mode": "error",
+            }
             continue
         contexts = _live_check_contexts(slug, branch)
         desired = _desired_protection(eff.rules, is_human_owned=is_human, contexts=contexts)
         live = _read_live_protection(slug, branch)
         changes, mode = _diff_protection(desired, live)
-        yield (name, branch, "human" if is_human else "agent", changes, mode)
+        yield {
+            "repo": name,
+            "slug": slug,
+            "branch": branch,
+            "kind": "human" if is_human else "agent",
+            "desired": desired,
+            "changes": changes,
+            "mode": mode,
+        }
 
 
 def _cmd_diff() -> int:
@@ -307,12 +336,13 @@ def _cmd_diff() -> int:
 
     UI.header("Policy — branch-protection diff (desired vs live)")
     drift = False
-    for name, branch, kind, changes, mode in _diff_repos(root, config):
+    for rec in _plan_repos(root, config):
+        name, branch, kind, mode = rec["repo"], rec["branch"], rec["kind"], rec["mode"]
         if kind == "skip":
-            UI.warn(f"{name}: skipped — {changes[0]}")
+            UI.warn(f"{name}: skipped — {rec['changes'][0]}")
             continue
         if kind == "error":
-            UI.error(f"{name} ({branch}): {changes[0]}")
+            UI.error(f"{name} ({branch}): {rec['changes'][0]}")
             drift = True
             continue
         if mode == "conformant":
@@ -320,9 +350,114 @@ def _cmd_diff() -> int:
             continue
         drift = True
         UI.warn(f"{name} ({branch}, {kind}-owned): {mode}")
-        for c in changes:
+        for c in rec["changes"]:
             UI.muted(f"    {c}")
     return 1 if drift else 0
+
+
+def _acting_is_cto(root) -> tuple[bool, str]:
+    """(is_cto, message). Resolves OTAMAN_HUMAN against the roster; policy edits
+    require the `cto` role (D5). On success `message` is the resolved name."""
+    import os
+
+    from otaman_core.human_roster import load_human_roster, resolve_roster_human
+
+    try:
+        roster = load_human_roster(root / "platform.yaml")
+    except Exception:  # noqa: BLE001 - absent/invalid roster → treat as no cto
+        roster = []
+    entry = resolve_roster_human(roster, os.environ.get("OTAMAN_HUMAN"))
+    if entry is None:
+        return False, (
+            "`otaman policy apply` edits enforcement and requires the 'cto' roster role — "
+            "no acting human resolved (set OTAMAN_HUMAN to a roster human whose roles "
+            "include 'cto')."
+        )
+    if "cto" not in entry.roles:
+        return False, (
+            f"{entry.name!r} lacks the required 'cto' role for `otaman policy apply` "
+            f"(has: {', '.join(entry.roles) or 'none'})."
+        )
+    return True, entry.name
+
+
+def _cmd_apply(dry_run: bool) -> int:
+    root, config = _load_context()
+    if root is None:
+        return 1
+    if not _repos(config):
+        UI.muted("No repos in platform.yaml.")
+        return 0
+
+    records = list(_plan_repos(root, config))
+    for rec in records:
+        if rec["kind"] == "skip":
+            UI.warn(f"{rec['repo']}: skipped — {rec['changes'][0]}")
+        elif rec["kind"] == "error":
+            return _bail(f"{rec['repo']} ({rec['branch']}): {rec['changes'][0]}", code=2)
+
+    actionable = [
+        r for r in records if r["kind"] in ("human", "agent") and r["mode"] != "conformant"
+    ]
+    if not actionable:
+        UI.ok("All repos conformant — nothing to apply.")
+        return 0
+
+    UI.header("Policy — apply plan (generate-and-diff)")
+    tightens_human = False
+    for r in actionable:
+        UI.warn(f"{r['repo']} ({r['branch']}, {r['kind']}-owned): {r['mode']}")
+        for c in r["changes"]:
+            UI.muted(f"    {c}")
+        if r["kind"] == "human":
+            tightens_human = True
+
+    if dry_run:
+        need = "the 'cto' role" + (" + a human decision" if tightens_human else "")
+        UI.muted(f"(dry-run: nothing written; applying would require {need})")
+        return 0
+
+    # D5: policy edits are a cto act.
+    ok, who = _acting_is_cto(root)
+    if not ok:
+        return _bail(who, code=2)
+
+    # D5: tightening live protection on a human-owned branch is a HUMAN-DECISION.
+    if tightens_human:
+        from otaman_cli import safety
+
+        if not safety.confirm_human_decision(
+            "otaman policy apply will TIGHTEN branch protection on human-owned branch(es)"
+        ):
+            return _bail("apply aborted — human decision not confirmed", code=2)
+
+    # Emit the plan for deploy (step 3) to push live. Per the STOP-AT, cli never
+    # PUTs branch protection itself.
+    import json
+
+    plan = {
+        "generated_by": "otaman policy apply",
+        "pack": "git",
+        "acting_cto": who,
+        "repos": [
+            {
+                "repo": r["repo"],
+                "slug": r["slug"],
+                "branch": r["branch"],
+                "owner_kind": r["kind"],
+                "mode": r["mode"],
+                "desired": r["desired"],
+            }
+            for r in actionable
+        ],
+    }
+    gen_dir = root / "policy" / "generated"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    plan_path = gen_dir / "branch-protection.json"
+    plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    UI.ok(f"Wrote apply plan for deploy: {plan_path.relative_to(root)}")
+    UI.muted("Deploy (policy-engine step 3) applies this live; cli does not push protection.")
+    return 0
 
 
 def _cmd_validate() -> int:
@@ -369,6 +504,7 @@ def cmd_policy(args: list[str]) -> int:
         UI.muted("Usage: otaman policy list")
         UI.muted("       otaman policy show [<pack>] [--repo R] [--agent A] [--json]")
         UI.muted("       otaman policy diff")
+        UI.muted("       otaman policy apply [--dry-run]")
         UI.muted("       otaman policy validate")
         return 0 if args else 1
 
@@ -377,6 +513,8 @@ def cmd_policy(args: list[str]) -> int:
         return _cmd_list()
     if action == "diff":
         return _cmd_diff()
+    if action == "apply":
+        return _cmd_apply(dry_run="--dry-run" in rest)
     if action == "validate":
         return _cmd_validate()
     if action == "show":
@@ -402,7 +540,7 @@ def cmd_policy(args: list[str]) -> int:
                 return _bail(f"Unexpected argument: {a}")
         return _cmd_show(pack, repo, agent, as_json)
 
-    return _bail(f"Unknown action {action!r}. Actions: list, show, diff, validate")
+    return _bail(f"Unknown action {action!r}. Actions: list, show, diff, apply, validate")
 
 
 register(
