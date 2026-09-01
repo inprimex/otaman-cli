@@ -1564,6 +1564,85 @@ def check_human_roster(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def check_branch_policy(config: dict[str, Any], project_root: Path) -> dict[str, Any]:
+    """policy-engine 4.2 — branch ownership / delegation / protection-drift per repo.
+
+    Ownership + delegation are local (roster + branch-owners.yaml). Drift is a
+    live read via the cli's policy diff, best-effort: skipped with a note when
+    `gh` is unavailable/unauthenticated, so a dev environment never shows false
+    drift. Drift severity follows the enforcement mode (block → high, warn →
+    medium), matching the engine's "ERROR in block, WARN in warn" contract.
+    """
+    from otaman_cli.commands import policy as _policy
+
+    issues: list[dict[str, Any]] = []
+    details: dict[str, Any] = {}
+
+    try:
+        from otaman_core.policy import check_deprecated_standards
+
+        for finding in check_deprecated_standards(config):
+            issues.append(
+                {
+                    "severity": "medium",
+                    "message": finding.message,
+                    "fix": "remove the deprecated standards.git.* keys "
+                    "(content moved to policy/git/standard.yaml)",
+                }
+            )
+    except Exception:  # noqa: BLE001 - deprecation scan is advisory
+        pass
+
+    repos = [r for r in (config.get("repos") or []) if isinstance(r, dict)]
+    if not repos:
+        status = "warn" if issues else "ok"
+        details["skipped"] = "no repos in platform.yaml"
+        return {"check": "branch_policy", "status": status, "details": details, "issues": issues}
+
+    humans = _policy._human_names(project_root)
+    details["ownership"] = [
+        {
+            "repo": r.get("name"),
+            "owner": r.get("owner") or None,
+            "kind": "human" if (r.get("owner") or "") in humans else "agent",
+        }
+        for r in repos
+    ]
+    delegation = _policy._branch_owners(project_root)
+    if delegation:
+        details["delegation"] = delegation
+
+    if not _policy._gh_available():
+        details["drift"] = "not checked (gh unavailable/unauthenticated)"
+    else:
+        mode = "warn"
+        policies = config.get("policies")
+        if isinstance(policies, dict) and policies.get("enforcement") in ("block", "warn"):
+            mode = policies["enforcement"]
+        drift_sev = "high" if mode == "block" else "medium"
+        drifted = 0
+        for rec in _policy._plan_repos(project_root, config):
+            if rec["kind"] in ("skip", "error") or rec["mode"] == "conformant":
+                continue
+            drifted += 1
+            issues.append(
+                {
+                    "severity": drift_sev,
+                    "message": f"{rec['repo']} ({rec['branch']}, {rec['kind']}-owned): "
+                    f"branch-protection drift [{rec['mode']}] — {'; '.join(rec['changes'])}",
+                    "fix": "run `otaman policy apply` (cto); deploy then applies it live",
+                }
+            )
+        details["drift"] = {"mode": mode, "drifted_repos": drifted}
+
+    status = (
+        "fail"
+        if any(i["severity"] in ("critical", "high") for i in issues)
+        else ("warn" if issues else "ok")
+    )
+    return {"check": "branch_policy", "status": status, "details": details, "issues": issues}
+
+
 def run_doctor(project_root: Path) -> dict[str, Any]:
     """Run all doctor checks and return comprehensive report."""
     config_path = project_root / "platform.yaml"
@@ -1594,6 +1673,7 @@ def run_doctor(project_root: Path) -> dict[str, Any]:
         check_plugin_doctor(project_root),
         check_human_roster(config),
         check_edition_consistency(),
+        check_branch_policy(config, project_root),
     ]
 
     passed = sum(1 for c in checks if c["status"] == "ok")
