@@ -132,5 +132,8 @@ if [ "$started" -eq 0 ] && [ "$skipped" -eq 0 ]; then
   exit 1
 fi
 
-echo "Attach: tmux attach -t $PREFIX-spec-agent"
+{% set _enabled = agents | selectattr('enabled') | map(attribute='name') | list %}
+{% if _enabled %}
+echo "Attach: tmux attach -t $PREFIX-{{ _enabled[0] }}"
+{% endif %}
 exit 0
