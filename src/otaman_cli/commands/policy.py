@@ -24,10 +24,15 @@ Implemented verbs:
   exit non-zero to refuse an agent session merging into a human-owned (or
   owner-less) branch. Owner intent comes from ``resolve_branch_owner`` +
   ``policy/git/branch-owners.yaml``, never from live protection state (D4a).
+- ``otaman policy annotate <base-branch> [--repo NAME]`` — 4.2 PR annotation:
+  print an admissibility annotation for a PR's base branch (owner-less /
+  human-owned / agent-owned). Read-only, always exit 0 — for display on a PR;
+  the gate is ``check-merge``.
 - ``otaman policy validate`` — every selected policy parses and composes with no
   refused loosening; non-zero exit on any structural error or loosening.
 
-The 4.2 observability surface (doctor section + PR annotation) lands next.
+The other half of 4.2 — the ``otaman doctor`` branch-policy section (ownership /
+delegation / drift per repo) — lives in ``commands/doctor.py``.
 """
 
 from __future__ import annotations
@@ -217,6 +222,24 @@ def _live_check_contexts(slug: str, branch: str) -> list[str]:
         [f"repos/{slug}/commits/{branch}/check-runs", "--jq", "[.check_runs[].name] | unique"]
     )
     return [n for n in names if isinstance(n, str)] if isinstance(names, list) else []
+
+
+def _gh_available() -> bool:
+    """True if `gh` is installed AND authenticated — so a caller (e.g. the doctor
+    branch-policy section) can skip live reads instead of reporting false drift
+    from an unauthenticated environment."""
+    import shutil
+    import subprocess
+
+    if not shutil.which("gh"):
+        return False
+    try:
+        return (
+            subprocess.run(["gh", "auth", "status"], capture_output=True, timeout=15).returncode
+            == 0
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def _desired_protection(rules: dict, *, is_human_owned: bool, contexts: list[str]) -> dict:
@@ -533,13 +556,15 @@ def _caller_identity(root) -> tuple[bool, str | None]:
     return True, resolve_agent_identity(root)
 
 
-def _cmd_check_merge(branch: str | None, repo_arg: str | None) -> int:
-    root, config = _load_context()
-    if root is None:
-        return 1
-    if not branch:
-        return _bail("Usage: otaman policy check-merge <base-branch> [--repo NAME]", code=2)
+def _resolve_target_owner(
+    root, config: dict, branch: str, repo_arg: str | None
+) -> tuple[str | None, bool]:
+    """(owner, owner_is_human) for a base branch. ``owner`` is None when owner-less.
 
+    Owner intent only: branch-owners.yaml registry → `<type>/<owner>/<topic>`
+    convention → the repo's declared owner for its default branch. Never reads
+    live branch protection (D4a).
+    """
     from otaman_core.policy import resolve_branch_owner
 
     repo = _resolve_repo(root, config, repo_arg)
@@ -561,6 +586,17 @@ def _cmd_check_merge(branch: str | None, repo_arg: str | None) -> int:
         is_default_branch=is_default,
         branch_owners=_branch_owners(root),
     )
+    return owner, (owner in _human_names(root) if owner else False)
+
+
+def _cmd_check_merge(branch: str | None, repo_arg: str | None) -> int:
+    root, config = _load_context()
+    if root is None:
+        return 1
+    if not branch:
+        return _bail("Usage: otaman policy check-merge <base-branch> [--repo NAME]", code=2)
+
+    owner, owner_is_human = _resolve_target_owner(root, config, branch, repo_arg)
     caller_is_agent, caller = _caller_identity(root)
 
     if owner is None:
@@ -571,7 +607,6 @@ def _cmd_check_merge(branch: str | None, repo_arg: str | None) -> int:
             code=_GUARD_REFUSED,
         )
 
-    owner_is_human = owner in _human_names(root)
     if owner_is_human and caller_is_agent:
         return _bail(
             f"Refused — agents must not merge into the human-owned branch {branch!r} "
@@ -586,6 +621,38 @@ def _cmd_check_merge(branch: str | None, repo_arg: str | None) -> int:
         f"OK to merge into {branch} — owner {owner} [{owner_kind}], "
         f"caller {caller or 'unknown'} [{caller_kind}]."
     )
+    return 0
+
+
+def _cmd_annotate(branch: str | None, repo_arg: str | None) -> int:
+    """4.2 PR annotation: print an admissibility annotation for a PR's base branch.
+
+    Read-only, ALWAYS exit 0 — this is for display (a PR comment / CI annotation),
+    not a gate. The gate is `check-merge` (exit non-zero). A PR-comment poster
+    (CI / `otaman git-host`) pipes this text onto the PR.
+    """
+    root, config = _load_context()
+    if root is None:
+        return 1
+    if not branch:
+        return _bail("Usage: otaman policy annotate <base-branch> [--repo NAME]", code=2)
+
+    owner, owner_is_human = _resolve_target_owner(root, config, branch, repo_arg)
+    if owner is None:
+        print(
+            f"⛔ UNADMITTABLE: base branch `{branch}` is owner-less — no `<type>/<owner>/<topic>` "
+            "match, no branch-owners.yaml entry. Assign an owner before this PR can be admitted."
+        )
+    elif owner_is_human:
+        print(
+            f"👤 Owner: `{owner}` (human). Only {owner} or a delegate admits this PR — "
+            "agents must not merge it; it awaits the owner's review/merge."
+        )
+    else:
+        print(
+            f"🤖 Owner: `{owner}` (agent). The owning agent self-merges its own green PR — "
+            "no human merge required."
+        )
     return 0
 
 
@@ -635,6 +702,7 @@ def cmd_policy(args: list[str]) -> int:
         UI.muted("       otaman policy diff")
         UI.muted("       otaman policy apply [--dry-run]")
         UI.muted("       otaman policy check-merge <base-branch> [--repo NAME]")
+        UI.muted("       otaman policy annotate <base-branch> [--repo NAME]")
         UI.muted("       otaman policy validate")
         return 0 if args else 1
 
@@ -645,7 +713,7 @@ def cmd_policy(args: list[str]) -> int:
         return _cmd_diff()
     if action == "apply":
         return _cmd_apply(dry_run="--dry-run" in rest)
-    if action == "check-merge":
+    if action in ("check-merge", "annotate"):
         branch = None
         repo_arg = None
         i = 0
@@ -659,7 +727,9 @@ def cmd_policy(args: list[str]) -> int:
                 i += 1
             else:
                 return _bail(f"Unexpected argument: {a}")
-        return _cmd_check_merge(branch, repo_arg)
+        if action == "check-merge":
+            return _cmd_check_merge(branch, repo_arg)
+        return _cmd_annotate(branch, repo_arg)
     if action == "validate":
         return _cmd_validate()
     if action == "show":
@@ -686,7 +756,8 @@ def cmd_policy(args: list[str]) -> int:
         return _cmd_show(pack, repo, agent, as_json)
 
     return _bail(
-        f"Unknown action {action!r}. Actions: list, show, diff, apply, check-merge, validate"
+        f"Unknown action {action!r}. "
+        "Actions: list, show, diff, apply, check-merge, annotate, validate"
     )
 
 
