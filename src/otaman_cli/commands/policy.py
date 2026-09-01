@@ -20,12 +20,14 @@ Implemented verbs:
   ``policy/generated/branch-protection.json`` for deploy (step 3) to push live —
   cli never PUTs protection itself (STOP-AT). ``--dry-run`` previews the plan
   without the gates or the write.
+- ``otaman policy check-merge <base-branch> [--repo NAME]`` — the merge guard:
+  exit non-zero to refuse an agent session merging into a human-owned (or
+  owner-less) branch. Owner intent comes from ``resolve_branch_owner`` +
+  ``policy/git/branch-owners.yaml``, never from live protection state (D4a).
 - ``otaman policy validate`` — every selected policy parses and composes with no
   refused loosening; non-zero exit on any structural error or loosening.
 
-The remaining verbs land in follow-up PRs (kept out of the dispatcher until then
-so the surface never advertises a verb it can't honor): ``check-merge`` (the
-agent-into-human-owned-branch merge guard) and the 4.2 observability surface.
+The 4.2 observability surface (doctor section + PR annotation) lands next.
 """
 
 from __future__ import annotations
@@ -460,6 +462,133 @@ def _cmd_apply(dry_run: bool) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# merge guard (2.1: check-merge)
+#
+# A read-only pre-merge check the launcher/agent calls before a `gh pr merge`
+# into a base branch: exit non-zero => refuse. Owner intent comes from
+# resolve_branch_owner + policy/git/branch-owners.yaml, NEVER from live branch
+# protection (D4a point 3 — "protection configured" and "owner admits
+# personally" look identical from the API; conflating them re-creates the
+# false-block incident). Pairs with generated protection as the rails layer.
+
+_GUARD_REFUSED = 3
+
+
+def _branch_owners(root) -> dict:
+    """The ``policy/git/branch-owners.yaml`` registry (branch -> owner), or {}."""
+    import yaml
+
+    path = root / "policy" / "git" / "branch-owners.yaml"
+    if not path.is_file():
+        return {}
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    bo = data.get("branch-owners", data)
+    if not isinstance(bo, dict):
+        return {}
+    return {k: v for k, v in bo.items() if isinstance(k, str) and isinstance(v, str)}
+
+
+def _resolve_repo(root, config: dict, repo_arg: str | None) -> dict | None:
+    """The repos[] entry for --repo, else the one whose path contains cwd."""
+    repos = _repos(config)
+    if repo_arg:
+        return next((r for r in repos if r.get("name") == repo_arg), None)
+    from pathlib import Path
+
+    cwd = Path.cwd().resolve()
+    for r in repos:
+        path = r.get("path")
+        if not path:
+            continue
+        rp = (root / path).resolve()
+        if cwd == rp or rp in cwd.parents:
+            return r
+    return None
+
+
+def _caller_identity(root) -> tuple[bool, str | None]:
+    """(is_agent, name). A resolvable OTAMAN_HUMAN roster entry => human caller;
+    otherwise the acting agent identity."""
+    import os
+
+    human = os.environ.get("OTAMAN_HUMAN")
+    if human:
+        from otaman_core.human_roster import load_human_roster, resolve_roster_human
+
+        try:
+            roster = load_human_roster(root / "platform.yaml")
+        except Exception:  # noqa: BLE001 - absent/invalid roster → not a human caller
+            roster = []
+        entry = resolve_roster_human(roster, human)
+        if entry is not None:
+            return False, entry.name
+    from otaman_cli.identity import resolve_agent_identity
+
+    return True, resolve_agent_identity(root)
+
+
+def _cmd_check_merge(branch: str | None, repo_arg: str | None) -> int:
+    root, config = _load_context()
+    if root is None:
+        return 1
+    if not branch:
+        return _bail("Usage: otaman policy check-merge <base-branch> [--repo NAME]", code=2)
+
+    from otaman_core.policy import resolve_branch_owner
+
+    repo = _resolve_repo(root, config, repo_arg)
+    repo_owner = repo.get("owner") if repo else None
+
+    is_default = False
+    if repo and repo.get("path"):
+        from otaman_core.git_host import detect_remote_for_repo
+
+        repo_dir = (root / repo["path"]).resolve()
+        info = detect_remote_for_repo(repo_dir) if repo_dir.exists() else None
+        if info is not None and info.provider == "github":
+            default = _default_branch(info.slug)
+            is_default = bool(default and branch == default)
+
+    owner = resolve_branch_owner(
+        branch,
+        repo_owner=repo_owner,
+        is_default_branch=is_default,
+        branch_owners=_branch_owners(root),
+    )
+    caller_is_agent, caller = _caller_identity(root)
+
+    if owner is None:
+        return _bail(
+            f"Refused — target branch {branch!r} is owner-less (no `<type>/<owner>/<topic>` "
+            "convention, no branch-owners.yaml entry, not a mapped default branch). PRs into "
+            "it are unadmittable; assign an owner before merging.",
+            code=_GUARD_REFUSED,
+        )
+
+    owner_is_human = owner in _human_names(root)
+    if owner_is_human and caller_is_agent:
+        return _bail(
+            f"Refused — agents must not merge into the human-owned branch {branch!r} "
+            f"(owner: {owner}). The owner admits it: ask {owner} to merge, or open the PR "
+            f"for their review. (caller: {caller or 'unknown'})",
+            code=_GUARD_REFUSED,
+        )
+
+    owner_kind = "human" if owner_is_human else "agent"
+    caller_kind = "agent" if caller_is_agent else "human"
+    UI.ok(
+        f"OK to merge into {branch} — owner {owner} [{owner_kind}], "
+        f"caller {caller or 'unknown'} [{caller_kind}]."
+    )
+    return 0
+
+
 def _cmd_validate() -> int:
     root, config = _load_context()
     if root is None:
@@ -505,6 +634,7 @@ def cmd_policy(args: list[str]) -> int:
         UI.muted("       otaman policy show [<pack>] [--repo R] [--agent A] [--json]")
         UI.muted("       otaman policy diff")
         UI.muted("       otaman policy apply [--dry-run]")
+        UI.muted("       otaman policy check-merge <base-branch> [--repo NAME]")
         UI.muted("       otaman policy validate")
         return 0 if args else 1
 
@@ -515,6 +645,21 @@ def cmd_policy(args: list[str]) -> int:
         return _cmd_diff()
     if action == "apply":
         return _cmd_apply(dry_run="--dry-run" in rest)
+    if action == "check-merge":
+        branch = None
+        repo_arg = None
+        i = 0
+        while i < len(rest):
+            a = rest[i]
+            if a == "--repo" and i + 1 < len(rest):
+                repo_arg = rest[i + 1]
+                i += 2
+            elif not a.startswith("-") and branch is None:
+                branch = a
+                i += 1
+            else:
+                return _bail(f"Unexpected argument: {a}")
+        return _cmd_check_merge(branch, repo_arg)
     if action == "validate":
         return _cmd_validate()
     if action == "show":
@@ -540,7 +685,9 @@ def cmd_policy(args: list[str]) -> int:
                 return _bail(f"Unexpected argument: {a}")
         return _cmd_show(pack, repo, agent, as_json)
 
-    return _bail(f"Unknown action {action!r}. Actions: list, show, diff, apply, validate")
+    return _bail(
+        f"Unknown action {action!r}. Actions: list, show, diff, apply, check-merge, validate"
+    )
 
 
 register(
