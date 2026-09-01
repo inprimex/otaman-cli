@@ -133,5 +133,8 @@ Write-Host "Summary: started=$Started skipped=$Skipped failed=$Failed"
 
 if ($Started -eq 0 -and $Skipped -eq 0) { exit 1 }
 
-Write-Host "Attach: tmux attach -t $Prefix-spec-agent"
+{% set _enabled = agents | selectattr('enabled') | map(attribute='name') | list %}
+{% if _enabled %}
+Write-Host "Attach: tmux attach -t $Prefix-{{ _enabled[0] }}"
+{% endif %}
 exit 0

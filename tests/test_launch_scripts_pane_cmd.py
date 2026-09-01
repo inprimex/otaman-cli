@@ -162,3 +162,50 @@ def test_generate_without_agent_repos_backward_compatible(tmp_path: Path):
     sh = r.launch_sh.read_text(encoding="utf-8")
     assert "otaman start" not in sh
     assert "pane_cmd" in sh
+
+
+def test_attach_hint_uses_first_enabled_agent_not_hardcoded(tmp_path: Path):
+    """The 'Attach:' hint must name a real enabled agent, not a hardcoded
+    'spec-agent' — a program without spec-agent (e.g. a solo-dev
+    frontend+backend setup) otherwise gets an attach hint pointing at a
+    session that never exists (found servicing landing-agent's docs render)."""
+    s = default_settings(
+        project_name="todo-app", extra_agent_names=["frontend-agent", "backend-agent"]
+    )
+    s = s.model_copy(
+        update={
+            "agents": [
+                AgentEntry(name="frontend-agent", enabled=True),
+                AgentEntry(name="backend-agent", enabled=True),
+            ]
+        }
+    )
+    r = generate(
+        s,
+        tmp_path / "launcher",
+        agent_repos={"frontend-agent": "../fe", "backend-agent": "../be"},
+    )
+    sh = r.launch_sh.read_text(encoding="utf-8")
+    ps1 = r.launch_ps1.read_text(encoding="utf-8")
+    # attaches to the first enabled agent
+    assert "Attach: tmux attach -t $PREFIX-frontend-agent" in sh
+    assert "Attach: tmux attach -t $Prefix-frontend-agent" in ps1
+    # and never the old hardcoded spec-agent session
+    assert "$PREFIX-spec-agent" not in sh
+    assert "$Prefix-spec-agent" not in ps1
+
+
+def test_attach_hint_first_agent_when_spec_present(tmp_path: Path):
+    """When spec-agent IS first (the fleet case), the hint still resolves to it
+    — the fix references the first enabled agent, not a constant."""
+    s = default_settings(project_name="otaman", extra_agent_names=["cli-agent"])
+    s = s.model_copy(
+        update={
+            "agents": [
+                AgentEntry(name="spec-agent", enabled=True),
+                AgentEntry(name="cli-agent", enabled=True),
+            ]
+        }
+    )
+    r = generate(s, tmp_path / "launcher", agent_repos={"spec-agent": "../otaman-specs"})
+    assert "Attach: tmux attach -t $PREFIX-spec-agent" in r.launch_sh.read_text(encoding="utf-8")
