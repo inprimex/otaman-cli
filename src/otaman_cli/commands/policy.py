@@ -14,12 +14,16 @@ Implemented verbs:
 - ``otaman policy diff`` — per repo, the branch protection the effective git
   policy wants vs what is live on the host (read-only; D4a failure-mode
   classification). Exit non-zero when any repo drifts.
-- ``otaman policy apply [--dry-run]`` — generate-and-diff the branch protection
-  from the effective git policy; ``cto`` role gate (D5); HUMAN-DECISION when it
-  would tighten a human-owned branch; writes the plan to
-  ``policy/generated/branch-protection.json`` for deploy (step 3) to push live —
-  cli never PUTs protection itself (STOP-AT). ``--dry-run`` previews the plan
-  without the gates or the write.
+- ``otaman policy apply [--dry-run] [--apply-live]`` — generate-and-diff the
+  branch protection from the effective git policy; ``cto`` role gate (D5);
+  HUMAN-DECISION when it would tighten a human-owned branch; writes the plan to
+  ``policy/generated/branch-protection.json``. Plan-only by default. With
+  ``--apply-live`` (or ``policies.live_apply: auto``) it shells to deploy's
+  non-interactive entrypoint ``otaman-policy-apply-live --root <root>`` AFTER the
+  confirm to converge live protection (D12) — cli never loads the deploy
+  credential and never PUTs protection itself (STOP-AT); an absent entrypoint is
+  reported and apply stops plan-only (no silent manual fallback). ``--dry-run``
+  previews the plan without the gates, the write, or the live handoff.
 - ``otaman policy check-merge <base-branch> [--repo NAME]`` — the merge guard:
   exit non-zero to refuse an agent session merging into a human-owned (or
   owner-less) branch. Owner intent comes from ``resolve_branch_owner`` +
@@ -433,13 +437,47 @@ def _acting_is_cto(root) -> tuple[bool, str]:
     return True, entry.name
 
 
-def _cmd_apply(dry_run: bool) -> int:
+def _live_apply(root, config: dict) -> int:
+    """4.4 / D12 apply->live handoff: shell to deploy's non-interactive entrypoint
+    AFTER the plan is written. cli never loads the deploy credential — the child
+    (`otaman-policy-apply-live`) resolves its own. Entrypoint absent => report and
+    stop plan-only (NO silent manual fallback — the D11 anti-pattern)."""
+    import shutil
+    import subprocess
+
+    entry = shutil.which("otaman-policy-apply-live")
+    if not entry:
+        UI.warn(
+            "live-apply requested but 'otaman-policy-apply-live' is not on PATH — the plan was "
+            "written, but protection was NOT applied. Install deploy's entrypoint (CE bootstrap), "
+            "then re-run `otaman policy apply --apply-live`. (Not falling back to manual API "
+            "calls — D11/D12.)"
+        )
+        return 2
+    UI.header("Policy — live apply (deploy entrypoint)")
+    UI.muted(f"$ otaman-policy-apply-live --root {root}")
+    try:
+        rc = subprocess.run([entry, "--root", str(root)]).returncode
+    except (OSError, subprocess.SubprocessError) as exc:
+        return _bail(f"live-apply entrypoint failed to run: {exc}", code=2)
+    if rc == 0:
+        UI.ok("Live protection converged to the plan.")
+    else:
+        UI.error(f"live-apply reported failures (exit {rc}) — see the per-repo output above.")
+    return rc
+
+
+def _cmd_apply(dry_run: bool, apply_live: bool = False) -> int:
     root, config = _load_context()
     if root is None:
         return 1
     if not _repos(config):
         UI.muted("No repos in platform.yaml.")
         return 0
+
+    # policies.live_apply: auto behaves like --apply-live.
+    policies = config.get("policies")
+    live = apply_live or (isinstance(policies, dict) and policies.get("live_apply") == "auto")
 
     records = list(_plan_repos(root, config))
     for rec in records:
@@ -508,8 +546,14 @@ def _cmd_apply(dry_run: bool) -> int:
     plan_path = gen_dir / "branch-protection.json"
     plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     UI.ok(f"Wrote apply plan for deploy: {plan_path.relative_to(root)}")
-    UI.muted("Deploy (policy-engine step 3) applies this live; cli does not push protection.")
-    return 0
+
+    if not live:
+        UI.muted(
+            "Plan-only. Pass --apply-live (or set policies.live_apply: auto) to apply it live "
+            "via deploy's entrypoint; cli itself never pushes protection."
+        )
+        return 0
+    return _live_apply(root, config)
 
 
 # ---------------------------------------------------------------------------
@@ -740,7 +784,7 @@ def cmd_policy(args: list[str]) -> int:
         UI.muted("Usage: otaman policy list")
         UI.muted("       otaman policy show [<pack>] [--repo R] [--agent A] [--json]")
         UI.muted("       otaman policy diff")
-        UI.muted("       otaman policy apply [--dry-run]")
+        UI.muted("       otaman policy apply [--dry-run] [--apply-live]")
         UI.muted("       otaman policy check-merge <base-branch> [--repo NAME]")
         UI.muted("       otaman policy annotate <base-branch> [--repo NAME]")
         UI.muted("       otaman policy validate")
@@ -752,7 +796,7 @@ def cmd_policy(args: list[str]) -> int:
     if action == "diff":
         return _cmd_diff()
     if action == "apply":
-        return _cmd_apply(dry_run="--dry-run" in rest)
+        return _cmd_apply(dry_run="--dry-run" in rest, apply_live="--apply-live" in rest)
     if action in ("check-merge", "annotate"):
         branch = None
         repo_arg = None
