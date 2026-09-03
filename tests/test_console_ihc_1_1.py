@@ -99,25 +99,20 @@ def test_run_console_refuses_on_fleet_socket(monkeypatch, capsys):
     assert "private" in out.lower() and seat.PRIVATE_SOCKET in out
 
 
-# ---- decision guard: outcome-proposal decisions defer to 1.2 ----
+# ---- outcome-proposal decisions: audit sign-off (1.2 supersedes the 1.1 guard) ----
 
 
-def test_decision_guard_defers_outcome_proposal(tmp_path):
+def test_outcome_proposal_approve_is_audit_signoff(tmp_path):
     from otaman_cli.console.identity import resolve_identity
 
     prog = _program(tmp_path)
-    op = bus.Proposal(
-        stem="s",
-        subject="an outcome",
-        from_agent="cofounder-agent",
-        timestamp="",
-        priority="high",
-        path=tmp_path / "x.md",
-        body="b",
-        msg_type="outcome-proposal",
-    )
+    _stage(tmp_path, "20260101T000009-c-to-human-outcome-proposal", mtype="outcome-proposal")
+    op = bus.list_pending_proposals(prog)[0]
     ident = resolve_identity(prog.root)
-    ok, msg = decision.approve(prog, op, ident)
-    assert ok is False and "read-only" in msg and "outcome-proposal" in msg
-    ok2, msg2 = decision.reject(prog, op, ident)
-    assert ok2 is False and "read-only" in msg2
+    ok, msg = decision.approve(prog, op, ident, reason="worth pursuing")
+    assert ok is True and "audit" in msg
+    # audit entry written + item acked (drops from the queue), no spec-change signal
+    assert bus.list_pending_proposals(prog) == []
+    active = tmp_path / ".agents" / "bus" / "active"
+    assert not list(active.glob("*spec-change-approved*"))
+    assert list(active.glob("*console-approved*"))

@@ -14,8 +14,17 @@ from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.screen import Screen
-from textual.widgets import Footer, Header, Label, ListItem, ListView, MarkdownViewer, Static
+from textual.screen import ModalScreen, Screen
+from textual.widgets import (
+    Footer,
+    Header,
+    Input,
+    Label,
+    ListItem,
+    ListView,
+    MarkdownViewer,
+    Static,
+)
 
 from otaman_cli.console.bus import Program, Proposal, discover_programs, list_pending_proposals
 
@@ -203,17 +212,53 @@ class PendingListScreen(Screen):
             self.app.push_screen(ProposalScreen(self.program, proposal))
 
 
+class ReasonModal(ModalScreen[str | None]):
+    """Capture a one-line reason for a decision (1.2: every verb records a reason).
+
+    Enter submits the typed reason (may be empty); Esc cancels the decision. The
+    result is delivered to the push_screen callback: a string (possibly "") to
+    proceed, or None when cancelled.
+    """
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)]
+
+    def __init__(self, verb: str) -> None:
+        super().__init__()
+        self._verb = verb
+
+    def compose(self) -> ComposeResult:
+        yield Static(
+            f"{self._verb.capitalize()} — enter a reason (optional), Enter to confirm:",
+            id="reason-prompt",
+            markup=False,
+        )
+        yield Input(placeholder="reason…", id="reason-input")
+
+    def on_mount(self) -> None:
+        self.query_one("#reason-input", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class ProposalScreen(Screen):
-    """Read the rendered proposal and approve/reject it (task 1.2).
+    """Read the rendered item and approve / reject / defer it (task 1.2).
 
     The human's keypress here is the confirmation — no LLM, no adapter prompt.
-    Approve/reject route through the same ledger-gated privileged writer as
-    `otaman approve`, stamped with the SSH-derived identity.
+    Each verb first captures a reason (ReasonModal), then routes through
+    decision.py stamped with the SSH-derived identity: a spec-change-request
+    approve mints `spec-change-approved` (parity with `/otaman:approve`);
+    outcome-proposal decisions are audit sign-offs; defer records an audit entry
+    and leaves the item pending. Every decision leaves a bus audit entry.
     """
 
     BINDINGS = [
         Binding("a", "approve", "Approve", priority=True),
         Binding("x", "reject", "Reject", priority=True),
+        Binding("d", "defer", "Defer", priority=True),
         Binding("escape", "back", "Back", priority=True),
         Binding("q", "quit", "Quit", priority=True),
     ]
@@ -239,21 +284,30 @@ class ProposalScreen(Screen):
         if ok:
             self.app.pop_screen()  # PendingListScreen.on_screen_resume refreshes
 
-    def action_approve(self) -> None:
+    def _apply_decision(self, verb: str, reason: str) -> None:
         from otaman_cli.console import decision
         from otaman_cli.console.identity import resolve_identity
 
         identity = resolve_identity(self.program.root)
-        ok, message = decision.approve(self.program, self.proposal, identity)
+        fn = {"approve": decision.approve, "reject": decision.reject, "defer": decision.defer}[verb]
+        ok, message = fn(self.program, self.proposal, identity, reason=reason)
         self._decide(ok, message)
+
+    def _prompt_and_decide(self, verb: str) -> None:
+        def _after(reason: str | None) -> None:
+            if reason is not None:  # None = cancelled
+                self._apply_decision(verb, reason)
+
+        self.app.push_screen(ReasonModal(verb), _after)
+
+    def action_approve(self) -> None:
+        self._prompt_and_decide("approve")
 
     def action_reject(self) -> None:
-        from otaman_cli.console import decision
-        from otaman_cli.console.identity import resolve_identity
+        self._prompt_and_decide("reject")
 
-        identity = resolve_identity(self.program.root)
-        ok, message = decision.reject(self.program, self.proposal, identity)
-        self._decide(ok, message)
+    def action_defer(self) -> None:
+        self._prompt_and_decide("defer")
 
     def action_back(self) -> None:
         self.app.pop_screen()
@@ -319,4 +373,5 @@ __all__ = [
     "PendingListScreen",
     "ProgramPickerScreen",
     "ProposalScreen",
+    "ReasonModal",
 ]
