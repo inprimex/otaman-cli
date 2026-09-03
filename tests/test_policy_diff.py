@@ -188,3 +188,58 @@ def test_live_check_contexts_enumerates_when_no_aggregator(monkeypatch):
 def test_live_check_contexts_empty_when_unreadable(monkeypatch):
     monkeypatch.setattr(policy, "_gh_json", lambda args: None)
     assert policy._live_check_contexts("inprimex/foo", "main") == []
+
+
+# ---- ci-ok from local workflow (deploy incident: check-runs unreliable) ----
+
+
+def _write_ci_ok_workflow(repo_dir):
+    wf = repo_dir / ".github" / "workflows"
+    wf.mkdir(parents=True, exist_ok=True)
+    (wf / "test.yml").write_text(
+        "jobs:\n"
+        "  test:\n    runs-on: ubuntu-latest\n"
+        "  ci-ok:\n    needs: [test]\n    runs-on: ubuntu-latest\n",
+        encoding="utf-8",
+    )
+
+
+def _cfg(root):
+    import yaml
+
+    return yaml.safe_load((root / "platform.yaml").read_text(encoding="utf-8"))
+
+
+def test_repo_has_ci_ok_detects_job(tmp_path):
+    _write_ci_ok_workflow(tmp_path)
+    assert policy._repo_has_ci_ok(tmp_path) is True
+    assert policy._repo_has_ci_ok(tmp_path / "nope") is False
+
+
+def test_plan_ci_ok_repo_requires_only_ci_ok(tmp_path, monkeypatch):
+    # the workflow defines ci-ok → require ONLY ci-ok, even though live check-runs
+    # enumerate the individual jobs (and even when ci-ok isn't among them)
+    root = _program(tmp_path, monkeypatch, [{"name": "foo", "path": "foo", "owner": "cli-agent"}])
+    _write_ci_ok_workflow(tmp_path / "foo")
+    _mock_gh(monkeypatch, live=None, contexts=("lint", "test-ubuntu", "test-macos"))
+    rec = next(r for r in policy._plan_repos(root, _cfg(root)) if r["repo"] == "foo")
+    assert rec["desired"]["required_status_checks"]["contexts"] == ["ci-ok"]
+
+
+def test_plan_non_ci_ok_repo_no_phantom_ci_ok(tmp_path, monkeypatch):
+    # no ci-ok job + unreadable/empty live check-runs → NO required_status_checks
+    # (never invent a phantom ci-ok that can't be satisfied)
+    root = _program(tmp_path, monkeypatch, [{"name": "bar", "path": "bar", "owner": "cli-agent"}])
+    _mock_gh(monkeypatch, live=None, contexts=())  # no workflow written → no ci-ok
+    rec = next(r for r in policy._plan_repos(root, _cfg(root)) if r["repo"] == "bar")
+    assert "required_status_checks" not in rec["desired"]
+
+
+def test_desired_omits_required_checks_when_contexts_empty():
+    d = _desired_protection(
+        {"require_status_checks": True, "force_push_forbidden": True},
+        is_human_owned=False,
+        contexts=[],
+    )
+    assert "required_status_checks" not in d
+    assert d["allow_force_pushes"] is False
