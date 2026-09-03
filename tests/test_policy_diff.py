@@ -235,6 +235,64 @@ def test_plan_non_ci_ok_repo_no_phantom_ci_ok(tmp_path, monkeypatch):
     assert "required_status_checks" not in rec["desired"]
 
 
+# ---- default-branch: live-preferred in the plan, local-first for check-merge ----
+# (deploy 2026-09-03: a stale local origin/HEAD 'master' targeted a nonexistent
+# branch in the apply plan for otaman-landing, whose live default is 'dev'.)
+
+
+def test_repo_default_branch_prefer_live_beats_stale_local(monkeypatch):
+    monkeypatch.setattr(policy, "_local_default_branch", lambda d: "master")  # stale symref
+    monkeypatch.setattr(policy, "_default_branch", lambda s: "dev")  # live truth
+    # plan path prefers live; check-merge keeps local-first (availability > freshness)
+    assert policy._repo_default_branch("d", "slug", prefer_live=True) == "dev"
+    assert policy._repo_default_branch("d", "slug") == "master"
+
+
+def test_repo_default_branch_prefer_live_falls_back_when_gh_down(monkeypatch):
+    monkeypatch.setattr(policy, "_local_default_branch", lambda d: "main")
+    monkeypatch.setattr(policy, "_default_branch", lambda s: None)  # gh unavailable
+    assert policy._repo_default_branch("d", "slug", prefer_live=True) == "main"
+
+
+def test_repo_default_branch_last_resort_main(monkeypatch):
+    monkeypatch.setattr(policy, "_local_default_branch", lambda d: None)
+    monkeypatch.setattr(policy, "_default_branch", lambda s: None)
+    assert policy._repo_default_branch(None, "slug", prefer_live=True) == "main"
+    assert policy._repo_default_branch(None, "slug") == "main"
+
+
+def test_plan_prefers_live_branch_and_warns_on_stale_local(tmp_path, monkeypatch):
+    root = _program(
+        tmp_path, monkeypatch, [{"name": "landing", "path": "landing", "owner": "cli-agent"}]
+    )
+    _mock_gh(monkeypatch, live=None)
+    monkeypatch.setattr(policy, "_default_branch", lambda s: "dev")  # live default
+    monkeypatch.setattr(policy, "_local_default_branch", lambda d: "master")  # stale local
+    rec = next(r for r in policy._plan_repos(root, _cfg(root)) if r["repo"] == "landing")
+    assert rec["branch"] == "dev"  # live wins, not the stale 'master'
+    assert rec["warning"] and "master" in rec["warning"] and "dev" in rec["warning"]
+    assert "set-head" in rec["warning"]  # actionable re-sync hint
+
+
+def test_plan_no_warning_when_local_and_live_agree(tmp_path, monkeypatch):
+    root = _program(tmp_path, monkeypatch, [{"name": "foo", "path": "foo", "owner": "cli-agent"}])
+    _mock_gh(monkeypatch, live=None)
+    monkeypatch.setattr(policy, "_default_branch", lambda s: "main")
+    monkeypatch.setattr(policy, "_local_default_branch", lambda d: "main")
+    rec = next(r for r in policy._plan_repos(root, _cfg(root)) if r["repo"] == "foo")
+    assert rec["branch"] == "main" and rec["warning"] is None
+
+
+def test_cmd_diff_surfaces_stale_branch_warning(tmp_path, monkeypatch, capsys):
+    _program(tmp_path, monkeypatch, [{"name": "landing", "path": "landing", "owner": "cli-agent"}])
+    _mock_gh(monkeypatch, live=None)
+    monkeypatch.setattr(policy, "_default_branch", lambda s: "dev")
+    monkeypatch.setattr(policy, "_local_default_branch", lambda d: "master")
+    cmd_policy(["diff"])
+    out = capsys.readouterr().out
+    assert "stale" in out and "dev" in out and "set-head" in out
+
+
 def test_desired_omits_required_checks_when_contexts_empty():
     d = _desired_protection(
         {"require_status_checks": True, "force_push_forbidden": True},

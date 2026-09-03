@@ -213,25 +213,49 @@ def _default_branch(slug: str) -> str | None:
     return _gh_json([f"repos/{slug}", "--jq", ".default_branch"]) if slug else None
 
 
-def _repo_default_branch(repo_dir, slug: str) -> str:
-    """The repo's default branch — LOCAL git first (no network/auth), then gh,
-    then 'main'. The gh-only path was fragile (any auth/network hiccup made every
-    default branch resolve owner-less in check-merge — the 5.1 gate blocker)."""
+def _local_default_branch(repo_dir) -> str | None:
+    """The local checkout's cached default branch (``origin/HEAD`` symref), or None.
+
+    Fast and offline, but can go STALE: ``origin/HEAD`` is only refreshed by a
+    clone or an explicit ``git remote set-head`` — if the remote's default moves
+    (e.g. master→dev) the local symref keeps pointing at the old, now-nonexistent
+    branch until someone re-syncs it (deploy's 2026-09-03 otaman-landing finding).
+    """
     import subprocess
 
-    if repo_dir is not None:
-        try:
-            r = subprocess.run(
-                ["git", "-C", str(repo_dir), "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if r.returncode == 0 and r.stdout.strip():
-                return r.stdout.strip().rsplit("/", 1)[-1]  # origin/main -> main
-        except (OSError, subprocess.SubprocessError):
-            pass
-    return _default_branch(slug) or "main"
+    if repo_dir is None:
+        return None
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(repo_dir), "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip().rsplit("/", 1)[-1]  # origin/main -> main
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return None
+
+
+def _repo_default_branch(repo_dir, slug: str, *, prefer_live: bool = False) -> str:
+    """The repo's default branch, then 'main' as a last resort.
+
+    Two resolution orders for two different stakes:
+
+    - default (``prefer_live=False``) — LOCAL symref first, then gh. Right for
+      check-merge, a routine gate where a stale value is low-stakes and the
+      gh-only path's auth/network fragility (which made every default resolve
+      owner-less — the 5.1 blocker) matters more than perfect freshness.
+    - ``prefer_live=True`` — LIVE gh first, local only as fallback. Right for the
+      apply/diff PLAN, where a wrong branch does not degrade gracefully: it
+      silently targets a nonexistent branch (404 on apply) and leaves the real
+      default unprotected. Correctness outranks availability here.
+    """
+    if prefer_live:
+        return _default_branch(slug) or _local_default_branch(repo_dir) or "main"
+    return _local_default_branch(repo_dir) or _default_branch(slug) or "main"
 
 
 def _read_live_protection(slug: str, branch: str) -> dict | None:
@@ -389,7 +413,18 @@ def _plan_repos(root, config: dict):
             }
             continue
         slug = info.slug
-        branch = _repo_default_branch(repo_dir, slug)
+        # PLAN path: prefer the LIVE default branch — a stale local origin/HEAD
+        # must not silently target a nonexistent branch (deploy's finding). Warn
+        # when local and live disagree so the drift is visible + fixable.
+        live_branch = _default_branch(slug)
+        local_branch = _local_default_branch(repo_dir)
+        branch = live_branch or local_branch or "main"
+        branch_warning = None
+        if live_branch and local_branch and live_branch != local_branch:
+            branch_warning = (
+                f"local origin/HEAD ({local_branch}) is stale — live default is "
+                f"{live_branch}; using live. Re-sync: git -C {repo_dir} remote set-head origin -a"
+            )
         is_human = owner in humans
         try:
             eff, _v = effective_policy(root, config, "git", repo=name)
@@ -425,6 +460,7 @@ def _plan_repos(root, config: dict):
             "desired": desired,
             "changes": changes,
             "mode": mode,
+            "warning": branch_warning,
         }
 
 
@@ -447,6 +483,8 @@ def _cmd_diff() -> int:
             UI.error(f"{name} ({branch}): {rec['changes'][0]}")
             drift = True
             continue
+        if rec.get("warning"):
+            UI.warn(f"{name}: {rec['warning']}")
         if mode == "conformant":
             UI.ok(f"{name} ({branch}, {kind}-owned): conformant")
             continue
@@ -542,6 +580,8 @@ def _cmd_apply(dry_run: bool, apply_live: bool = False) -> int:
     UI.header("Policy — apply plan (generate-and-diff)")
     tightens_human = False
     for r in actionable:
+        if r.get("warning"):
+            UI.warn(f"{r['repo']}: {r['warning']}")
         UI.warn(f"{r['repo']} ({r['branch']}, {r['kind']}-owned): {r['mode']}")
         for c in r["changes"]:
             UI.muted(f"    {c}")
@@ -583,6 +623,7 @@ def _cmd_apply(dry_run: bool, apply_live: bool = False) -> int:
                 "owner_kind": r["kind"],
                 "mode": r["mode"],
                 "desired": r["desired"],
+                "branch_warning": r.get("warning"),
             }
             for r in actionable
         ],
