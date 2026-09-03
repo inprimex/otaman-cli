@@ -240,13 +240,28 @@ def _read_live_protection(slug: str, branch: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+#: The canonical aggregator job: when a repo has it, it is the ONE context that
+#: actually gates merge — requiring the individual jobs alongside it is redundant
+#: (and harmful when some are `continue-on-error`, whose conclusions report
+#: failure though ci-ok ignores them — deploy live incident 2026-09-03).
+_AGGREGATOR_CHECK = "ci-ok"
+
+
 def _live_check_contexts(slug: str, branch: str) -> list[str]:
-    """The repo's live CI check names (D4a: required-check context is per-repo,
-    read from live CI, never a constant like a hardcoded ``ci-ok``)."""
+    """The repo's live required-check contexts (D4a: per-repo, from live CI).
+
+    If the repo has the ``ci-ok`` aggregator, require ONLY it — that is what
+    gates merge for the repo (an opt-in aggregator pattern); requiring the
+    individual jobs too is redundant and breaks on `continue-on-error` jobs.
+    Otherwise require every discovered check name.
+    """
     names = _gh_json(
         [f"repos/{slug}/commits/{branch}/check-runs", "--jq", "[.check_runs[].name] | unique"]
     )
-    return [n for n in names if isinstance(n, str)] if isinstance(names, list) else []
+    live = [n for n in names if isinstance(n, str)] if isinstance(names, list) else []
+    if _AGGREGATOR_CHECK in live:
+        return [_AGGREGATOR_CHECK]
+    return live
 
 
 def _gh_available() -> bool:

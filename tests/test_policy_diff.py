@@ -164,3 +164,27 @@ def test_cmd_diff_skips_repo_without_remote(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert rc == 0  # skipped repos are not drift
     assert "skipped" in out
+
+
+# ---- _live_check_contexts: ci-ok aggregator special-case (deploy incident) ----
+
+
+def test_live_check_contexts_prefers_ci_ok_aggregator(monkeypatch):
+    # ci-ok present among live checks → require ONLY ci-ok (not the individual
+    # jobs, some of which may be continue-on-error and report failure)
+    monkeypatch.setattr(
+        policy,
+        "_gh_json",
+        lambda args: ["ci-ok", "lint", "test-ubuntu", "test-macos", "test-windows"],
+    )
+    assert policy._live_check_contexts("inprimex/foo", "main") == ["ci-ok"]
+
+
+def test_live_check_contexts_enumerates_when_no_aggregator(monkeypatch):
+    monkeypatch.setattr(policy, "_gh_json", lambda args: ["lint", "test-ubuntu"])
+    assert sorted(policy._live_check_contexts("inprimex/foo", "main")) == ["lint", "test-ubuntu"]
+
+
+def test_live_check_contexts_empty_when_unreadable(monkeypatch):
+    monkeypatch.setattr(policy, "_gh_json", lambda args: None)
+    assert policy._live_check_contexts("inprimex/foo", "main") == []
