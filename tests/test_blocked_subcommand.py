@@ -214,3 +214,34 @@ def test_clear_ambiguous_partial_match_lists_candidates_and_errors(project: Path
     remaining = blocked.read_text(encoding="utf-8")
     assert "feature-x-phase-1" in remaining
     assert "feature-x-phase-2" in remaining
+
+
+# ---------------------------------------------------------------------------
+# --help must win over positional parsing (footgun class — cofounder 2026-09-03)
+
+
+def _blocked_file(meta: Path) -> Path:
+    return meta / ".agents" / "blocked" / "cli-agent.md"
+
+
+def test_help_does_not_register_blocked_entry(project: Path) -> None:
+    result = _run(project, "--help")
+    assert result.returncode == 0
+    assert "Usage: otaman blocked" in result.stdout
+    bf = _blocked_file(project)
+    # the bare --help must NOT be registered as a blocked slug titled "--help"
+    assert not bf.exists() or "--help" not in bf.read_text(encoding="utf-8")
+
+
+def test_dash_h_does_not_register_blocked_entry(project: Path) -> None:
+    result = _run(project, "-h")
+    assert result.returncode == 0
+    bf = _blocked_file(project)
+    assert not bf.exists() or "## Blocked:" not in bf.read_text(encoding="utf-8")
+
+
+def test_real_slug_still_registers(project: Path) -> None:
+    result = _run(project, "my-blocked-task")
+    assert result.returncode == 0
+    bf = _blocked_file(project)
+    assert bf.exists() and "## Blocked: my-blocked-task" in bf.read_text(encoding="utf-8")
