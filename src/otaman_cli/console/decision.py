@@ -35,6 +35,20 @@ def _target(proposal: Proposal) -> dict:
     }
 
 
+def _wrong_type_refusal(proposal: Proposal) -> str | None:
+    """Approve/reject apply to spec-change-requests. Outcome-proposals appear in
+    the 1.1 queue for visibility + full-body read, but their decision semantics
+    (a distinct sign-off signal, not spec-change-approved) land in 1.2 — until
+    then, guard against the SCR writer minting the wrong signal on them."""
+    if proposal.msg_type != "spec-change-request":
+        return (
+            f"{proposal.msg_type} decisions are read-only for now "
+            "(interactive-human-console 1.2 wires their sign-off signal); "
+            "approve/reject currently apply to spec-change-requests."
+        )
+    return None
+
+
 def _approver_refusal(program: Program) -> str | None:
     """The named refusal iff the acting human is a resolved non-approver.
 
@@ -57,6 +71,9 @@ def approve(program: Program, proposal: Proposal, identity: ConsoleIdentity) -> 
     """
     from otaman_cli.commands.approve import _perform_approval
 
+    wrong = _wrong_type_refusal(proposal)
+    if wrong is not None:
+        return False, wrong
     refusal = _approver_refusal(program)
     if refusal is not None:
         return False, f"Approval refused — {refusal}."
@@ -85,6 +102,9 @@ def reject(
     """Reject *proposal* through the privileged writer, stamped with identity."""
     from otaman_cli.commands.approve import _perform_rejection
 
+    wrong = _wrong_type_refusal(proposal)
+    if wrong is not None:
+        return False, wrong
     refusal = _approver_refusal(program)
     if refusal is not None:
         return False, f"Rejection refused — {refusal}."
