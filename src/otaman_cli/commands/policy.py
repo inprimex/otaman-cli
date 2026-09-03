@@ -264,6 +264,32 @@ def _live_check_contexts(slug: str, branch: str) -> list[str]:
     return live
 
 
+def _repo_has_ci_ok(repo_dir) -> bool:
+    """True if the repo defines a ``ci-ok`` aggregator JOB in its workflows.
+
+    This is the RELIABLE ci-ok signal — the local workflow definition — used in
+    preference to main-tip check-runs, which miss ci-ok when it runs only on
+    ``pull_request`` (not push), and are 403 for a read-scoped token. Both cases
+    made the check-runs derivation wrong (a phantom ci-ok on repos that lack it;
+    the enumerated list on a repo that has it) — deploy incident 2026-09-03.
+    """
+    import re
+
+    if repo_dir is None:
+        return False
+    wf = repo_dir / ".github" / "workflows"
+    if not wf.is_dir():
+        return False
+    job = re.compile(rf"^\s+{re.escape(_AGGREGATOR_CHECK)}:\s*$", re.MULTILINE)
+    for f in [*wf.glob("*.yml"), *wf.glob("*.yaml")]:
+        try:
+            if job.search(f.read_text(encoding="utf-8")):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def _gh_available() -> bool:
     """True if `gh` is installed AND authenticated — so a caller (e.g. the doctor
     branch-policy section) can skip live reads instead of reporting false drift
@@ -285,7 +311,9 @@ def _gh_available() -> bool:
 def _desired_protection(rules: dict, *, is_human_owned: bool, contexts: list[str]) -> dict:
     """The branch protection the effective git policy wants for this branch."""
     desired: dict = {}
-    if rules.get("require_status_checks"):
+    # Only require status checks when we can NAME them — an empty contexts list
+    # means "couldn't determine the gate", not "require an unnameable check".
+    if rules.get("require_status_checks") and contexts:
         desired["required_status_checks"] = {"strict": False, "contexts": sorted(contexts)}
     if rules.get("force_push_forbidden"):
         desired["allow_force_pushes"] = False
@@ -376,13 +404,16 @@ def _plan_repos(root, config: dict):
                 "mode": "error",
             }
             continue
-        # D4a: contexts come from the repo's live CI. If enumeration comes back
-        # empty (no check-runs on the tip, or gh unreadable), fall back to the
-        # fleet's `ci-ok` aggregate rather than emit zero required checks —
-        # empty contexts would apply live as NO required checks and silently
-        # weaken the gate (spec-agent 5.1 finding). Precise single-vs-multi
-        # workflow context selection (D9) is plugin's generator contract.
-        contexts = _live_check_contexts(slug, branch) or ["ci-ok"]
+        # Required-check contexts (D4a/D9). A repo with a `ci-ok` aggregator job
+        # gates merge on ci-ok ALONE — detected from the local workflow (reliable),
+        # never from main-tip check-runs (token-scoped 403s + event dependency).
+        # A repo without ci-ok enumerates its live check-runs; when those are
+        # unreadable we require NO specific checks rather than invent a phantom
+        # ci-ok that can never be satisfied (deploy incident 2026-09-03).
+        if _repo_has_ci_ok(repo_dir):
+            contexts = [_AGGREGATOR_CHECK]
+        else:
+            contexts = _live_check_contexts(slug, branch)
         desired = _desired_protection(eff.rules, is_human_owned=is_human, contexts=contexts)
         live = _read_live_protection(slug, branch)
         changes, mode = _diff_protection(desired, live)
