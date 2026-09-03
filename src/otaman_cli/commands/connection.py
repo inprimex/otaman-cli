@@ -1,4 +1,10 @@
-"""`otaman connection <create|list|show|update|delete|check>`.
+"""`otaman connection <create|list|show|update|delete|check|map>`.
+
+The ``map`` verb (agent-credential-access 1.3) is the on-demand truth: which
+credential/Host serves which external system, and where each cascade layer's
+file lives — the ambient CLAUDE.local.md block's queryable counterpart, values
+never printed.
+
 
 agent-credential-access 3.1. Connections are first-class objects an agent
 consumes — "how do I reach + auth to X" — composed of locations/identifiers
@@ -22,7 +28,7 @@ from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root
 from otaman_cli.main import UI
 
-_ACTIONS = ("create", "list", "show", "update", "delete", "check")
+_ACTIONS = ("create", "list", "show", "update", "delete", "check", "map")
 
 
 def cmd_connection(args: list[str]) -> int:
@@ -54,6 +60,8 @@ def cmd_connection(args: list[str]) -> int:
         return _cmd_delete(root, rest)
     if action == "check":
         return _cmd_check(root, rest)
+    if action == "map":
+        return _cmd_map(root, rest)
     return 2  # unreachable
 
 
@@ -67,7 +75,7 @@ def _parse_flags(rest: list[str]) -> tuple[list[str], dict[str, str], set[str]]:
     Valued flags are ``--key value``; bare flags (``--yes``, ``--all``,
     ``--fix``, ``--reattach``) take no value.
     """
-    bare = {"--yes", "--all", "--fix", "--reattach"}
+    bare = {"--yes", "--all", "--fix", "--reattach", "--json"}
     positionals: list[str] = []
     valued: dict[str, str] = {}
     present_bare: set[str] = set()
@@ -390,6 +398,118 @@ def _cmd_check(root, rest: list[str]) -> int:
         UI.muted(f"    {r.detail}")
         UI.muted(f"    last-check: {render_last_check(r)}")
     return 0 if ok else 1
+
+
+# ---------------------------------------------------------------------------
+# map — on-demand resource truth (aca 1.3): which credential/Host serves which
+# external system, and where each cascade layer's file lives. VALUES-FREE.
+
+
+def _ssh_config_path():
+    from pathlib import Path
+
+    return Path.home() / ".ssh" / "config"
+
+
+def _build_map(root):
+    """Assemble the values-free resource map: (layers, resources).
+
+    ``layers`` is the ordered list of cascade layers with their file paths and
+    presence; ``resources`` is one entry per connection, each naming the external
+    system it reaches and the credential/Host that serves it — key NAMES, Host
+    aliases, layer names, and file locations only, never a secret value.
+    """
+    from otaman_core._secrets import credential_layer_paths, credential_provenance
+    from otaman_core.connections import resolve_for
+    from otaman_core.ssh_registry import ssh_config_has_host
+
+    layer_paths = credential_layer_paths(maestro_root=root)
+    provenance = credential_provenance(maestro_root=root)  # key name → winning layer
+    ssh_config = _ssh_config_path()
+
+    layers = [
+        {"scope": scope, "path": str(path), "present": path.is_file()}
+        for scope, path in layer_paths.items()
+    ]
+
+    resources = []
+    for c in resolve_for(root):
+        cred = None
+        if c.secret_ref:
+            winning = provenance.get(c.secret_ref)
+            cred = {
+                "secret_ref": c.secret_ref,
+                "layer": winning,  # None → no backing key in any applicable layer
+                "layer_file": str(layer_paths[winning]) if winning else None,
+                "backed": winning is not None,
+            }
+        ssh = None
+        if c.ssh_ref:
+            ssh = {
+                "host": c.ssh_ref,
+                "config": str(ssh_config),
+                "present": ssh_config_has_host(c.ssh_ref, ssh_config),
+                "scope_note": c.ssh_scope,
+            }
+        resources.append(
+            {
+                "system": c.endpoint,
+                "name": c.name,
+                "type": c.type,
+                "kind": c.kind,
+                "scope": c.scope,
+                "credential": cred,
+                "ssh": ssh,
+            }
+        )
+    resources.sort(key=lambda r: (r["system"] or "", r["name"]))
+    return layers, resources
+
+
+def _cmd_map(root, rest: list[str]) -> int:
+    import json
+
+    _pos, valued, bare = _parse_flags(rest)
+    scope_filter = valued.get("--scope")
+    layers, resources = _build_map(root)
+    if scope_filter:
+        resources = [r for r in resources if r["scope"] == scope_filter]
+
+    if "--json" in bare:
+        print(json.dumps({"layers": layers, "resources": resources}, indent=2, sort_keys=True))
+        return 0
+
+    UI.header("Credential layers (nearest scope first)")
+    for lyr in layers:
+        UI.kv(f"  {lyr['scope']}", f"{lyr['path']}  [{'present' if lyr['present'] else 'absent'}]")
+
+    UI.header("Resource map — which credential/Host serves which external system")
+    if not resources:
+        UI.muted("No connections configured. Add one: otaman connection create <name> ...")
+        return 0
+    for r in resources:
+        typ = "/".join(x for x in (r["type"], r["kind"]) if x)
+        UI.bullet(f"{r['system']}   via {r['name']} [{typ}]")
+        cred = r["credential"]
+        if cred:
+            if cred["backed"]:
+                UI.kv(
+                    "    credential",
+                    f"{cred['secret_ref']} → {cred['layer']} ({cred['layer_file']})",
+                )
+            else:
+                UI.kv("    credential", f"{cred['secret_ref']}  [!] no backing key in any layer")
+        ssh = r["ssh"]
+        if ssh:
+            state = "present" if ssh["present"] else "MISSING"
+            note = f" — {ssh['scope_note']}" if ssh["scope_note"] else ""
+            UI.kv("    ssh Host", f"{ssh['host']} → {ssh['config']} ({state}){note}")
+        UI.kv("    scope", r["scope"])
+    UI.muted(
+        "(values are never shown — secret_ref is a backend key name, ssh Host is a "
+        "~/.ssh/config alias; both resolve at the call site)"
+    )
+    return 0
 
 
 def _http_probe(endpoint: str) -> bool:
