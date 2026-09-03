@@ -1,20 +1,24 @@
-"""Console approve/reject — reuse the privileged CLI writers (task 1.2).
+"""Console approve / reject / defer — the human's SSH-identified decisions (1.2).
 
-The console is the human's own SSH-identified session with NO agent in the
-loop, so the human's keypress IS the confirmation — there is no adapter
-prompt. The decision routes through the SAME fail-closed, ledger-gated
-writers as `otaman approve` (`_perform_approval` / `_perform_rejection`), so
-there is exactly one privileged path, and the audit is stamped with the
-SSH-derived identity via the writers' `comment` field.
+The console is the human's own SSH-identified session with NO agent in the loop,
+so the human's keypress IS the confirmation — there is no adapter prompt.
 
-The writers print CLI-style output; we redirect that during the TUI so it
-can't corrupt the Textual display — the console surfaces its own result.
+Signal parity (D4): approving a spec-change-request routes through the SAME
+fail-closed, ledger-gated writer as `/otaman:approve` (`_perform_approval`), so
+the `spec-change-approved` broadcast is indistinguishable across surfaces;
+rejecting routes through `_perform_rejection`. Outcome-proposals have no
+`/otaman:approve` signal (that command is SCR-only), so their approve/reject is
+recorded as a human-decision AUDIT entry on the bus and acked — no invented
+cross-domain signal. Defer records an audit entry for either type and leaves the
+item pending (a postponement, not a resolution). Every verb, both types, leaves
+a bus audit entry, each with the human's recorded reason.
 """
 
 from __future__ import annotations
 
 import contextlib
 import io
+import re
 from datetime import datetime, timezone
 
 from otaman_cli.console.bus import Program, Proposal
@@ -35,20 +39,6 @@ def _target(proposal: Proposal) -> dict:
     }
 
 
-def _wrong_type_refusal(proposal: Proposal) -> str | None:
-    """Approve/reject apply to spec-change-requests. Outcome-proposals appear in
-    the 1.1 queue for visibility + full-body read, but their decision semantics
-    (a distinct sign-off signal, not spec-change-approved) land in 1.2 — until
-    then, guard against the SCR writer minting the wrong signal on them."""
-    if proposal.msg_type != "spec-change-request":
-        return (
-            f"{proposal.msg_type} decisions are read-only for now "
-            "(interactive-human-console 1.2 wires their sign-off signal); "
-            "approve/reject currently apply to spec-change-requests."
-        )
-    return None
-
-
 def _approver_refusal(program: Program) -> str | None:
     """The named refusal iff the acting human is a resolved non-approver.
 
@@ -64,23 +54,62 @@ def _approver_refusal(program: Program) -> str | None:
     return refusal_message(elig) if elig.refused else None
 
 
-def approve(program: Program, proposal: Proposal, identity: ConsoleIdentity) -> tuple[bool, str]:
-    """Approve *proposal* through the privileged writer, stamped with identity.
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:30] or "item"
 
-    Returns ``(ok, message)`` — never raises into the TUI.
-    """
-    from otaman_cli.commands.approve import _perform_approval
 
-    wrong = _wrong_type_refusal(proposal)
-    if wrong is not None:
-        return False, wrong
+def _write_audit(
+    program: Program,
+    proposal: Proposal,
+    identity: ConsoleIdentity,
+    *,
+    verb: str,
+    reason: str,
+    ack: bool,
+) -> str:
+    """Write a human-decision audit message to the bus (from human) and, when the
+    decision resolves the item (`ack`), drop it from the pending queue. Returns
+    the audit stem. Used for defer (no ack) and outcome-proposal approve/reject
+    (ack) — a values-free record, not a privileged spec-change signal."""
+    active_dir, acks_dir = program.bus_paths()
+    now_iso, now_ts = _now()
+    stem = f"{now_ts}-human-to-all-console-{verb}-{_slug(proposal.subject)}"
+    reason_section = f"\n### Reason\n{reason}\n" if reason else ""
+    content = (
+        f"---\nid: {stem}\nfrom: human\nto: all\npriority: normal\ntype: info\n"
+        f"timestamp: {now_iso}\nstatus: pending\n---\n\n"
+        f"## Subject: {verb.capitalize()}: {proposal.subject}\n\n"
+        f"The {proposal.msg_type} **{proposal.stem}** from **{proposal.from_agent}** "
+        f"was **{verb}** in otaman -i by {identity.audit_label}.\n{reason_section}"
+    )
+    active_dir.mkdir(parents=True, exist_ok=True)
+    (active_dir / f"{stem}.md").write_text(content, encoding="utf-8")
+    if ack:
+        acks_dir.mkdir(parents=True, exist_ok=True)
+        (acks_dir / f"{proposal.stem}.human.ack").write_text(f"{verb}\n", encoding="utf-8")
+    return stem
+
+
+def approve(
+    program: Program, proposal: Proposal, identity: ConsoleIdentity, *, reason: str = ""
+) -> tuple[bool, str]:
+    """Approve *proposal*, stamped with identity. SCR → the privileged
+    `spec-change-approved` writer (parity with `/otaman:approve`); outcome-proposal
+    → an audit sign-off. Returns ``(ok, message)`` — never raises into the TUI."""
     refusal = _approver_refusal(program)
     if refusal is not None:
         return False, f"Approval refused — {refusal}."
 
+    if proposal.msg_type != "spec-change-request":
+        stem = _write_audit(program, proposal, identity, verb="approved", reason=reason, ack=True)
+        return True, f"Signed off {proposal.stem} — audit {stem}"
+
+    from otaman_cli.commands.approve import _perform_approval
+
     active_dir, acks_dir = program.bus_paths()
     now_iso, now_ts = _now()
-    comment = f"Confirmed in otaman -i by {identity.audit_label}"
+    tail = f"Confirmed in otaman -i by {identity.audit_label}"
+    comment = f"{reason} — {tail}" if reason else tail
     with contextlib.redirect_stdout(io.StringIO()):
         rc = _perform_approval(
             _target(proposal),
@@ -99,15 +128,17 @@ def approve(program: Program, proposal: Proposal, identity: ConsoleIdentity) -> 
 def reject(
     program: Program, proposal: Proposal, identity: ConsoleIdentity, *, reason: str = ""
 ) -> tuple[bool, str]:
-    """Reject *proposal* through the privileged writer, stamped with identity."""
-    from otaman_cli.commands.approve import _perform_rejection
-
-    wrong = _wrong_type_refusal(proposal)
-    if wrong is not None:
-        return False, wrong
+    """Reject *proposal*, stamped with identity. SCR → the privileged
+    `spec-change-rejected` writer; outcome-proposal → an audit rejection."""
     refusal = _approver_refusal(program)
     if refusal is not None:
         return False, f"Rejection refused — {refusal}."
+
+    if proposal.msg_type != "spec-change-request":
+        stem = _write_audit(program, proposal, identity, verb="rejected", reason=reason, ack=True)
+        return True, f"Rejected {proposal.stem} — audit {stem}"
+
+    from otaman_cli.commands.approve import _perform_rejection
 
     active_dir, acks_dir = program.bus_paths()
     now_iso, now_ts = _now()
@@ -128,4 +159,14 @@ def reject(
     return False, f"Rejection failed for {proposal.stem} (ledger gate refused)."
 
 
-__all__ = ["approve", "reject"]
+def defer(
+    program: Program, proposal: Proposal, identity: ConsoleIdentity, *, reason: str = ""
+) -> tuple[bool, str]:
+    """Defer *proposal* — record a bus audit entry with the reason and LEAVE it
+    pending (a postponement, not a resolution). No approver gate: deferring is a
+    note, not a privileged decision. Works for both SCRs and outcome-proposals."""
+    stem = _write_audit(program, proposal, identity, verb="deferred", reason=reason, ack=False)
+    return True, f"Deferred {proposal.stem} (still pending) — audit {stem}"
+
+
+__all__ = ["approve", "defer", "reject"]

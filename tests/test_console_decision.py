@@ -221,6 +221,10 @@ def test_proposal_screen_approve_flow(program, monkeypatch):
             assert isinstance(app.screen, ProposalScreen)
             await app.screen.run_action("approve")
             await pilot.pause()
+            # 1.2: approve now prompts for a reason (ReasonModal) — submit it
+            # (empty is allowed) with Enter to confirm the approval.
+            await pilot.press("enter")
+            await pilot.pause()
             await app.action_quit()
 
     asyncio.run(go())
