@@ -27,6 +27,7 @@ from textual.widgets import (
 )
 
 from otaman_cli.console.bus import Program, Proposal, discover_programs, list_pending_proposals
+from otaman_cli.console.lifecycle import LifecycleRow, list_lifecycle_states
 
 # A path that can never be a program root — used to resolve the identity badge
 # on the picker (no program picked yet) without a cwd platform.yaml false-match.
@@ -124,8 +125,12 @@ class PendingListScreen(Screen):
     BINDINGS = [
         Binding("escape", "back", "Back", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
+        Binding("l", "lifecycle", "Lifecycle", priority=True),
         Binding("q", "quit", "Quit", priority=True),
     ]
+
+    def action_lifecycle(self) -> None:
+        self.app.push_screen(LifecycleScreen(self.program))
 
     def __init__(self, program: Program, *, event_source=None) -> None:
         super().__init__()
@@ -311,6 +316,68 @@ class ProposalScreen(Screen):
 
     def action_back(self) -> None:
         self.app.pop_screen()
+
+
+class _LifecycleItem(ListItem):
+    def __init__(self, row: LifecycleRow) -> None:
+        super().__init__(
+            Label(
+                f"[{row.state}] {row.change}  ({row.age}, next: {row.next_action})",
+                markup=False,
+            )
+        )
+        self.row = row
+
+
+class LifecycleScreen(Screen):
+    """Catchable lifecycle states beyond pending approvals (task 1.3 / D7).
+
+    Surfaces approved-unauthored / in-flight / complete-unarchived derived
+    runner-free from bus + specs repo, so stalled work is visible even when it is
+    no longer in the pending queue (the 2026-09-03 staleness incident).
+    """
+
+    BINDINGS = [
+        Binding("escape", "back", "Back", priority=True),
+        Binding("r", "refresh", "Refresh", priority=True),
+        Binding("q", "quit", "Quit", priority=True),
+    ]
+
+    def __init__(self, program: Program) -> None:
+        super().__init__()
+        self.program = program
+
+    def compose(self) -> ComposeResult:
+        yield _header()
+        yield _identity_badge_widget(self.program.root)
+        yield Static(f"Lifecycle — {self.program.name}", id="lifecycle-header", markup=False)
+        yield ListView(id="lifecycle-list")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self._load()
+
+    def action_refresh(self) -> None:
+        self._load()
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+    def _load(self) -> None:
+        self.run_worker(self._worker, thread=True, exclusive=True, group="lifecycle")
+
+    def _worker(self) -> None:
+        rows = list_lifecycle_states(self.program)  # bus + specs scan, off the UI thread
+        self.app.call_from_thread(self._paint, rows)
+
+    def _paint(self, rows: list[LifecycleRow]) -> None:
+        lv = self.query_one("#lifecycle-list", ListView)
+        lv.clear()
+        if rows:
+            for r in rows:
+                lv.append(_LifecycleItem(r))
+        else:
+            lv.append(ListItem(Label("No catchable lifecycle states — nothing stalled.")))
 
 
 class OtamanConsole(App):
