@@ -635,19 +635,31 @@ def _cmd_check_merge(branch: str | None, repo_arg: str | None) -> int:
             code=_GUARD_REFUSED,
         )
 
-    if owner_is_human and caller_is_agent:
+    # Owner-admission (D6): ONLY the owner — or a per-branch delegate, captured by
+    # resolve_branch_owner via branch-owners.yaml — admits merges. This holds for
+    # agent-owned branches too (spec-agent canon-gap 2026-09-03): a DIFFERENT agent
+    # merging into another agent's repo is refused, not just the human-owned case.
+    # Self-merge is the special case caller == owner.
+    if caller != owner:
+        if owner_is_human:
+            return _bail(
+                f"Refused — {branch!r} is human-owned (owner: {owner}); only {owner} or a "
+                f"delegate admits it. caller {caller or 'unknown'} is neither — ask {owner} to "
+                f"merge, or open the PR for {owner}'s review.",
+                code=_GUARD_REFUSED,
+            )
         return _bail(
-            f"Refused — agents must not merge into the human-owned branch {branch!r} "
-            f"(owner: {owner}). The owner admits it: ask {owner} to merge, or open the PR "
-            f"for their review. (caller: {caller or 'unknown'})",
+            f"Refused — {branch!r} is owned by agent {owner}; only {owner} (its owner) or a "
+            f"delegate admits merges into it. caller {caller or 'unknown'} is not the owner "
+            f"(agents self-merge only their OWN repos' branches).",
             code=_GUARD_REFUSED,
         )
 
-    owner_kind = "human" if owner_is_human else "agent"
     caller_kind = "agent" if caller_is_agent else "human"
+    owner_kind = "human" if owner_is_human else "agent"
     UI.ok(
-        f"OK to merge into {branch} — owner {owner} [{owner_kind}], "
-        f"caller {caller or 'unknown'} [{caller_kind}]."
+        f"OK to merge into {branch} — owner {owner} [{owner_kind}] "
+        f"== caller [{caller_kind}] (self-admit)."
     )
     return 0
 

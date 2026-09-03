@@ -152,3 +152,25 @@ def test_agent_into_human_repo_default_branch_refused(tmp_path, monkeypatch, cap
     out = capsys.readouterr().out
     assert rc == _GUARD_REFUSED
     assert "human-owned" in out and "roman" in out
+
+
+def test_agent_into_other_agents_branch_refused(tmp_path, monkeypatch, capsys):
+    """Canon gap fix (spec-agent 2026-09-03): only the OWNER (or a delegate)
+    admits — a DIFFERENT agent merging into another agent's owned branch is
+    refused, not just the human-owned case."""
+    _program(tmp_path, monkeypatch, roster=["roman"])
+    _as_agent(monkeypatch)  # caller cli-agent
+    rc = cmd_policy(["check-merge", "fix/web-agent/thing"])  # owner web-agent (agent) != caller
+    out = capsys.readouterr().out
+    assert rc == _GUARD_REFUSED
+    assert "owned by agent web-agent" in out and "not the owner" in out
+
+
+def test_agent_self_merge_still_allowed(tmp_path, monkeypatch, capsys):
+    """The self-merge special case (caller == owner) stays allowed."""
+    _program(tmp_path, monkeypatch, roster=["roman"])
+    _as_agent(monkeypatch)  # caller cli-agent
+    rc = cmd_policy(["check-merge", "fix/cli-agent/thing"])  # owner cli-agent == caller
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "OK to merge" in out and "self-admit" in out
