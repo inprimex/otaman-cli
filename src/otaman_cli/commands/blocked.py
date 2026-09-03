@@ -33,6 +33,17 @@ def cmd_blocked(args: list[str]) -> int:
     `otaman blocked <slug> [--blocked-by NAME]`  — register a new blocked entry
                                                     and set status (1.8)
     """
+    # `-h`/`--help` must win over positional parsing: the `<slug>` form turns a
+    # positional into content, so a bare `--help` would otherwise be registered
+    # as a blocked entry titled "--help" (the propose/team footgun class —
+    # cofounder-agent hit it 2026-09-03).
+    if any(a in ("-h", "--help") for a in args):
+        UI.muted("Usage: otaman blocked --list")
+        UI.muted("       otaman blocked --clear <slug>")
+        UI.muted("       otaman blocked clear <stem>")
+        UI.muted("       otaman blocked <slug> [--blocked-by NAME]")
+        return 0
+
     list_mode = False
     clear_slug = ""
     blocked_by: str | None = None
