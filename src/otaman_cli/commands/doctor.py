@@ -480,6 +480,8 @@ def cmd_doctor(args: list[str]) -> int:
         "connection_value_leaks": "Connection Value Leaks",
         "git_host": "Git Host PAT",
         "edition": "Edition (CE/EE identity)",
+        "human_roster": "Human Roster",
+        "branch_policy": "Branch Policy (ownership/drift)",
     }
 
     for check in checks:
@@ -523,6 +525,16 @@ def cmd_doctor(args: list[str]) -> int:
         elif check["check"] == "tmux":
             if details.get("version"):
                 detail_parts.append(details["version"])
+        elif check["check"] == "branch_policy":
+            if details.get("policy_source"):
+                detail_parts.append(f"policy: {details['policy_source']}")
+            drift = details.get("drift")
+            if isinstance(drift, dict):
+                detail_parts.append(
+                    f"drift: {drift.get('drifted_repos', 0)} repo(s) [{drift.get('mode')}]"
+                )
+            elif isinstance(drift, str):
+                detail_parts.append(drift)
 
         detail_str = f" ({', '.join(detail_parts)})" if detail_parts else ""
         print(f"  {icon} {name}{C.DIM}{detail_str}{C.RESET}")

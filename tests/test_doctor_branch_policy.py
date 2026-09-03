@@ -129,3 +129,24 @@ def test_drift_reported_block_mode_is_high(tmp_path, monkeypatch):
     res = check_branch_policy(cfg, root)
     assert res["status"] == "fail"
     assert any(i["severity"] == "high" for i in res["issues"])
+
+
+def test_policy_source_implicit_when_no_files(tmp_path, monkeypatch):
+    # D11: doctor must STATE implicit defaults rather than staying silent
+    root, cfg = _setup(tmp_path, [{"name": "foo", "owner": "cli-agent"}])
+    monkeypatch.setattr(policy, "_gh_available", lambda: False)
+    res = check_branch_policy(cfg, root)
+    assert res["details"]["policy_source"] == "implicit (shipped in-code standard)"
+    # informational only — does not flip status to warn on its own
+    assert res["status"] == "ok"
+
+
+def test_policy_source_on_disk_when_standard_present(tmp_path, monkeypatch):
+    root, cfg = _setup(tmp_path, [{"name": "foo", "owner": "cli-agent"}])
+    (root / "policy" / "git").mkdir(parents=True, exist_ok=True)
+    (root / "policy" / "git" / "standard.yaml").write_text(
+        "pack: git\nname: standard\nrules: {}\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(policy, "_gh_available", lambda: False)
+    res = check_branch_policy(cfg, root)
+    assert res["details"]["policy_source"] == "on-disk"
