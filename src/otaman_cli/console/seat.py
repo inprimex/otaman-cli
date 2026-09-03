@@ -48,6 +48,37 @@ def in_seat() -> bool:
     return os.environ.get(SEAT_ENV) == "1"
 
 
+#: Shown when `otaman -i` is launched from inside a NON-private tmux server.
+FLEET_REFUSAL = (
+    f"Refusing to launch: `otaman -i` must run on your PRIVATE tmux server "
+    f"(socket '{PRIVATE_SOCKET}'), not the fleet/default server. Start it from a plain SSH "
+    f"shell — outside any fleet tmux session — and it creates its own private seat. "
+    f"(interactive-human-console D1: the never-inject boundary is structural — there is no "
+    f"fleet-reachable session to inject into.)"
+)
+
+
+def current_tmux_socket() -> str | None:
+    """The socket path of the tmux server we're inside (from $TMUX), or None when
+    not inside tmux. `$TMUX` is `<socket_path>,<pid>,<session_id>`."""
+    tmux = os.environ.get("TMUX")
+    if not tmux:
+        return None
+    return tmux.split(",", 1)[0] or None
+
+
+def on_fleet_server() -> bool:
+    """True when running inside a tmux server that is NOT our private socket — i.e.
+    the fleet/default server. The console must refuse this (D1). Not inside tmux
+    at all is fine (we'll seat onto the private socket ourselves)."""
+    sock = current_tmux_socket()
+    if sock is None:
+        return False
+    from pathlib import Path
+
+    return Path(sock).name != PRIVATE_SOCKET
+
+
 def tmux_available() -> bool:
     return shutil.which("tmux") is not None
 
@@ -199,11 +230,14 @@ def reexec_into_seat(argv: list[str], *, exec_fn=os.execvp) -> None:
 
 __all__ = [
     "CONSOLE_VERSION_ENV",
+    "FLEET_REFUSAL",
     "PRIVATE_SOCKET",
     "SEAT_ENV",
     "SESSION_NAME",
     "build_attach_command",
+    "current_tmux_socket",
     "in_seat",
+    "on_fleet_server",
     "inner_command",
     "installed_version",
     "kill_seat",

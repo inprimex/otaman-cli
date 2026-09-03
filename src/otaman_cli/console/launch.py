@@ -36,14 +36,21 @@ def run_console(argv: list[str], *, _run: bool = True) -> int:
         print(_INSTALL_HINT)
         return 2
 
+    from otaman_cli.console import seat
+
+    # Private-server boundary (task 1.1 / D1): refuse to launch on the fleet
+    # (default) tmux server — the never-inject boundary is structural. Launched
+    # from a plain SSH shell we seat onto our own private socket below.
+    if _run and seat.on_fleet_server():
+        print(seat.FLEET_REFUSAL)
+        return 2
+
     # Self-managing surviving seat (task 1.4): wrap this launch in a tmux
     # session on the private human server so it survives disconnects and stays
     # isolated from the fleet default server. Re-exec replaces this process;
     # inside the seat (or without tmux / with --no-seat) we fall through and
     # run the app directly.
     if _run:
-        from otaman_cli.console import seat
-
         if seat.should_seat(argv):
             # If a surviving seat is running an OLDER version, offer to restart
             # it before we attach — otherwise re-attaching lands on stale code

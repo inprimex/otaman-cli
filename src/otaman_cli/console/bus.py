@@ -30,7 +30,8 @@ class Program:
 
 @dataclass(frozen=True)
 class Proposal:
-    """A pending spec-change-request as the console displays it (values-free)."""
+    """A pending human decision item as the console displays it (values-free) —
+    a spec-change-request OR an outcome-proposal (``msg_type`` distinguishes)."""
 
     stem: str
     subject: str
@@ -39,6 +40,7 @@ class Proposal:
     priority: str
     path: Path
     body: str
+    msg_type: str = "spec-change-request"
 
 
 # Directories that never hold a distinct PROGRAM root: heavy build dirs, the
@@ -235,11 +237,17 @@ def _frontmatter_head(f: Path, limit: int = 8192) -> str | None:
     return m.group(1) if m else None
 
 
-def list_pending_proposals(program: Program) -> list[Proposal]:
-    """Pending spec-change-requests for *program* (no `<stem>.human.ack`).
+_QUEUE_TYPES = ("spec-change-request", "outcome-proposal")
 
-    Same detection as `otaman approve`, so the two never disagree. Malformed
-    files are skipped, never crash the console.
+
+def list_pending_proposals(program: Program) -> list[Proposal]:
+    """Pending human decision items for *program* (no `<stem>.human.ack`): both
+    spec-change-requests AND outcome-proposals addressed to the human (1.1).
+
+    SCR detection matches `otaman approve`, so the two never disagree.
+    Outcome-proposal CC copies (`x-cc: true`, addressed to strategic agents) are
+    skipped so only the human's primary shows once. Malformed files are skipped,
+    never crash the console.
 
     Perf (5.1 finding #5 — ~3000-message active dirs): the hot loop reads only
     a bounded frontmatter head (not the whole file), skips the ~99% of
@@ -267,7 +275,7 @@ def list_pending_proposals(program: Program) -> list[Proposal]:
             continue
         # Cheap prefilter: skip the overwhelming majority without parsing YAML.
         # fm_text is the frontmatter ONLY, so this can't false-match a body.
-        if "spec-change-request" not in fm_text:
+        if not any(t in fm_text for t in _QUEUE_TYPES):
             continue
         if f"{f.stem}.human.ack" in acked:
             continue
@@ -275,7 +283,12 @@ def list_pending_proposals(program: Program) -> list[Proposal]:
             fm = yaml.safe_load(fm_text)
         except yaml.YAMLError:
             continue
-        if not isinstance(fm, dict) or fm.get("type") != "spec-change-request":
+        if not isinstance(fm, dict) or fm.get("type") not in _QUEUE_TYPES:
+            continue
+        # Skip CC copies (outcome-proposal fans out to strategic agents) — the
+        # human's primary is the one to act on; showing the CC copies would
+        # duplicate the row and address it to the wrong recipient.
+        if fm.get("x-cc"):
             continue
         # Only genuine pending proposals reach here (a handful) — now it's
         # cheap to read the whole file for the subject + body.
@@ -298,6 +311,7 @@ def list_pending_proposals(program: Program) -> list[Proposal]:
                 priority=str(fm.get("priority", "normal")),
                 path=f,
                 body=body.strip(),
+                msg_type=str(fm.get("type")),
             )
         )
     return out

@@ -56,11 +56,15 @@ class _ProgramItem(ListItem):
         self.program = program
 
 
+_TYPE_TAG = {"spec-change-request": "SCR", "outcome-proposal": "outcome"}
+
+
 class _ProposalItem(ListItem):
     def __init__(self, proposal: Proposal) -> None:
+        tag = _TYPE_TAG.get(proposal.msg_type, proposal.msg_type)
         super().__init__(
             Label(
-                f"[{proposal.priority}] {proposal.subject}  —  from {proposal.from_agent}",
+                f"[{tag}] [{proposal.priority}] {proposal.subject}  —  from {proposal.from_agent}",
                 markup=False,
             )
         )
