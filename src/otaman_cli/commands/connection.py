@@ -107,11 +107,55 @@ def _program_name(root) -> str:
     return root.name
 
 
+def _infer_org_from_path(root) -> str | None:
+    """Best-effort org slug from the fleet's ``orgs/<org>/programs/<program>``
+    layout (e.g. ``.../orgs/otaman-dev/programs/otaman-dev/otaman-meta`` → org
+    ``otaman-dev``). No dedicated org resolver exists anywhere in
+    otaman-core/otaman-cli, so the cascade's org layer is otherwise dropped from
+    every read here — the aca-1.5 gate bug (org secrets.env holds the live PATs).
+
+    Mirrors otaman-plugin's ``_infer_org_from_path`` (aca 1.4) so the ``map``
+    verb and the generated CLAUDE.local.md block resolve the SAME three layers.
+    Returns ``None`` on any non-fleet layout — callers then degrade to
+    program+tenant rather than guess an org wrong.
+    """
+    from pathlib import Path
+
+    parts = Path(root).resolve().parts
+    for i, part in enumerate(parts):
+        if part == "orgs" and i + 1 < len(parts):
+            return parts[i + 1]
+    return None
+
+
+def _org_config_dir(root):
+    """The org-scope config dir (``~/orgs/<org>/config``) for connections cascade,
+    or ``None`` off the fleet layout. Derived from the same org slug as the
+    credential cascade so connections + credentials resolve one consistent org."""
+    from pathlib import Path
+
+    org = _infer_org_from_path(root)
+    return (Path.home() / "orgs" / org / "config") if org else None
+
+
+def _resolve_connections(root):
+    """Resolve connections across the FULL cascade (tenant → org → program).
+
+    ``resolve_for`` drops the org layer unless ``org_config_dir`` is supplied;
+    every call site here routes through this helper so org-scope connections are
+    never silently invisible (aca-1.5 parity with the credential cascade)."""
+    from otaman_core.connections import resolve_for
+
+    return resolve_for(root, org_config_dir=_org_config_dir(root))
+
+
 def _available_keys(root) -> set[str]:
-    """Values-free backend key NAMES (workspace ∪ tenant dotenv). Never values."""
+    """Values-free backend key NAMES across the full cascade (program ∪ org ∪
+    tenant dotenv). Never values. The org layer is included so an org-backed
+    ``secret_ref`` is not falsely badged "no backing key"."""
     from otaman_core._secrets import list_keys
 
-    return list_keys(maestro_root=root)
+    return list_keys(maestro_root=root, org=_infer_org_from_path(root))
 
 
 # ---------------------------------------------------------------------------
@@ -119,12 +163,12 @@ def _available_keys(root) -> set[str]:
 
 
 def _cmd_list(root, rest: list[str]) -> int:
-    from otaman_core.connections import missing_secret_refs, resolve_for
+    from otaman_core.connections import missing_secret_refs
 
     _pos, valued, _bare = _parse_flags(rest)
     scope_filter = valued.get("--scope")
 
-    conns = resolve_for(root)
+    conns = _resolve_connections(root)
     if scope_filter:
         conns = [c for c in conns if c.scope == scope_filter]
 
@@ -149,14 +193,14 @@ def _cmd_list(root, rest: list[str]) -> int:
 
 
 def _cmd_show(root, rest: list[str]) -> int:
-    from otaman_core.connections import missing_secret_refs, resolve_for
+    from otaman_core.connections import missing_secret_refs
 
     pos, _valued, _bare = _parse_flags(rest)
     if not pos:
         UI.error("Usage: otaman connection show <name>")
         return 1
     name = pos[0]
-    conns = resolve_for(root)
+    conns = _resolve_connections(root)
     match = next((c for c in conns if c.name == name), None)
     if match is None:
         UI.error(f"No connection named {name!r}")
@@ -354,12 +398,11 @@ def _cmd_check(root, rest: list[str]) -> int:
         render_last_check,
         report_store_path,
     )
-    from otaman_core.connections import resolve_for
     from otaman_core.ssh_registry import SshAgentRegistry
 
     pos, valued, bare = _parse_flags(rest)
     fix = "--fix" in bare or "--reattach" in bare
-    conns = resolve_for(root)
+    conns = _resolve_connections(root)
 
     if "--all" in bare:
         targets = conns
@@ -420,11 +463,11 @@ def _build_map(root):
     aliases, layer names, and file locations only, never a secret value.
     """
     from otaman_core._secrets import credential_layer_paths, credential_provenance
-    from otaman_core.connections import resolve_for
     from otaman_core.ssh_registry import ssh_config_has_host
 
-    layer_paths = credential_layer_paths(maestro_root=root)
-    provenance = credential_provenance(maestro_root=root)  # key name → winning layer
+    org = _infer_org_from_path(root)  # include the org layer (aca-1.5 gate)
+    layer_paths = credential_layer_paths(maestro_root=root, org=org)
+    provenance = credential_provenance(maestro_root=root, org=org)  # key → winning layer
     ssh_config = _ssh_config_path()
 
     layers = [
@@ -433,7 +476,7 @@ def _build_map(root):
     ]
 
     resources = []
-    for c in resolve_for(root):
+    for c in _resolve_connections(root):
         cred = None
         if c.secret_ref:
             winning = provenance.get(c.secret_ref)
