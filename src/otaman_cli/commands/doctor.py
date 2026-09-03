@@ -412,6 +412,43 @@ def _print_approver_config_report(findings: list[dict]) -> None:
         print(f"  {badge}  {f.get('message', '')}")
 
 
+def _check_plugin_wiring(root: Path) -> list[dict]:
+    """ce-bootstrap-plugin-wiring 1.2 — WARN when the vendored plugin tree is
+    present but not wired to ``runner.agent_bootstrap.plugin_dir`` (core PR #41).
+
+    Mirrors :func:`_check_approver_config`: the WARN only reaches users once
+    ``otaman doctor`` calls the core primitive. WARN-only — never changes the
+    exit code (gate 2.1 needs this surfaced end-to-end).
+    """
+    try:
+        from otaman_core.plugin_wiring import resolve_plugin_wiring
+    except Exception:  # noqa: BLE001 - core primitive unavailable → skip
+        return []
+    try:
+        import yaml
+
+        config = yaml.safe_load((root / "platform.yaml").read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001 - absent/unreadable platform.yaml → nothing to check
+        return []
+    if not isinstance(config, dict):
+        return []
+    try:
+        findings = resolve_plugin_wiring(config, home=Path.home(), platform_dir=root)
+    except Exception:  # noqa: BLE001 - resolution is best-effort
+        return []
+    return [{"level": f.level, "message": f.message} for f in findings]
+
+
+def _print_plugin_wiring_report(findings: list[dict]) -> None:
+    """Pretty-print plugin-wiring WARNs (nothing when the tree is wired/absent)."""
+    if not findings:
+        return
+    print()
+    UI.header("Plugin Wiring")
+    for f in findings:
+        print(f"  {UI.badge('WARN', C.YELLOW)}  {f.get('message', '')}")
+
+
 def cmd_doctor(args: list[str]) -> int:
     """Check environment readiness — git, runtimes, CLI tools, MCP.
 
@@ -647,6 +684,10 @@ def cmd_doctor(args: list[str]) -> int:
     ap_rc, ap_findings = _check_approver_config(root)
     _print_approver_config_report(ap_findings)
     base_rc = 1 if (base_rc or ap_rc) else 0
+
+    # ce-bootstrap-plugin-wiring 1.2 — WARN on a vendored-but-unwired plugin
+    # tree (core PR #41). WARN-only; never folds into the exit code.
+    _print_plugin_wiring_report(_check_plugin_wiring(root))
 
     # ce-bootstrap-harness-deps task 3.1 — additive `--org` harness check
     if org:
