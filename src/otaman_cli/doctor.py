@@ -1612,6 +1612,13 @@ def check_branch_policy(config: dict[str, Any], project_root: Path) -> dict[str,
     if delegation:
         details["delegation"] = delegation
 
+    # D11: state when the program runs on the in-code shipped standard rather
+    # than on-disk policy files (a valid first-run default — say so, don't stay
+    # silent). Informational only; never flips the check status.
+    pdir = project_root / "policy"
+    on_disk = (pdir / "index.yaml").is_file() or (pdir / "git" / "standard.yaml").is_file()
+    details["policy_source"] = "on-disk" if on_disk else "implicit (shipped in-code standard)"
+
     if not _policy._gh_available():
         details["drift"] = "not checked (gh unavailable/unauthenticated)"
     else:
