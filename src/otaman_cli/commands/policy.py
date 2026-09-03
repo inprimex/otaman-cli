@@ -206,7 +206,28 @@ def _gh_json(args: list[str]):
 
 
 def _default_branch(slug: str) -> str | None:
-    return _gh_json([f"repos/{slug}", "--jq", ".default_branch"])
+    return _gh_json([f"repos/{slug}", "--jq", ".default_branch"]) if slug else None
+
+
+def _repo_default_branch(repo_dir, slug: str) -> str:
+    """The repo's default branch — LOCAL git first (no network/auth), then gh,
+    then 'main'. The gh-only path was fragile (any auth/network hiccup made every
+    default branch resolve owner-less in check-merge — the 5.1 gate blocker)."""
+    import subprocess
+
+    if repo_dir is not None:
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(repo_dir), "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip().rsplit("/", 1)[-1]  # origin/main -> main
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return _default_branch(slug) or "main"
 
 
 def _read_live_protection(slug: str, branch: str) -> dict | None:
@@ -321,7 +342,7 @@ def _plan_repos(root, config: dict):
             }
             continue
         slug = info.slug
-        branch = _default_branch(slug) or "main"
+        branch = _repo_default_branch(repo_dir, slug)
         is_human = owner in humans
         try:
             eff, _v = effective_policy(root, config, "git", repo=name)
@@ -336,7 +357,13 @@ def _plan_repos(root, config: dict):
                 "mode": "error",
             }
             continue
-        contexts = _live_check_contexts(slug, branch)
+        # D4a: contexts come from the repo's live CI. If enumeration comes back
+        # empty (no check-runs on the tip, or gh unreadable), fall back to the
+        # fleet's `ci-ok` aggregate rather than emit zero required checks —
+        # empty contexts would apply live as NO required checks and silently
+        # weaken the gate (spec-agent 5.1 finding). Precise single-vs-multi
+        # workflow context selection (D9) is plugin's generator contract.
+        contexts = _live_check_contexts(slug, branch) or ["ci-ok"]
         desired = _desired_protection(eff.rules, is_human_owned=is_human, contexts=contexts)
         live = _read_live_protection(slug, branch)
         changes, mode = _diff_protection(desired, live)
@@ -575,10 +602,11 @@ def _resolve_target_owner(
         from otaman_core.git_host import detect_remote_for_repo
 
         repo_dir = (root / repo["path"]).resolve()
-        info = detect_remote_for_repo(repo_dir) if repo_dir.exists() else None
-        if info is not None and info.provider == "github":
-            default = _default_branch(info.slug)
-            is_default = bool(default and branch == default)
+        exists = repo_dir.exists()
+        info = detect_remote_for_repo(repo_dir) if exists else None
+        slug = info.slug if info is not None and info.provider == "github" else ""
+        default = _repo_default_branch(repo_dir if exists else None, slug)
+        is_default = branch == default
 
     owner = resolve_branch_owner(
         branch,
