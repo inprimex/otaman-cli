@@ -111,8 +111,12 @@ TODO: Which repos will need implementation changes after the spec updates.
 TODO: Concrete suggestions for what the spec should say.
 """
 
-    filepath = active_dir / filename
-    filepath.write_text(content, encoding="utf-8")
+    from otaman_cli.bus_write import write_message_exclusive
+
+    # Never overwrite: two proposals in the same second must not clobber each
+    # other (the stem is second-precision). The returned path carries any
+    # collision suffix, so the blocked entry + report below stay consistent.
+    filepath = write_message_exclusive(active_dir / filename, content)
 
     # Record blocked task
     msg_stem = filepath.stem

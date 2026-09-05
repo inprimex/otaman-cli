@@ -17,6 +17,7 @@ from pathlib import Path
 
 from otaman_core.validate_message import PRIVILEGED_TYPES
 
+from otaman_cli.bus_write import write_message_exclusive
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, resolve_agent_identity
 from otaman_cli.main import UI, C, _read_platform_specs_path, _resolve_bus_paths, run_script
@@ -351,8 +352,9 @@ def cmd_send(args: list[str]) -> int:
     # (ack lifecycle owned by the recipient there); local sends unchanged.
     active_dir, _acks_dir = _resolve_bus_paths(target_root)
     active_dir.mkdir(parents=True, exist_ok=True)
-    msg_path = active_dir / filename
-    msg_path.write_text(content, encoding="utf-8")
+    # Never overwrite: same-second sends on the same route share a stem; the
+    # returned path carries any collision suffix (propose-hardening).
+    msg_path = write_message_exclusive(active_dir / filename, content)
 
     # Per-CC copies (task 1.5): one extra file per effective_cc recipient,
     # frontmatter augmented with `x-cc: true`.  Stem includes the recipient
@@ -367,8 +369,7 @@ def cmd_send(args: list[str]) -> int:
                 cc_recipient=recipient,
                 slug=slug,
             )
-            cc_path = active_dir / cc_fname
-            cc_path.write_text(cc_content, encoding="utf-8")
+            cc_path = write_message_exclusive(active_dir / cc_fname, cc_content)
             cc_copy_paths.append(cc_path)
 
     UI.ok(f"Sent: {filename}")

@@ -249,8 +249,10 @@ def emit(
     payload_yaml = sio2.getvalue()
 
     body = f"---\n{fm_yaml}---\n\n## Subject: {msg_type}\n\n```yaml\n{payload_yaml}```\n"
-    path.write_text(body, encoding="utf-8")
-    return path
+    from otaman_cli.bus_write import write_message_exclusive
+
+    # Never overwrite a same-second sibling (propose-hardening).
+    return write_message_exclusive(path, body)
 
 
 __all__ = [
