@@ -229,10 +229,11 @@ def emit_human_decision(
         command="hitl-take",
         agent=payload.decided_by or "human",
     )
+    from otaman_cli.bus_write import write_message_exclusive
+
     bus_active_dir.mkdir(parents=True, exist_ok=True)
-    out = bus_active_dir / filename
-    out.write_text(content, encoding="utf-8")
-    return out
+    # Never overwrite a same-second sibling (propose-hardening).
+    return write_message_exclusive(bus_active_dir / filename, content)
 
 
 def write_resolved_ack(
