@@ -77,12 +77,21 @@ def test_approved_with_no_change_folder_is_unauthored(tmp_path):
     assert "spec-agent" in row.next_action
 
 
-def test_staleness_incident_four_approvals_all_visible(tmp_path):
+def test_corrected_incident_only_genuinely_unauthored_flagged(tmp_path):
+    # D8 (spec.md "pending-only blindness is gone, without archive false-positives"):
+    # the corrected 2026-09-03 fixture — one SCR approved AND genuinely unauthored,
+    # three approved SCRs whose changes were delivered and ARCHIVED in August. The
+    # derivation must flag ONLY the one; the three archived ones are not stale.
     program = _program(tmp_path)
-    for i, title in enumerate(["Alpha change", "Beta change", "Gamma change", "Delta change"]):
-        _approved(program, title, stem_id=f"2026082{i}T000000", ts=f"2026-08-2{i}T00:00:00Z")
+    _approved(program, "agent-credential-access", stem_id="20260825T000000")
+    for i, name in enumerate(
+        ["openspec-cli-adoption", "hitl-confirmation-adapters", "repo-registration-materialization"]
+    ):
+        _approved(program, name, stem_id=f"2026082{i}T000001", ts=f"2026-08-2{i}T00:00:00Z")
+        _change(program, name, ticks=[True], archived=True)  # authored + delivered + archived
     rows = list_lifecycle_states(program, now=_NOW)
-    assert len([r for r in rows if r.state == APPROVED_UNAUTHORED]) == 4
+    unauthored = [r for r in rows if r.state == APPROVED_UNAUTHORED]
+    assert [r.change for r in unauthored] == ["agent-credential-access"]  # exactly the real one
 
 
 def test_approved_with_matching_change_folder_is_not_unauthored(tmp_path):
