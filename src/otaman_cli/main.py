@@ -628,6 +628,8 @@ def cmd_help() -> int:
   {C.GREEN}emergency-halt{C.RESET} --reason "..."  Broadcast an emergency halt to every agent (requires interactive confirmation)
   {C.GREEN}assign{C.RESET} [tasks.md]             Map OpenSpec tasks to repo owners
   {C.GREEN}complete{C.RESET} <change> --tasks T    Report task completion, update tasks.md
+  {C.GREEN}spec{C.RESET} <status|gate> [...]       Spec-lifecycle surface (stalled buckets, ratifications) + local dispatch/archive/merge gate
+  {C.GREEN}ratify{C.RESET} <change> --reason "..." Human-only ratified approval of a change (HUMAN-DECISION, mandatory reason)
   {C.GREEN}review{C.RESET} [--reviewer R]         Trigger observer review (CTO / security / all)
   {C.GREEN}team{C.RESET} <feature> [-d desc]       Orchestrate a cross-repo feature (decompose + assign)
   {C.GREEN}gate{C.RESET} [transition]             Check phase transition readiness (e.g. pre-sale → dev)

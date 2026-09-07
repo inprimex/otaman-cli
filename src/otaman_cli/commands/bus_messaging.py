@@ -848,6 +848,27 @@ def _write_spec_owner(root: Path, change_name: str, agent: str) -> None:
         pass
 
 
+def _change_name_from_target(target: str) -> str | None:
+    """The change-folder name from an `otaman assign` target (path or slug).
+
+    Handles ``openspec/changes/<slug>``, ``.../<slug>/tasks.md``, and a bare
+    ``<slug>``. Returns None for an empty target.
+    """
+    if not target:
+        return None
+    parts = [p for p in target.replace("\\", "/").split("/") if p and p != "."]
+    if not parts:
+        return None
+    if "changes" in parts:
+        i = parts.index("changes")
+        if i + 1 < len(parts):
+            return parts[i + 1]
+    tail = parts[-1]
+    if tail == "tasks.md" and len(parts) >= 2:
+        return parts[-2]
+    return tail if tail != "tasks.md" else None
+
+
 def cmd_assign(args: list[str]) -> int:
     """Map tasks from OpenSpec tasks.md to repo owners and notify agents."""
     root = find_project_root()
@@ -890,6 +911,22 @@ def cmd_assign(args: list[str]) -> int:
         return 1
 
     target = args[0]
+
+    # SLE 2.2 — dispatch-time gate (D2): a change that isn't spec-approved is
+    # refused under block mode; warn/self-waive proceed with a visible notice.
+    # Absence (legacy/unbackfilled change) never blocks. CI-less local check.
+    change_name = _change_name_from_target(target)
+    if change_name:
+        from otaman_cli.commands.spec import dispatch_gate_check
+
+        allowed, lines = dispatch_gate_check(root, change_name)
+        for ln in lines:
+            (UI.muted if allowed else UI.warn)(ln)
+        if not allowed:
+            UI.error(f"Dispatch blocked by spec policy: '{change_name}' is not spec-approved.")
+            UI.muted("Advance it to spec-approved (or `otaman ratify`), or relax enforcement.")
+            return 2
+
     result = run_script("map-tasks.py", target, capture=True)
     if result.returncode != 0:
         UI.error(result.stderr or result.stdout)
