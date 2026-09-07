@@ -131,12 +131,13 @@ def _cmd_validate_docs(rest: list[str]) -> int:
     """
     from otaman_cli import docs_format
 
-    fix = "--fix" in rest
+    align = "--align" in rest  # D3: opt-in width alignment (implies writing)
+    fix = "--fix" in rest or align
     targets = [a for a in rest if not a.startswith("--")]
 
     if not targets:
         # D2 / JTBD-107: a mutating command with no targets is a no-op + usage.
-        UI.muted("Usage: otaman validate docs [--fix] <files|folders|globs...>")
+        UI.muted("Usage: otaman validate docs [--fix] [--align] <files|folders|globs...>")
         UI.muted("  No targets given — nothing scanned (explicit targets required).")
         return 0
 
@@ -145,12 +146,13 @@ def _cmd_validate_docs(rest: list[str]) -> int:
         UI.muted("No markdown files matched the given targets.")
         return 0
 
-    UI.header("Docs format" + (" — fix" if fix else " — lint"))
+    mode = " — align" if align else (" — fix" if fix else " — lint")
+    UI.header("Docs format" + mode)
     total = 0
     changed = 0
     for f in files:
         if fix:
-            probs, did = docs_format.fix_path(f)
+            probs, did = docs_format.fix_path(f, align=align)
             if did:
                 changed += 1
         else:
