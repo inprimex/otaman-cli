@@ -175,6 +175,8 @@ def test_lifecycle_screen_table_lists_changes(tmp_path):
             await pilot.pause()
             app.push_screen(LifecycleScreen(program))
             await pilot.pause()
+            await app.workers.wait_for_complete()  # the table loads off a worker thread
+            await pilot.pause()
             assert isinstance(app.screen, LifecycleScreen)
             table = app.screen.query_one("#lifecycle-table", DataTable)
             assert table.row_count == 2  # one row per change

@@ -167,6 +167,8 @@ def test_table_renders_rows_grouped_by_triage(program):
             await pilot.pause()
             app.push_screen(LifecycleScreen(program))
             await pilot.pause()
+            await app.workers.wait_for_complete()  # table loads off a worker thread
+            await pilot.pause()
             table = app.screen.query_one("#lifecycle-table", DataTable)
             assert table.row_count == 2
             # active sorts before dormant → first row is the active change
@@ -187,6 +189,8 @@ def test_table_nudge_action_sends_message(program):
         async with app.run_test() as pilot:
             await pilot.pause()
             app.push_screen(LifecycleScreen(program))
+            await pilot.pause()
+            await app.workers.wait_for_complete()  # rows must be loaded before nudge
             await pilot.pause()
             await app.screen.run_action("nudge")
             await pilot.pause()
