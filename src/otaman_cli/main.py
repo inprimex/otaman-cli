@@ -589,6 +589,7 @@ def cmd_help() -> int:
   {C.GREEN}clone{C.RESET} <source> [--target D]    Clone all repos from otaman config (git URL, SSH, local)
   {C.GREEN}doctor{C.RESET}                        Check environment readiness (git, runtimes, CLI, tmux, MCP)
   {C.GREEN}validate{C.RESET} [config]             Validate platform.yaml against the schema
+  {C.GREEN}validate docs{C.RESET} [--fix] <t...>   Lint/fix markdown tables (R1-R4, fence-aware; explicit targets only)
   {C.GREEN}validate-messages{C.RESET} [file]      Validate bus message files
   {C.GREEN}install-cli{C.RESET} [--prefix DIR]     Install ``otaman`` shim on PATH (so launchers find it)
   {C.GREEN}upgrade{C.RESET} [--dry-run] [--yes]    Walk launcher registry: git pull + otaman init each

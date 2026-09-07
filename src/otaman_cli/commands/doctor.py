@@ -583,6 +583,45 @@ def _print_outcome_verification_report(result: dict) -> None:
     print("  (process.level=verified: Done outcomes must record how they were verified)")
 
 
+def _check_docs_format(root: Path) -> dict:
+    """docs-format-check 1.3 — advisory count of markdown files with table
+    violations across the platform.yaml ``docs-format`` include/exclude globs.
+
+    Doctor NEVER fixes — it counts and points at ``otaman validate docs --fix``.
+    Advisory only (never changes the exit code).
+    """
+    out: dict = {"files_with_issues": 0, "total_issues": 0}
+    try:
+        from otaman_cli import docs_format
+    except Exception:  # noqa: BLE001 - module unavailable → skip section
+        return out
+    try:
+        include, exclude = docs_format.load_docs_format_config(root)
+        files = docs_format.scan_configured(root, include, exclude)
+    except Exception:  # noqa: BLE001 - config/scan best-effort
+        return out
+    for f in files:
+        probs = docs_format.lint_path(f)
+        if probs:
+            out["files_with_issues"] += 1
+            out["total_issues"] += len(probs)
+    return out
+
+
+def _print_docs_format_report(result: dict) -> None:
+    """Advisory docs-format row (quiet when everything is clean)."""
+    n_files = result.get("files_with_issues", 0)
+    if not n_files:
+        return
+    print()
+    UI.header("Docs Format")
+    print(
+        f"  {UI.badge('WARN', C.YELLOW)}  {n_files} file(s) with "
+        f"{result.get('total_issues', 0)} table issue(s)"
+    )
+    print("  Fix: otaman validate docs --fix <files|folders>  (doctor never modifies files)")
+
+
 def cmd_doctor(args: list[str]) -> int:
     """Check environment readiness — git, runtimes, CLI tools, MCP.
 
@@ -831,6 +870,10 @@ def cmd_doctor(args: list[str]) -> int:
     # outcome-verification-field 1.2 — verified-level Done outcomes lacking the
     # verification field. WARN-only; fires only at process.level=verified.
     _print_outcome_verification_report(_check_outcome_verification(root))
+
+    # docs-format-check 1.3 — advisory count of markdown table violations across
+    # the platform.yaml docs-format globs. WARN-only; doctor never fixes.
+    _print_docs_format_report(_check_docs_format(root))
 
     # ce-bootstrap-harness-deps task 3.1 — additive `--org` harness check
     if org:
