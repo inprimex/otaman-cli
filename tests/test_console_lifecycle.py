@@ -160,11 +160,12 @@ def test_empty_program_yields_nothing(tmp_path):
 
 
 @_textual
-def test_lifecycle_screen_lists_rows(tmp_path):
+def test_lifecycle_screen_table_lists_changes(tmp_path):
+    # D10 table: one row per active change folder (not per catchable state).
     program = _program(tmp_path)
-    _approved(program, "Stalled change")
     _change(program, "wip-change", ticks=[False])
-    from textual.widgets import ListView
+    _change(program, "done-change", ticks=[True])
+    from textual.widgets import DataTable
 
     from otaman_cli.console.app import LifecycleScreen, OtamanConsole
 
@@ -174,9 +175,11 @@ def test_lifecycle_screen_lists_rows(tmp_path):
             await pilot.pause()
             app.push_screen(LifecycleScreen(program))
             await pilot.pause()
+            await app.workers.wait_for_complete()  # the table loads off a worker thread
+            await pilot.pause()
             assert isinstance(app.screen, LifecycleScreen)
-            lv = app.screen.query_one("#lifecycle-list", ListView)
-            assert len(lv.children) == 2  # one approved-unauthored + one in-flight
+            table = app.screen.query_one("#lifecycle-table", DataTable)
+            assert table.row_count == 2  # one row per change
             await app.action_quit()
 
     asyncio.run(go())

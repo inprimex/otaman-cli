@@ -17,6 +17,7 @@ from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
+    DataTable,
     Footer,
     Header,
     Input,
@@ -28,7 +29,6 @@ from textual.widgets import (
 )
 
 from otaman_cli.console.bus import Program, Proposal, discover_programs, list_pending_proposals
-from otaman_cli.console.lifecycle import LifecycleRow, list_lifecycle_states
 
 # A path that can never be a program root — used to resolve the identity badge
 # on the picker (no program picked yet) without a cwd platform.yaml false-match.
@@ -342,47 +342,62 @@ class ProposalScreen(Screen):
         self.app.pop_screen()
 
 
-class _LifecycleItem(ListItem):
-    def __init__(self, row: LifecycleRow) -> None:
-        sev = "" if row.severity == "ok" else f" !{row.severity.upper()}"
-        super().__init__(
-            Label(
-                f"[{row.state}]{sev} {row.change}  ({row.age}, next: {row.next_actor})",
-                markup=False,
-            )
-        )
-        self.row = row
+_TRIAGE_ABBR = {
+    "active": "active",
+    "archive-candidate": "arch-cand",
+    "paused-decision": "paused",
+    "absorbed": "absorbed",
+    "dormant": "dormant",
+}
 
 
 class LifecycleScreen(Screen):
-    """Catchable lifecycle states beyond pending approvals (task 1.3 / D7).
-
-    Surfaces approved-unauthored / in-flight / complete-unarchived derived
-    runner-free from bus + specs repo, so stalled work is visible even when it is
-    no longer in the pending queue (the 2026-09-03 staleness incident).
+    """The lifecycle TABLE (IHC 1.5 / D10): every active change, one row, columns
+    from the spec, grouped by triage class (active rows first — the moving work
+    separates from the dormant tail at a glance). ``n`` nudges the highlighted
+    row's next actor; the row shows when it was last nudged (anti-spam).
     """
 
     BINDINGS = [
         Binding("escape", "back", "Back", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
+        Binding("n", "nudge", "Nudge", priority=True),
         Binding("q", "quit", "Quit", priority=True),
     ]
+
+    _COLUMNS = (
+        "triage",
+        "change",
+        "stage",
+        "state",
+        "tasks",
+        "days",
+        "next actor",
+        "last touch",
+        "nudged",
+    )
 
     def __init__(self, program: Program) -> None:
         super().__init__()
         self.program = program
+        self._rows: list = []  # ChangeRow in table order, indexed by cursor_row
 
     def compose(self) -> ComposeResult:
         yield _header()
         yield _identity_badge_widget(self.program.root)
         yield _mode_banner(
-            f"Lifecycle — all changes by state · {self.program.name}",
-            "r refresh · esc back · q quit",
+            f"Lifecycle — all changes by triage · {self.program.name}",
+            "↑↓ rows · n nudge next actor · r refresh · esc back · q quit",
         )
-        yield ListView(id="lifecycle-list")
+        table = DataTable(id="lifecycle-table", cursor_type="row", zebra_stripes=True)
+        yield table
+        yield Static("", id="lifecycle-detail", markup=False)
         yield Footer()
 
     def on_mount(self) -> None:
+        table = self.query_one("#lifecycle-table", DataTable)
+        for col in self._COLUMNS:
+            table.add_column(col, key=col)
         self._load()
 
     def action_refresh(self) -> None:
@@ -395,17 +410,61 @@ class LifecycleScreen(Screen):
         self.run_worker(self._worker, thread=True, exclusive=True, group="lifecycle")
 
     def _worker(self) -> None:
-        rows = list_lifecycle_states(self.program)  # bus + specs scan, off the UI thread
+        from otaman_cli.console.lifecycle import _specs_changes_dir
+        from otaman_cli.lifecycle import derive_change_table
+
+        active_dir, _ = self.program.bus_paths()
+        rows = derive_change_table(
+            changes_dir=_specs_changes_dir(self.program),
+            bus_active_dir=active_dir if active_dir.is_dir() else None,
+        )
         self.app.call_from_thread(self._paint, rows)
 
-    def _paint(self, rows: list[LifecycleRow]) -> None:
-        lv = self.query_one("#lifecycle-list", ListView)
-        lv.clear()
-        if rows:
-            for r in rows:
-                lv.append(_LifecycleItem(r))
-        else:
-            lv.append(ListItem(Label("No catchable lifecycle states — nothing stalled.")))
+    def _paint(self, rows: list) -> None:
+        self._rows = rows
+        table = self.query_one("#lifecycle-table", DataTable)
+        table.clear()
+        for r in rows:
+            table.add_row(
+                _TRIAGE_ABBR.get(r.triage, r.triage or "—"),
+                r.name,
+                r.stage or "—",
+                r.state,
+                f"{r.tasks_done}/{r.tasks_total}",
+                r.age,
+                r.next_actor,
+                r.last_touch,
+                r.last_nudged or "—",
+            )
+        if not rows:
+            self.query_one("#lifecycle-detail", Static).update("No changes found.")
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        idx = event.cursor_row
+        if 0 <= idx < len(self._rows):
+            r = self._rows[idx]
+            note = f" — {r.triage_note}" if r.triage_note else ""
+            self.query_one("#lifecycle-detail", Static).update(
+                f"{r.name}: {r.triage or 'untriaged'}{note}"
+            )
+
+    def action_nudge(self) -> None:
+        table = self.query_one("#lifecycle-table", DataTable)
+        idx = table.cursor_row
+        if not (0 <= idx < len(self._rows)):
+            return
+        row = self._rows[idx]
+
+        def _after(note: str | None) -> None:
+            if note is None:
+                return
+            from otaman_cli.lifecycle import send_nudge
+
+            ok, msg = send_nudge(self.program, row, note=note)
+            self.app.notify(msg, severity="information" if ok else "error", timeout=6)
+            self._load()  # refresh so the last-nudged column updates
+
+        self.app.push_screen(ReasonModal("nudge"), _after)
 
 
 class _AuthoredItem(ListItem):
