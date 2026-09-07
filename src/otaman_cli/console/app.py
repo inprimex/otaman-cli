@@ -59,6 +59,16 @@ def _identity_badge_widget(program_root: Path) -> Static:
     )
 
 
+def _mode_banner(view: str, hints: str) -> Static:
+    """Persistent plain-words header for a console screen (D9, Roman UX ruling).
+
+    Every screen states, in plain words, what the human is looking at + the key
+    hints — so no view is a bare list the operator has to decode. Applies to all
+    current and future views.
+    """
+    return Static(f"{view}\n{hints}", id="mode-banner", markup=False)
+
+
 class _ProgramItem(ListItem):
     def __init__(self, program: Program) -> None:
         # markup=False: names/paths are arbitrary data — `[...]` must render
@@ -101,8 +111,10 @@ class ProgramPickerScreen(Screen):
         # Resolve the badge against the first program's roster (best-effort at
         # the picker; a picked program re-resolves against its own root).
         yield _identity_badge_widget(self._programs[0].root if self._programs else _NO_PROGRAM_ROOT)
+        yield _mode_banner(
+            "Programs — pick one to review", "↑↓ select · enter open · r rescan · q quit"
+        )
         if self._programs:
-            yield Static("Select a program (Enter):", id="picker-hint")
             yield ListView(*[_ProgramItem(p) for p in self._programs], id="program-list")
         else:
             yield Static(
@@ -153,7 +165,10 @@ class PendingListScreen(Screen):
     def compose(self) -> ComposeResult:
         yield _header()
         yield _identity_badge_widget(self.program.root)
-        yield Static(f"Program: {self.program.name}", id="prog-header", markup=False)
+        yield _mode_banner(
+            f"Proposals — pending SCRs & outcome-proposals · {self.program.name}",
+            "enter open · l lifecycle · b spec review · r refresh · esc back · q quit",
+        )
         yield ListView(id="pending-list")
         yield Footer()
 
@@ -281,6 +296,10 @@ class ProposalScreen(Screen):
     def compose(self) -> ComposeResult:
         yield _header()
         yield _identity_badge_widget(self.program.root)
+        yield _mode_banner(
+            "Proposal — read & decide",
+            "a approve · x reject · d defer · esc back · q quit",
+        )
         yield Static(
             f"{self.proposal.subject}   —   from {self.proposal.from_agent}",
             id="proposal-title",
@@ -356,7 +375,10 @@ class LifecycleScreen(Screen):
     def compose(self) -> ComposeResult:
         yield _header()
         yield _identity_badge_widget(self.program.root)
-        yield Static(f"Lifecycle — {self.program.name}", id="lifecycle-header", markup=False)
+        yield _mode_banner(
+            f"Lifecycle — all changes by state · {self.program.name}",
+            "r refresh · esc back · q quit",
+        )
         yield ListView(id="lifecycle-list")
         yield Footer()
 
@@ -419,10 +441,9 @@ class ArtifactBrowserScreen(Screen):
     def compose(self) -> ComposeResult:
         yield _header()
         yield _identity_badge_widget(self.program.root)
-        yield Static(
-            f"Spec review — authored changes — {self.program.name}",
-            id="artifact-header",
-            markup=False,
+        yield _mode_banner(
+            f"Spec review — authored changes awaiting approval · {self.program.name}",
+            "enter review · r refresh · esc back · q quit",
         )
         yield ListView(id="authored-list")
         yield Footer()
@@ -475,10 +496,9 @@ class ChangeReviewScreen(Screen):
     def compose(self) -> ComposeResult:
         yield _header()
         yield _identity_badge_widget(self.program.root)
-        yield Static(
-            f"Review: {self.change.name}   —   [a]pprove  [c] request changes",
-            id="review-header",
-            markup=False,
+        yield _mode_banner(
+            f"Spec review — {self.change.name}",
+            "↑↓ files · a approve (→ spec-approved) · c request changes · esc back",
         )
         yield ListView(id="artifact-files")
         with VerticalScroll(id="artifact-view-scroll"):

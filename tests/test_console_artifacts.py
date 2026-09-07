@@ -54,10 +54,10 @@ def _broadcasts(program, kind):
 # list_authored_changes
 
 
-def test_only_authored_changes_listed(program):
+def test_only_reviewable_changes_listed(program):
     _change(program, "ready-for-review", stage="authored")
-    _change(program, "still-draft", stage="approved")  # authored-but-unauthored? no: approved
-    _change(program, "shipped", stage="dispatched")
+    _change(program, "approved-shell", stage="approved", files=())  # no artifacts → excluded
+    _change(program, "shipped", stage="dispatched")  # past → excluded
     out = artifacts.list_authored_changes(program)
     assert [c.name for c in out] == ["ready-for-review"]
     assert "proposal.md" in out[0].files and "design.md" in out[0].files
@@ -100,11 +100,38 @@ def test_advance_sets_stage_and_broadcasts(program, monkeypatch):
     assert "roman" in bc[0].read_text("utf-8")
 
 
-def test_advance_refuses_non_authored(program, monkeypatch):
-    _change(program, "c", stage="approved")  # not yet authored
+def test_advance_refuses_pre_authored_stage(program, monkeypatch):
+    _change(program, "c", stage="proposed")  # earlier than authored, no review yet
     monkeypatch.setenv("OTAMAN_HUMAN", "roman")
     ok, msg = artifacts.advance_to_spec_approved(program, "c")
-    assert ok is False and "only an 'authored'" in msg
+    assert ok is False and "spec-approved" in msg and "authored" in msg
+
+
+def test_advance_from_approved_with_artifacts(program, monkeypatch):
+    # gap #3: an approved-stage change carrying artifacts (pre-convention, e.g. SLE)
+    # must be advanceable in-console, not stuck.
+    d = _change(program, "sle", stage="approved", files=("proposal.md", "design.md"))
+    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
+    ok, _ = artifacts.advance_to_spec_approved(program, "sle")
+    assert ok is True
+    from otaman_core.spec_lifecycle import read_stage
+
+    assert read_stage(d / ".openspec.yaml") == "spec-approved"
+
+
+def test_advance_refuses_approved_without_artifacts(program, monkeypatch):
+    _change(program, "shell", stage="approved", files=())  # SCR-approved shell, no artifacts
+    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
+    ok, msg = artifacts.advance_to_spec_approved(program, "shell")
+    assert ok is False and "artifacts" in msg
+
+
+def test_list_includes_approved_with_artifacts(program):
+    _change(program, "authored-one", stage="authored")
+    _change(program, "approved-with-art", stage="approved", files=("proposal.md",))
+    _change(program, "approved-shell", stage="approved", files=())
+    names = {c.name for c in artifacts.list_authored_changes(program)}
+    assert names == {"authored-one", "approved-with-art"}  # shell excluded
 
 
 def test_advance_refuses_already_spec_approved(program, monkeypatch):
@@ -182,6 +209,64 @@ def test_review_screen_approve_flow_advances_stage(program, monkeypatch):
     from otaman_core.spec_lifecycle import read_stage
 
     assert read_stage(d / ".openspec.yaml") == "spec-approved"
+
+
+def test_advance_commits_stage_in_git_checkout(program, monkeypatch):
+    # gap #2: repo is truth — the stage bump must be COMMITTED, not left dirty.
+    import subprocess
+
+    root = program.root
+
+    def _git(*a):
+        return subprocess.run(["git", "-C", str(root), *a], capture_output=True, text=True)
+
+    _git("init", "-q")
+    _git("config", "user.email", "t@x.io")
+    _git("config", "user.name", "t")
+    _change(program, "keystone", stage="authored")
+    _git("add", "-A")
+    _git("commit", "-q", "-m", "seed")
+    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
+
+    ok, msg = artifacts.advance_to_spec_approved(program, "keystone")
+    assert ok is True and "committed" in msg  # committed (push pending, no remote)
+    # the .openspec.yaml stage change is committed, not a dirty working-tree edit
+    status = _git("status", "--porcelain", "--", "specs/openspec/changes/keystone/.openspec.yaml")
+    assert status.stdout.strip() == ""
+    log = _git("log", "-1", "--format=%s")
+    assert "spec-approved" in log.stdout
+
+
+@_textual
+def test_every_screen_has_a_mode_banner(program):
+    from textual.widgets import Static
+
+    from otaman_cli.console.app import (
+        ArtifactBrowserScreen,
+        LifecycleScreen,
+        OtamanConsole,
+        PendingListScreen,
+    )
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()  # picker
+            assert app.screen.query_one("#mode-banner", Static)
+            for screen in (
+                PendingListScreen(program),
+                LifecycleScreen(program),
+                ArtifactBrowserScreen(program),
+            ):
+                app.push_screen(screen)
+                await pilot.pause()
+                banner = app.screen.query_one("#mode-banner", Static)
+                assert banner is not None
+                app.pop_screen()
+                await pilot.pause()
+            await app.action_quit()
+
+    asyncio.run(go())
 
 
 @_textual
