@@ -223,6 +223,173 @@ def derive_lifecycle(
     return rows
 
 
+# ---------------------------------------------------------------------------
+# Lifecycle TABLE (IHC 1.5 / D10): one row per active change, all columns, with
+# triage class read from .openspec.yaml + a one-key nudge.
+
+#: Triage classes in display order (active first — the moving work separates from
+#: the dormant tail at a glance). Unknown/absent sorts last.
+TRIAGE_ORDER = ("active", "archive-candidate", "paused-decision", "absorbed", "dormant")
+
+
+@dataclass(frozen=True)
+class ChangeRow:
+    """One change as the D10 lifecycle table renders it (values-free)."""
+
+    name: str
+    stage: str | None
+    state: str
+    tasks_done: int
+    tasks_total: int
+    age: str
+    days_in_state: int
+    next_actor: str
+    triage: str | None
+    triage_note: str
+    last_touch: str  # last non-chore commit date (YYYY-MM-DD) or "?"
+    last_nudged: str  # date of the most recent nudge for this change, or ""
+
+
+def triage_rank(triage: str | None) -> int:
+    return TRIAGE_ORDER.index(triage) if triage in TRIAGE_ORDER else len(TRIAGE_ORDER)
+
+
+def _tasks_counts(text: str) -> tuple[int, int]:
+    done = len(_TICKED.findall(text))
+    todo = len(_UNTICKED.findall(text))
+    return done, done + todo
+
+
+def _last_real_touch(change_dir: Path) -> str:
+    """Last NON-chore commit date (YYYY-MM-DD) touching the change dir, or '?'.
+
+    Excludes ``chore(...)`` commits (the triage/tick passes) so the column shows
+    real progress, not bookkeeping (D10)."""
+    import subprocess
+
+    try:
+        r = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(change_dir),
+                "log",
+                "-1",
+                "--format=%cs",
+                "--invert-grep",
+                "--grep=^chore",
+                "--",
+                ".",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        out = r.stdout.strip()
+        return out if r.returncode == 0 and out else "?"
+    except (OSError, subprocess.SubprocessError):
+        return "?"
+
+
+def _last_nudged(bus_active_dir: Path | None, change: str) -> str:
+    """Date of the most recent nudge bus message for *change*, or '' (never)."""
+    if bus_active_dir is None or not bus_active_dir.is_dir():
+        return ""
+    matches = sorted(bus_active_dir.glob(f"*-nudge-{change}.md"))
+    if not matches:
+        return ""
+    m = re.match(r"(\d{4})(\d{2})(\d{2})T", matches[-1].name)
+    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else ""
+
+
+def derive_change_table(
+    *,
+    changes_dir: Path | None,
+    bus_active_dir: Path | None,
+    now: datetime | None = None,
+) -> list[ChangeRow]:
+    """One ChangeRow per active (non-archived) change, sorted by triage then name."""
+    from otaman_core.spec_lifecycle import read_openspec
+
+    now = now or datetime.now(timezone.utc)
+    rows: list[ChangeRow] = []
+    if not changes_dir:
+        return rows
+    for d in sorted(p for p in changes_dir.iterdir() if p.is_dir() and p.name != "archive"):
+        data = read_openspec(d / ".openspec.yaml")
+        stage = data.get("stage") if isinstance(data, dict) else None
+        triage = data.get("triage") if isinstance(data, dict) else None
+        triage_note = str(data.get("triage_note") or "") if isinstance(data, dict) else ""
+        done = total = 0
+        state = "—"
+        next_actor = "—"
+        tasks = d / "tasks.md"
+        if tasks.is_file():
+            try:
+                text = tasks.read_text(encoding="utf-8")
+            except OSError:
+                text = ""
+            done, total = _tasks_counts(text)
+            if _UNTICKED.search(text):
+                state = IN_FLIGHT
+                next_actor = _unticked_owners(text)
+            elif _TICKED.search(text):
+                state = COMPLETE_UNARCHIVED
+                next_actor = "spec-agent"
+        secs = _delta_secs(datetime.fromtimestamp(d.stat().st_mtime, timezone.utc).isoformat(), now)
+        rows.append(
+            ChangeRow(
+                name=d.name,
+                stage=stage if isinstance(stage, str) else None,
+                state=state,
+                tasks_done=done,
+                tasks_total=total,
+                age=_human_age(secs),
+                days_in_state=_age_days(secs),
+                next_actor=next_actor,
+                triage=triage if isinstance(triage, str) else None,
+                triage_note=triage_note,
+                last_touch=_last_real_touch(d),
+                last_nudged=_last_nudged(bus_active_dir, d.name),
+            )
+        )
+    rows.sort(key=lambda r: (triage_rank(r.triage), r.name))
+    return rows
+
+
+def nudge_target(next_actor: str, triage: str | None) -> str:
+    """The agent a nudge is sent to — the first ``*-agent`` in the next-actor
+    string, else a triage-based fallback (paused → human, else spec-agent)."""
+    m = re.search(r"[a-z0-9]+-agent", next_actor or "")
+    if m:
+        return m.group(0)
+    return "human" if triage == "paused-decision" else "spec-agent"
+
+
+def send_nudge(program, row: ChangeRow, *, note: str = "") -> tuple[bool, str]:
+    """One-key nudge: a bus ping to the row's next actor naming the change /
+    state / age / expected next step (D10). Returns (ok, message)."""
+    from otaman_cli.bus_write import write_message_exclusive
+
+    active_dir, _ = program.bus_paths()
+    target = nudge_target(row.next_actor, row.triage)
+    now = datetime.now(timezone.utc)
+    iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    ts = now.strftime("%Y%m%dT%H%M%S")
+    stem = f"{ts}-human-to-{target}-nudge-{row.name}"[:120]
+    note_section = f"\nNote: {note}\n" if note.strip() else ""
+    content = (
+        f"---\nid: {stem}\nfrom: human\nto: {target}\npriority: normal\ntype: info\n"
+        f"timestamp: {iso}\nstatus: pending\n---\n\n"
+        f"## Subject: Nudge: {row.name} ({row.state}, {row.age} in state)\n\n"
+        f"Change **{row.name}** — stage {row.stage or '?'}, state {row.state}, "
+        f"{row.age} in state, tasks {row.tasks_done}/{row.tasks_total}. "
+        f"Expected next step: {row.next_actor}.{note_section}"
+    )
+    write_message_exclusive(active_dir / f"{stem}.md", content)
+    return True, f"nudged {target} about {row.name}"
+
+
 __all__ = [
     "APPROVED_UNAUTHORED",
     "COMPLETE_UNARCHIVED",
@@ -230,6 +397,12 @@ __all__ = [
     "SEV_ERROR",
     "SEV_OK",
     "SEV_WARN",
+    "TRIAGE_ORDER",
+    "ChangeRow",
     "LifecycleRow",
+    "derive_change_table",
     "derive_lifecycle",
+    "nudge_target",
+    "send_nudge",
+    "triage_rank",
 ]
