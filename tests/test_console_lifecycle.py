@@ -74,7 +74,7 @@ def test_approved_with_no_change_folder_is_unauthored(tmp_path):
     assert row.state == APPROVED_UNAUTHORED
     assert row.change == "Add widget engine"
     assert row.age == "10d"  # approved 2026-08-25, now 2026-09-04
-    assert "spec-agent" in row.next_action
+    assert "spec-agent" in row.next_actor
 
 
 def test_corrected_incident_only_genuinely_unauthored_flagged(tmp_path):
@@ -120,7 +120,7 @@ def test_in_flight_change_names_unticked_owner(tmp_path):
     rows = list_lifecycle_states(program, now=_NOW)
     (row,) = [r for r in rows if r.change == "wip-change"]
     assert row.state == IN_FLIGHT
-    assert "cli-agent" in row.next_action
+    assert "cli-agent" in row.next_actor
 
 
 def test_complete_unarchived_change(tmp_path):
@@ -129,7 +129,7 @@ def test_complete_unarchived_change(tmp_path):
     rows = list_lifecycle_states(program, now=_NOW)
     (row,) = [r for r in rows if r.change == "done-change"]
     assert row.state == COMPLETE_UNARCHIVED
-    assert "spec-agent" in row.next_action
+    assert "spec-agent" in row.next_actor
 
 
 def test_archived_change_is_not_listed(tmp_path):

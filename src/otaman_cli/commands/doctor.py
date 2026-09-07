@@ -449,6 +449,85 @@ def _print_plugin_wiring_report(findings: list[dict]) -> None:
         print(f"  {UI.badge('WARN', C.YELLOW)}  {f.get('message', '')}")
 
 
+def _check_spec_lifecycle(root: Path) -> dict:
+    """SLE 2.1 / D3 — the doctor half of the spec-lifecycle surface.
+
+    Shares ONE derivation with ``otaman spec status`` + the console view
+    (:func:`otaman_cli.lifecycle.derive_lifecycle`). Reports the stalled buckets
+    (approved-but-unauthored / complete-but-unarchived — WARN day 1, ERROR day 3)
+    and the month's ratification count. WARN-only here — never changes doctor's
+    exit code; block-mode ENFORCEMENT is the gates' job (SLE 2.2).
+    """
+    out: dict = {"stalled": [], "ratifications": 0, "available": False}
+    try:
+        from datetime import datetime, timezone
+
+        from otaman_core.spec_lifecycle import ratifications_in_month
+
+        from otaman_cli.lifecycle import derive_lifecycle
+    except Exception:  # noqa: BLE001 - core primitive unavailable → skip section
+        return out
+    try:
+        import yaml
+
+        config = yaml.safe_load((root / "platform.yaml").read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001 - absent/unreadable platform.yaml → nothing to check
+        return out
+    if not isinstance(config, dict):
+        return out
+
+    from otaman_cli.main import _resolve_bus_paths
+
+    specs = config.get("specs") if isinstance(config.get("specs"), dict) else {}
+    changes_dir = None
+    if specs.get("path"):
+        cand = (root / specs["path"] / "openspec" / "changes").resolve()
+        changes_dir = cand if cand.is_dir() else None
+    active, _ = _resolve_bus_paths(root)
+    active = active if active.is_dir() else None
+
+    now = datetime.now(timezone.utc)
+    try:
+        rows = derive_lifecycle(changes_dir=changes_dir, bus_active_dir=active, now=now)
+    except Exception:  # noqa: BLE001 - derivation is best-effort in doctor
+        return out
+    out["available"] = True
+    out["stalled"] = [
+        {
+            "level": "error" if r.severity == "error" else "warn",
+            "message": f"{r.change}: {r.state} for {r.age} — next: {r.next_actor}",
+        }
+        for r in rows
+        if r.severity in ("warn", "error")
+    ]
+    try:
+        from otaman_cli.commands.spec import _collect_ratifications
+
+        out["ratifications"] = ratifications_in_month(
+            _collect_ratifications(changes_dir), year=now.year, month=now.month
+        )
+    except Exception:  # noqa: BLE001 - count is best-effort
+        pass
+    return out
+
+
+def _print_spec_lifecycle_report(result: dict) -> None:
+    """Pretty-print the spec-lifecycle section (nothing when unavailable + clean)."""
+    if not result.get("available"):
+        return
+    stalled = result.get("stalled", [])
+    ratifications = result.get("ratifications", 0)
+    if not stalled and not ratifications:
+        return  # all clear, no ratifications to flag → stay quiet
+    print()
+    UI.header("Spec Lifecycle")
+    for f in stalled:
+        badge = UI.badge("FAIL", C.RED) if f["level"] == "error" else UI.badge("WARN", C.YELLOW)
+        print(f"  {badge}  {f['message']}")
+    if ratifications:
+        print(f"  ratifications this month: {ratifications} (a rising count is a process alarm)")
+
+
 def cmd_doctor(args: list[str]) -> int:
     """Check environment readiness — git, runtimes, CLI tools, MCP.
 
@@ -688,6 +767,11 @@ def cmd_doctor(args: list[str]) -> int:
     # ce-bootstrap-plugin-wiring 1.2 — WARN on a vendored-but-unwired plugin
     # tree (core PR #41). WARN-only; never folds into the exit code.
     _print_plugin_wiring_report(_check_plugin_wiring(root))
+
+    # spec-lifecycle-enforcement 2.1 / D3 — the doctor half of the spec-lifecycle
+    # surface (stalled buckets + ratification count). WARN-only here; block-mode
+    # enforcement folds into the gates (SLE 2.2), not doctor's exit code.
+    _print_spec_lifecycle_report(_check_spec_lifecycle(root))
 
     # ce-bootstrap-harness-deps task 3.1 — additive `--org` harness check
     if org:
