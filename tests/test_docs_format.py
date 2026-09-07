@@ -19,11 +19,12 @@ def _rules(problems):
 # the four breakage classes
 
 
-def test_class1_raw_lt_flagged_and_escaped():
+def test_class1_raw_lt_flagged_and_backtick_wrapped():
+    # backtick-first (D2): the fixer wraps the token in a code span, not \<
     text = "| A | B |\n|---|---|\n| <tag | y |\n"
     assert "R3" in _rules(d.lint_text(text))
     fixed, _ = d.process_text(text, fix=True)
-    assert "\\<tag" in fixed and "<tag" not in fixed.replace("\\<tag", "")
+    assert "`<tag`" in fixed and "\\<tag" not in fixed
 
 
 def test_class2_short_row_padded():
