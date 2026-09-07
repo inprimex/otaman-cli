@@ -320,9 +320,10 @@ class ProposalScreen(Screen):
 
 class _LifecycleItem(ListItem):
     def __init__(self, row: LifecycleRow) -> None:
+        sev = "" if row.severity == "ok" else f" !{row.severity.upper()}"
         super().__init__(
             Label(
-                f"[{row.state}] {row.change}  ({row.age}, next: {row.next_action})",
+                f"[{row.state}]{sev} {row.change}  ({row.age}, next: {row.next_actor})",
                 markup=False,
             )
         )
