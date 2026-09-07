@@ -50,8 +50,19 @@ def _artifact_files(change_dir: Path) -> tuple[str, ...]:
     return tuple(files)
 
 
+def _has_authored_artifacts(files: tuple[str, ...]) -> bool:
+    """Whether a change carries authored artifacts (anything beyond .openspec.yaml)."""
+    return any(f != ".openspec.yaml" for f in files)
+
+
 def list_authored_changes(program: Program) -> list[AuthoredChange]:
-    """Changes at stage ``authored`` (awaiting the spec-approved review)."""
+    """Changes awaiting the spec-approved review.
+
+    Primarily stage ``authored``, PLUS stage ``approved`` changes that already
+    carry authored artifacts — those pre-date the stage convention (e.g. SLE
+    itself) and would otherwise be un-reviewable in-console (Roman's live gap,
+    2026-09-07). Anything already at/past spec-approved is excluded.
+    """
     from otaman_core.spec_lifecycle import read_stage
 
     changes = _specs_changes_dir(program)
@@ -59,12 +70,10 @@ def list_authored_changes(program: Program) -> list[AuthoredChange]:
         return []
     out: list[AuthoredChange] = []
     for d in sorted(p for p in changes.iterdir() if p.is_dir() and p.name != "archive"):
-        if read_stage(d / ".openspec.yaml") == "authored":
-            out.append(
-                AuthoredChange(
-                    name=d.name, change_dir=d, stage="authored", files=_artifact_files(d)
-                )
-            )
+        stage = read_stage(d / ".openspec.yaml")
+        files = _artifact_files(d)
+        if stage == "authored" or (stage == "approved" and _has_authored_artifacts(files)):
+            out.append(AuthoredChange(name=d.name, change_dir=d, stage=stage, files=files))
     return out
 
 
@@ -138,17 +147,62 @@ def advance_to_spec_approved(
     data = read_openspec(oy)
     if spec_approved_reached(data):
         return False, f"{change_name} is already at or past spec-approved"
-    if data.get("stage") != "authored":
+    stage = data.get("stage")
+    # authored, or approved-with-artifacts (the pre-convention case, D9 gap #3).
+    if stage not in ("authored", "approved") or (
+        stage == "approved" and not _has_authored_artifacts(_artifact_files(d))
+    ):
         return False, (
-            f"{change_name} is at stage {data.get('stage') or 'unknown'} — "
-            "only an 'authored' change can advance to spec-approved"
+            f"{change_name} is at stage {stage or 'unknown'} — only an authored "
+            "(or approved-with-artifacts) change can advance to spec-approved"
         )
     try:
         set_stage(oy, SPEC_APPROVED_STAGE)
     except SpecLifecycleError as exc:
         return False, str(exc)
-    _broadcast(program, change_name, approver.name, reason)
-    return True, f"{change_name} → spec-approved (by {approver.name})"
+    # Repo is truth (D1): the stage change must be committed, not left dirty in
+    # the checkout. Best-effort commit+push; a failure is flagged so spec-agent
+    # can commit it (gap #2 from Roman's live session).
+    committed, pushed, detail = _commit_stage(d, change_name, approver.name)
+    _broadcast(program, change_name, approver.name, reason, committed=committed, pushed=pushed)
+    if not committed:
+        return (
+            True,
+            f"{change_name} → spec-approved (by {approver.name}) — ⚠ commit needed: {detail}",
+        )
+    if not pushed:
+        return (
+            True,
+            f"{change_name} → spec-approved (by {approver.name}) — committed (push pending)",
+        )
+    return True, f"{change_name} → spec-approved (by {approver.name}) — committed + pushed"
+
+
+def _commit_stage(change_dir: Path, change_name: str, by: str) -> tuple[bool, bool, str]:
+    """Commit (and try to push) the change's .openspec.yaml stage bump. Best-effort.
+
+    Returns (committed, pushed, detail). A non-git checkout / no remote is not an
+    error the caller fails on — it degrades to a flagged 'commit needed'.
+    """
+    import subprocess
+
+    def _git(*a, timeout=30):
+        return subprocess.run(
+            ["git", "-C", str(change_dir), *a], capture_output=True, text=True, timeout=timeout
+        )
+
+    try:
+        if _git("add", ".openspec.yaml").returncode != 0:
+            return False, False, "git add failed (not a git checkout?)"
+        msg = f"chore(spec): {change_name} -> spec-approved (via otaman -i by {by})"
+        commit = _git("commit", "-m", msg, "--", ".openspec.yaml")
+        if commit.returncode != 0:
+            reason = (commit.stderr or commit.stdout or "").strip().splitlines()
+            return False, False, reason[0] if reason else "git commit failed"
+        push = _git("push")
+        return True, push.returncode == 0, "" if push.returncode == 0 else "push failed"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, False, str(exc)
 
 
 def request_changes(program: Program, change_name: str, comments: str) -> tuple[bool, str]:
@@ -171,19 +225,36 @@ def request_changes(program: Program, change_name: str, comments: str) -> tuple[
     return True, f"changes requested on {change_name} (author notified)"
 
 
-def _broadcast(program: Program, change_name: str, by: str, reason: str) -> None:
+def _broadcast(
+    program: Program,
+    change_name: str,
+    by: str,
+    reason: str,
+    *,
+    committed: bool = True,
+    pushed: bool = True,
+) -> None:
     from otaman_cli.bus_write import write_message_exclusive
 
     active, _ = program.bus_paths()
     iso, ts = _now()
     stem = f"{ts}-human-to-all-spec-approved-{change_name}"[:120]
     reason_section = f"\n### Reason\n{reason}\n" if reason else ""
+    if not committed:
+        commit_note = (
+            "\n\n**spec-agent: the stage change is written but NOT committed — "
+            "please commit .openspec.yaml in otaman-specs to make it durable (D1).**"
+        )
+    elif not pushed:
+        commit_note = "\n\n(stage committed locally; push pending)"
+    else:
+        commit_note = ""
     content = (
         f"---\nid: {stem}\nfrom: human\nto: all\npriority: normal\ntype: info\n"
         f"timestamp: {iso}\nstatus: pending\n---\n\n"
         f"## Subject: spec-approved: {change_name}\n\n"
         f"Change **{change_name}** reached **spec-approved** (advanced in otaman -i by {by}). "
-        f"Dispatch is now unblocked.{reason_section}"
+        f"Dispatch is now unblocked.{reason_section}{commit_note}"
     )
     write_message_exclusive(active / f"{stem}.md", content)
 
