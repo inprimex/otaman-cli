@@ -528,6 +528,61 @@ def _print_spec_lifecycle_report(result: dict) -> None:
         print(f"  ratifications this month: {ratifications} (a rising count is a process alarm)")
 
 
+def _check_outcome_verification(root: Path) -> dict:
+    """outcome-verification-field 1.2 — at process.level=verified only, WARN on Done
+    outcomes lacking the ``verification`` field. Lower levels stay untaxed.
+
+    Reads the RAW outcomes registry (forward-compatible: the schema field itself is
+    cofounder-agent's 1.1). WARN-only — never changes doctor's exit code.
+    """
+    out: dict = {"applicable": False, "missing": []}
+    try:
+        import yaml
+        from otaman_core.spec_lifecycle import resolve_spec_policy
+    except Exception:  # noqa: BLE001 - core primitive unavailable → skip
+        return out
+    try:
+        cfg = yaml.safe_load((root / "platform.yaml").read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001 - absent/unreadable platform.yaml → skip
+        return out
+    if not isinstance(cfg, dict):
+        return out
+    policy = resolve_spec_policy(None, cfg.get("spec_policy"))
+    if policy.process_level != "verified":
+        return out  # the lint fires ONLY at the verified level (lower levels untaxed)
+    out["applicable"] = True
+    try:
+        from otaman_cli.registries.loader import resolve_registry_path, yaml_load
+
+        path = resolve_registry_path(root, "outcomes")
+        if path is None:
+            return out
+        raw = yaml_load(path) or {}
+    except Exception:  # noqa: BLE001 - registry absent/unreadable → nothing to lint
+        return out
+    outcomes = raw.get("outcomes") if isinstance(raw, dict) else None
+    if not isinstance(outcomes, list):
+        return out
+    out["missing"] = [
+        o.get("id", "?")
+        for o in outcomes
+        if isinstance(o, dict) and o.get("status") == "Done" and not o.get("verification")
+    ]
+    return out
+
+
+def _print_outcome_verification_report(result: dict) -> None:
+    """WARN on verified-level Done outcomes lacking verification (nothing otherwise)."""
+    missing = result.get("missing", [])
+    if not result.get("applicable") or not missing:
+        return
+    print()
+    UI.header("Outcome Verification")
+    for oid in missing:
+        print(f"  {UI.badge('WARN', C.YELLOW)}  {oid}: Done but missing the `verification` field")
+    print("  (process.level=verified: Done outcomes must record how they were verified)")
+
+
 def cmd_doctor(args: list[str]) -> int:
     """Check environment readiness — git, runtimes, CLI tools, MCP.
 
@@ -772,6 +827,10 @@ def cmd_doctor(args: list[str]) -> int:
     # surface (stalled buckets + ratification count). WARN-only here; block-mode
     # enforcement folds into the gates (SLE 2.2), not doctor's exit code.
     _print_spec_lifecycle_report(_check_spec_lifecycle(root))
+
+    # outcome-verification-field 1.2 — verified-level Done outcomes lacking the
+    # verification field. WARN-only; fires only at process.level=verified.
+    _print_outcome_verification_report(_check_outcome_verification(root))
 
     # ce-bootstrap-harness-deps task 3.1 — additive `--org` harness check
     if org:
