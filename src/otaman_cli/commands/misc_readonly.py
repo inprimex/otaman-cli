@@ -99,6 +99,11 @@ def cmd_validate(args: list[str]) -> int:
     inferred from parent dir; version default "1.0").  Deprecation hints
     are printed; the on-disk file is not rewritten.
     """
+    # `validate docs [...]` is a subtarget (JTBD-108: no new top-level command);
+    # bare `validate [platform.yaml]` keeps its existing behavior.
+    if args and args[0] == "docs":
+        return _cmd_validate_docs(args[1:])
+
     config = args[0] if args else "platform.yaml"
     config_path = Path(config)
     norm_path, hints = _normalize_ce_platform_yaml_for_validation(config_path)
@@ -114,6 +119,56 @@ def cmd_validate(args: list[str]) -> int:
             except OSError:
                 pass
     return result.returncode
+
+
+def _cmd_validate_docs(rest: list[str]) -> int:
+    """`otaman validate docs [--fix] <targets...>` — fence-aware R1-R4 table
+    lint/fix (docs-format-check 1.2).
+
+    Safe-by-default (D2): with NO explicit targets it does nothing but print a
+    usage line and exit 0 — never an implicit repo-wide sweep. Lint exits 1 on
+    violations; --fix repairs in place (and never touches unfenced pipe-art).
+    """
+    from otaman_cli import docs_format
+
+    fix = "--fix" in rest
+    targets = [a for a in rest if not a.startswith("--")]
+
+    if not targets:
+        # D2 / JTBD-107: a mutating command with no targets is a no-op + usage.
+        UI.muted("Usage: otaman validate docs [--fix] <files|folders|globs...>")
+        UI.muted("  No targets given — nothing scanned (explicit targets required).")
+        return 0
+
+    files = docs_format.expand_targets(targets)
+    if not files:
+        UI.muted("No markdown files matched the given targets.")
+        return 0
+
+    UI.header("Docs format" + (" — fix" if fix else " — lint"))
+    total = 0
+    changed = 0
+    for f in files:
+        if fix:
+            probs, did = docs_format.fix_path(f)
+            if did:
+                changed += 1
+        else:
+            probs = docs_format.lint_path(f)
+        for ln, msg in probs:
+            print(f"  {f}:{ln}: {msg}")
+            total += 1
+
+    if fix:
+        UI.ok(f"Scanned {len(files)} file(s); fixed {changed}; {total} issue(s) reported")
+        # --fix repairs in place; it is not the CI gate (lint is), so it exits 0
+        # even if unfixable flags (unfenced pipe-art) remain — those were printed.
+        return 0
+    if total:
+        UI.error(f"{total} issue(s) across {len(files)} file(s) — run with --fix to repair")
+        return 1
+    UI.ok(f"{len(files)} file(s) clean")
+    return 0
 
 
 def cmd_validate_messages(args: list[str]) -> int:
