@@ -14,6 +14,7 @@ from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.containers import VerticalScroll
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Footer,
@@ -126,11 +127,15 @@ class PendingListScreen(Screen):
         Binding("escape", "back", "Back", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
         Binding("l", "lifecycle", "Lifecycle", priority=True),
+        Binding("b", "browse", "Spec review", priority=True),
         Binding("q", "quit", "Quit", priority=True),
     ]
 
     def action_lifecycle(self) -> None:
         self.app.push_screen(LifecycleScreen(self.program))
+
+    def action_browse(self) -> None:
+        self.app.push_screen(ArtifactBrowserScreen(self.program))
 
     def __init__(self, program: Program, *, event_source=None) -> None:
         super().__init__()
@@ -379,6 +384,154 @@ class LifecycleScreen(Screen):
                 lv.append(_LifecycleItem(r))
         else:
             lv.append(ListItem(Label("No catchable lifecycle states — nothing stalled.")))
+
+
+class _AuthoredItem(ListItem):
+    def __init__(self, change) -> None:
+        super().__init__(Label(f"{change.name}  ({len(change.files)} files)", markup=False))
+        self.change = change
+
+
+class _FileItem(ListItem):
+    def __init__(self, relname: str) -> None:
+        super().__init__(Label(relname, markup=False))
+        self.relname = relname
+
+
+class ArtifactBrowserScreen(Screen):
+    """IHC iteration 2 — changes at stage `authored` awaiting spec-approved review.
+
+    Wired to SLE's stage machine: selecting a change opens ChangeReviewScreen,
+    whose approve action mints the real spec-approved signal (set_stage +
+    notification). The feature guard is dropped now that core's substrate exists.
+    """
+
+    BINDINGS = [
+        Binding("escape", "back", "Back", priority=True),
+        Binding("r", "refresh", "Refresh", priority=True),
+        Binding("q", "quit", "Quit", priority=True),
+    ]
+
+    def __init__(self, program: Program) -> None:
+        super().__init__()
+        self.program = program
+
+    def compose(self) -> ComposeResult:
+        yield _header()
+        yield _identity_badge_widget(self.program.root)
+        yield Static(
+            f"Spec review — authored changes — {self.program.name}",
+            id="artifact-header",
+            markup=False,
+        )
+        yield ListView(id="authored-list")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self._load()
+
+    def action_refresh(self) -> None:
+        self._load()
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+    def on_screen_resume(self) -> None:
+        self._load()  # returning from a review refreshes the authored list
+
+    def _load(self) -> None:
+        from otaman_cli.console.artifacts import list_authored_changes
+
+        lv = self.query_one("#authored-list", ListView)
+        lv.clear()
+        changes = list_authored_changes(self.program)
+        if changes:
+            for c in changes:
+                lv.append(_AuthoredItem(c))
+        else:
+            lv.append(ListItem(Label("No changes awaiting spec-approved review.")))
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        item = event.item
+        if isinstance(item, _AuthoredItem):
+            self.app.push_screen(ChangeReviewScreen(self.program, item.change))
+
+
+class ChangeReviewScreen(Screen):
+    """Per-file view of an authored change; approve → spec-approved / request changes."""
+
+    BINDINGS = [
+        Binding("a", "approve", "Approve (spec-approved)", priority=True),
+        Binding("c", "request_changes", "Request changes", priority=True),
+        Binding("escape", "back", "Back", priority=True),
+        Binding("q", "quit", "Quit", priority=True),
+    ]
+
+    def __init__(self, program: Program, change) -> None:
+        super().__init__()
+        self.program = program
+        self.change = change
+
+    def compose(self) -> ComposeResult:
+        yield _header()
+        yield _identity_badge_widget(self.program.root)
+        yield Static(
+            f"Review: {self.change.name}   —   [a]pprove  [c] request changes",
+            id="review-header",
+            markup=False,
+        )
+        yield ListView(id="artifact-files")
+        with VerticalScroll(id="artifact-view-scroll"):
+            yield Static("", id="artifact-view", markup=False)
+        yield Footer()
+
+    def on_mount(self) -> None:
+        lv = self.query_one("#artifact-files", ListView)
+        for f in self.change.files:
+            lv.append(_FileItem(f))
+        if self.change.files:
+            self._show(self.change.files[0])
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        item = event.item
+        if isinstance(item, _FileItem):
+            self._show(item.relname)
+
+    def _show(self, relname: str) -> None:
+        from otaman_cli.console.artifacts import read_artifact
+
+        text = read_artifact(self.change.change_dir, relname) or "(empty)"
+        self.query_one("#artifact-view", Static).update(f"── {relname} ──\n\n{text}")
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+    def action_approve(self) -> None:
+        self._prompt("approve")
+
+    def action_request_changes(self) -> None:
+        self._prompt("request changes")
+
+    def _prompt(self, verb: str) -> None:
+        def _after(reason: str | None) -> None:
+            if reason is None:
+                return
+            self._apply(verb, reason)
+
+        self.app.push_screen(ReasonModal(verb), _after)
+
+    def _apply(self, verb: str, reason: str) -> None:
+        from otaman_cli.console import artifacts
+
+        if verb == "approve":
+            ok, msg = artifacts.advance_to_spec_approved(
+                self.program, self.change.name, reason=reason
+            )
+        else:
+            ok, msg = artifacts.request_changes(self.program, self.change.name, reason)
+        self.app.notify(msg, severity="information" if ok else "error", timeout=8)
+        if ok:
+            self.app.pop_screen()  # ArtifactBrowserScreen.on_screen_resume refreshes
 
 
 class OtamanConsole(App):
