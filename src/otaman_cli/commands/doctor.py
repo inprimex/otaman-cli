@@ -702,6 +702,83 @@ def _print_local_ownership_report(result: dict, *, deep: bool = False) -> None:
             print("  Deep scan: no foreign-owned files")
 
 
+def _check_tenant_consistency() -> dict:
+    """scan-init-edition-backfill 1.2 — compare runner:/terminal: across the
+    tenant's registered program platforms.
+
+    otaman-runner derives its bootstrap ONCE from the alphabetically-first
+    registered platform (the PRIMARY) and applies it tenant-wide, so a program
+    whose runner:/terminal: diverges from — or is missing versus — the primary
+    can regress every program's sessions. This surfaces that hazard before it
+    bites. WARN-only (detection); returns the primary name + divergent programs.
+    """
+    out: dict = {"applicable": False, "primary": None, "divergent": [], "total": 0}
+    try:
+        import yaml
+
+        from otaman_cli._runner_registry import platforms_list
+
+        entries = [e for e in platforms_list() if e.get("state") == "ok"]
+    except Exception:  # noqa: BLE001 - registry absent/unreadable → not applicable
+        return out
+    if len(entries) < 2:
+        return out  # nothing tenant-wide to compare
+    out["applicable"] = True
+    out["total"] = len(entries)
+
+    def _load(path) -> dict:
+        try:
+            data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _canon(block) -> str:
+        return yaml.safe_dump(block, sort_keys=True) if block else ""
+
+    primary = entries[0]  # alphabetical-first == the runner's primary
+    out["primary"] = primary["name"]
+    primary_doc = _load(primary["target"])
+    for entry in entries[1:]:
+        doc = _load(entry["target"])
+        issues: list[str] = []
+        for section in ("runner", "terminal"):
+            if section not in doc or not doc.get(section):
+                issues.append(f"{section}: missing")
+            elif _canon(doc.get(section)) != _canon(primary_doc.get(section)):
+                issues.append(f"{section}: differs from primary")
+        if issues:
+            out["divergent"].append({"name": entry["name"], "issues": issues})
+    return out
+
+
+def _print_tenant_consistency_report(result: dict) -> None:
+    """Tenant-wide runner/terminal consistency row. WARN names divergent
+    programs AND the primary the runner currently treats as authoritative."""
+    if not result.get("applicable"):
+        return
+    print()
+    UI.header("Tenant Runner/Terminal Consistency")
+    primary = result.get("primary")
+    divergent = result.get("divergent", [])
+    if not divergent:
+        print(
+            f"  {UI.badge('OK', C.GREEN)}  runner:/terminal: consistent across "
+            f"{result.get('total', 0)} registered programs (primary: {primary})"
+        )
+        return
+    print(
+        f"  {UI.badge('WARN', C.YELLOW)}  runner applies '{primary}' tenant-wide "
+        f"(alphabetically-first registered platform); these programs diverge:"
+    )
+    for d in divergent:
+        print(f"    {UI.badge('WARN', C.YELLOW)}  {d['name']}: {', '.join(d['issues'])}")
+    print(
+        "  Reconcile with `otaman init --update` in each divergent program "
+        "(backfills/aligns from the org primary)."
+    )
+
+
 def cmd_doctor(args: list[str]) -> int:
     """Check environment readiness — git, runtimes, CLI tools, MCP.
 
@@ -966,6 +1043,11 @@ def cmd_doctor(args: list[str]) -> int:
     _print_local_ownership_report(own, deep=scan)
     if own.get("foreign") or own.get("scan"):
         base_rc = 1
+
+    # scan-init-edition-backfill 1.2 — tenant-wide runner:/terminal: consistency,
+    # naming the alphabetical-first primary the runner applies tenant-wide.
+    # WARN-only; never folds into the exit code (detection surface).
+    _print_tenant_consistency_report(_check_tenant_consistency())
 
     # ce-bootstrap-harness-deps task 3.1 — additive `--org` harness check
     if org:

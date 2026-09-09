@@ -70,6 +70,8 @@ class PostScanResult:
     specs_repo_lifted: Path | None = None
     launcher_block_added: bool = False
     openspec_scaffolded: Path | None = None
+    # scan-init-edition-backfill 1.1 — org-implied sections copied into the draft
+    org_sections_backfilled: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
 
 
@@ -383,6 +385,12 @@ def run(
     result = PostScanResult()
     gaps = analyze_draft(draft_path, scan_root, program_slug)
 
+    # scan-init-edition-backfill 1.1 — org-implied sections
+    # (runner:/terminal:/human-roster:) are independent of the four draft gaps
+    # below, so backfill runs UNCONDITIONALLY (even a draft with no other gaps
+    # may still be missing them — the pmeets case).
+    _backfill_org_sections(draft_path, result)
+
     if not gaps.any():
         return result
 
@@ -456,6 +464,30 @@ def run(
         result.launcher_block_added = True
 
     return result
+
+
+def _backfill_org_sections(draft_path: Path, result: PostScanResult) -> None:
+    """Copy the org primary's runner:/terminal:/human-roster: into the draft."""
+    try:
+        from otaman_cli.onboard.edition_backfill import apply_backfill, plan_for_platform
+
+        plan = plan_for_platform(draft_path)
+    except Exception as exc:  # noqa: BLE001 - additive UX; never break the scan
+        result.skipped.append(f"org-section backfill failed: {exc}")
+        return
+    if not plan.has_work:
+        return
+    if plan.ambiguous:
+        # missing runner:/terminal:/human-roster: but no org template → surface
+        # loudly (never silent): the runner applies one program's bootstrap
+        # tenant-wide, so an unfilled gap here can regress every program.
+        result.skipped.append(
+            "runner:/terminal:/human-roster: (no org primary platform to copy from — "
+            "verify by hand or register the org primary, then `otaman init --update`)"
+        )
+        return
+    written = apply_backfill(draft_path, plan.additions)
+    result.org_sections_backfilled = written
 
 
 __all__ = [
