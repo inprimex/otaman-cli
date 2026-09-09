@@ -112,6 +112,16 @@ def test_status_json_structure(root, capsys):
     assert c["state"] == "approved-unauthored" and c["severity"] == "error"
 
 
+def test_status_ratify_blocked_shows_human_next_actor(root, capsys):
+    # gate 3.1: spec status (derive_lifecycle) must route a done-but-unapproved
+    # delta change to the human (ratify), not spec-agent — matching the console table.
+    _change(root, "auto-clear-blocked-entries", ticks=[True, True])  # complete, unapproved
+    spec_cmd.cmd_spec(["status"])
+    out = capsys.readouterr().out
+    assert "auto-clear-blocked-entries" in out
+    assert "human" in out and "ratify" in out
+
+
 def test_spec_help_and_unknown_action(root, capsys):
     assert spec_cmd.cmd_spec(["--help"]) == 0
     assert spec_cmd.cmd_spec(["bogus"]) == 2

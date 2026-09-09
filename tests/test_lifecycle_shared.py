@@ -115,7 +115,8 @@ def test_complete_unarchived_is_a_stalled_bucket(tmp_path):
     os.utime(folder, (four_days_ago, four_days_ago))
     (row,) = derive_lifecycle(changes_dir=changes, bus_active_dir=None, now=_NOW)
     assert row.state == COMPLETE_UNARCHIVED and row.severity == SEV_ERROR
-    assert "spec-agent" in row.next_actor
+    # unapproved delta change → ratify-blocked → next actor is the human (gate 3.1)
+    assert "human" in row.next_actor and "ratify" in row.next_actor
 
 
 def test_empty_inputs_yield_nothing(tmp_path):
