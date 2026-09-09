@@ -21,6 +21,22 @@ from otaman_core.testing import isolate_bus  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
+def _isolated_platforms_registry(tmp_path, monkeypatch):
+    """Keep the runner platforms registry read off the real host.
+
+    scan-init-edition-backfill (1.1/1.2) reads ``~/.config/otaman/platforms/``
+    (``OTAMAN_PLATFORMS_DIR``) — via scan/init backfill and doctor's
+    tenant-consistency check — to find the org's primary platform. Default it
+    to an empty per-test dir so in-process tests never touch the real registry
+    (CLAUDE.md: never touch config outside tmp_path); tests that need a
+    populated registry override ``OTAMAN_PLATFORMS_DIR`` themselves."""
+    pdir = tmp_path / "platforms-registry"
+    pdir.mkdir(exist_ok=True)
+    monkeypatch.setenv("OTAMAN_PLATFORMS_DIR", str(pdir))
+    return pdir
+
+
+@pytest.fixture(autouse=True)
 def _isolated_ledger(tmp_path, monkeypatch):
     import otaman_core.confirmations as _conf
 

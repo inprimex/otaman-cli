@@ -370,6 +370,52 @@ def _ensure_routing_rules(platform_yaml: Path) -> int:
         return 0
 
 
+def _ensure_org_sections(platform_yaml: Path, *, interactive: bool | None = None) -> int:
+    """scan-init-edition-backfill 1.1 — backfill runner:/terminal:/human-roster:
+    from the org's PRIMARY registered platform (the runner's alphabetical-first
+    bootstrap source) when this program's config is missing them.
+
+    Idempotent (only absent sections are added, copied verbatim for
+    byte-consistency); returns 1 if anything was written, else 0. On AMBIGUITY
+    (sections missing but no org template to copy from) it WARNs loudly and
+    leaves them absent — never a silent omit — because the runner applies one
+    program's bootstrap tenant-wide, so a silent gap here regresses every
+    program's sessions.
+    """
+    from otaman_cli.onboard.edition_backfill import apply_backfill, plan_for_platform
+
+    if interactive is None:
+        interactive = sys.stdin.isatty()
+    try:
+        plan = plan_for_platform(platform_yaml)
+    except Exception as exc:  # noqa: BLE001 - backfill is additive; never break --update
+        UI.muted(f"  org-section backfill skipped: {exc}")
+        return 0
+    if not plan.has_work:
+        return 0
+    if plan.ambiguous:
+        UI.warn(
+            "runner:/terminal:/human-roster: missing and no org primary platform "
+            "found to copy from — leaving them ABSENT."
+        )
+        UI.muted(
+            "  The runner applies one program's bootstrap tenant-wide, so verify this "
+            "config by hand or register the org's primary platform, then re-run "
+            "`otaman init --update`."
+        )
+        return 0
+    if not plan.additions:
+        return 0
+    written = apply_backfill(platform_yaml, plan.additions)
+    if written:
+        UI.ok(
+            f"platform.yaml: backfilled {', '.join(written)} from org primary "
+            f"'{plan.template.name}' (edition: {plan.edition})"
+        )
+        return 1
+    return 0
+
+
 def _cmd_init_update(dry_run: bool = False) -> int:
     """Patch .otaman agent: fields + regenerate launch commands across all repos (--update, D5).
 
@@ -551,6 +597,7 @@ def _cmd_init_update(dry_run: bool = False) -> int:
     if dry_run:
         UI.muted("  would check .claude/settings.local.json defaultMode across repos")
         UI.muted("  would check platform.yaml bus.routing_rules defaults")
+        UI.muted("  would backfill runner:/terminal:/human-roster: from the org primary platform")
     else:
         # Ensure defaultMode: auto in each repo's settings.local.json
         _ensure_settings_default_mode(root, config)
@@ -558,6 +605,11 @@ def _cmd_init_update(dry_run: bool = False) -> int:
         # bus-cc-routing task 2.5 — ensure routing_rules defaults exist in platform.yaml
         if _ensure_routing_rules(platform_yaml):
             UI.ok("platform.yaml: bus.routing_rules defaults added")
+
+        # scan-init-edition-backfill 1.1 — backfill org-implied sections
+        # (runner:/terminal:/human-roster:) from the org's primary platform so
+        # the runner's tenant-wide bootstrap stays consistent across programs.
+        _ensure_org_sections(platform_yaml)
 
     # external-audit gate blocker 2/2 (spec-agent 20260818T195901): --update
     # is the documented headless step-2 command (works from any repo dir via

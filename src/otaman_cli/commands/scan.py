@@ -329,6 +329,12 @@ def cmd_scan(args: list[str]) -> int:
                     UI.ok(f"Scaffolded OpenSpec: {_ps_result.openspec_scaffolded}")
                 if _ps_result.launcher_block_added:
                     UI.ok("Added launcher block to platform.yaml.draft (review and customise)")
+                if _ps_result.org_sections_backfilled:
+                    UI.ok(
+                        "Backfilled "
+                        + ", ".join(_ps_result.org_sections_backfilled)
+                        + " from the org primary platform (consistent tenant-wide bootstrap)"
+                    )
                 for s in _ps_result.skipped:
                     UI.muted(f"  skipped: {s}")
             except Exception as _post_exc:
