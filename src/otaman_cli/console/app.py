@@ -362,6 +362,8 @@ class LifecycleScreen(Screen):
         Binding("escape", "back", "Back", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
         Binding("n", "nudge", "Nudge", priority=True),
+        Binding("y", "ratify", "Ratify", priority=True),
+        Binding("a", "archive", "Archive", priority=True),
         Binding("q", "quit", "Quit", priority=True),
     ]
 
@@ -387,7 +389,7 @@ class LifecycleScreen(Screen):
         yield _identity_badge_widget(self.program.root)
         yield _mode_banner(
             f"Lifecycle — all changes by triage · {self.program.name}",
-            "↑↓ rows · n nudge next actor · r refresh · esc back · q quit",
+            "↑↓ rows · n nudge · y ratify · a archive · r refresh · esc back · q quit",
         )
         table = DataTable(id="lifecycle-table", cursor_type="row", zebra_stripes=True)
         yield table
@@ -465,6 +467,58 @@ class LifecycleScreen(Screen):
             self._load()  # refresh so the last-nudged column updates
 
         self.app.push_screen(ReasonModal("nudge"), _after)
+
+    def _highlighted(self):
+        table = self.query_one("#lifecycle-table", DataTable)
+        idx = table.cursor_row
+        return self._rows[idx] if 0 <= idx < len(self._rows) else None
+
+    def action_ratify(self) -> None:
+        # D1: ratify is offered only where the human is the next actor (a
+        # ratify-blocked row); otherwise the key is a clear no-op with a hint.
+        row = self._highlighted()
+        if row is None:
+            return
+        if "human" not in row.next_actor or "ratify" not in row.next_actor:
+            self.app.notify(f"Ratify not applicable — {row.name} is not ratify-blocked.", timeout=5)
+            return
+
+        def _after(reason: str | None) -> None:
+            if reason is None:
+                return
+            if not reason.strip():
+                self.app.notify("Ratify needs a reason.", severity="error", timeout=5)
+                return
+            from otaman_cli.console.identity import resolve_identity
+            from otaman_cli.console.lifecycle import ratify_change
+
+            by = resolve_identity(self.program.root).operator
+            ok, msg = ratify_change(self.program, row.name, by=by, reason=reason)
+            self.app.notify(msg, severity="information" if ok else "error", timeout=8)
+            if ok:
+                self._load()
+
+        self.app.push_screen(ReasonModal("ratify"), _after)
+
+    def action_archive(self) -> None:
+        # D1: archive is offered only on a complete-unarchived row whose archive
+        # gate is ALLOWED (the gate is re-checked inside archive_change).
+        from otaman_cli.lifecycle import COMPLETE_UNARCHIVED
+
+        row = self._highlighted()
+        if row is None:
+            return
+        if row.state != COMPLETE_UNARCHIVED:
+            self.app.notify(
+                f"Archive not applicable — {row.name} is not complete-unarchived.", timeout=5
+            )
+            return
+        from otaman_cli.console.lifecycle import archive_change
+
+        ok, msg = archive_change(self.program, row.name)
+        self.app.notify(msg, severity="information" if ok else "error", timeout=8)
+        if ok:
+            self._load()
 
 
 class _AuthoredItem(ListItem):
