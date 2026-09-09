@@ -309,7 +309,7 @@ def derive_change_table(
     now: datetime | None = None,
 ) -> list[ChangeRow]:
     """One ChangeRow per active (non-archived) change, sorted by triage then name."""
-    from otaman_core.spec_lifecycle import read_openspec
+    from otaman_core.spec_lifecycle import has_approval, is_research, read_openspec
 
     now = now or datetime.now(timezone.utc)
     rows: list[ChangeRow] = []
@@ -335,7 +335,14 @@ def derive_change_table(
                 next_actor = _unticked_owners(text)
             elif _TICKED.search(text):
                 state = COMPLETE_UNARCHIVED
-                next_actor = "spec-agent"
+                # console-lifecycle-actions 1.1: a delta change that is done but
+                # lacks approval is ratify-blocked at the archive gate — the next
+                # actor is the HUMAN with `otaman ratify`, not spec-agent (Roman's
+                # misrouted-nudge incident). Approved / research changes → archive.
+                if not is_research(data) and not has_approval(data):
+                    next_actor = f"human (otaman ratify {d.name})"
+                else:
+                    next_actor = "spec-agent"
         secs = _delta_secs(datetime.fromtimestamp(d.stat().st_mtime, timezone.utc).isoformat(), now)
         rows.append(
             ChangeRow(
@@ -358,9 +365,13 @@ def derive_change_table(
 
 
 def nudge_target(next_actor: str, triage: str | None) -> str:
-    """The agent a nudge is sent to — the first ``*-agent`` in the next-actor
+    """The agent a nudge is sent to — ``human`` when the next actor is the human
+    (e.g. a ratify-blocked row), else the first ``*-agent`` in the next-actor
     string, else a triage-based fallback (paused → human, else spec-agent)."""
-    m = re.search(r"[a-z0-9]+-agent", next_actor or "")
+    na = next_actor or ""
+    if re.search(r"\bhuman\b", na):  # ratify-blocked / human-next-actor rows
+        return "human"
+    m = re.search(r"[a-z0-9]+-agent", na)
     if m:
         return m.group(0)
     return "human" if triage == "paused-decision" else "spec-agent"
