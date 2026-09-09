@@ -309,24 +309,28 @@ class ProposalScreen(Screen):
         yield MarkdownViewer(self.proposal.body, show_table_of_contents=False, id="proposal-body")
         yield Footer()
 
-    def _decide(self, ok: bool, message: str) -> None:
-        self.app.notify(message, severity="information" if ok else "error", timeout=8)
-        if ok:
-            self.app.pop_screen()  # PendingListScreen.on_screen_resume refreshes
-
     def _apply_decision(self, verb: str, reason: str, *, delivery: str | None = None) -> None:
         from otaman_cli.console import decision
         from otaman_cli.console.identity import resolve_identity
+        from otaman_cli.console.journal import run_decision_action
 
         identity = resolve_identity(self.program.root)
         if verb == "approve":
-            ok, message = decision.approve(
-                self.program, self.proposal, identity, reason=reason, delivery=delivery
-            )
+
+            def fn():
+                return decision.approve(
+                    self.program, self.proposal, identity, reason=reason, delivery=delivery
+                )
         else:
-            fn = {"reject": decision.reject, "defer": decision.defer}[verb]
-            ok, message = fn(self.program, self.proposal, identity, reason=reason)
-        self._decide(ok, message)
+            verb_fn = {"reject": decision.reject, "defer": decision.defer}[verb]
+
+            def fn():
+                return verb_fn(self.program, self.proposal, identity, reason=reason)
+
+        label = f"{verb}-auto" if delivery == "auto" else verb
+        ok, _ = run_decision_action(self.app, action=label, target=self.proposal.stem, fn=fn)
+        if ok:
+            self.app.pop_screen()  # PendingListScreen.on_screen_resume refreshes
 
     def _prompt_and_decide(self, verb: str, *, delivery: str | None = None) -> None:
         def _after(reason: str | None) -> None:
@@ -471,11 +475,17 @@ class LifecycleScreen(Screen):
         def _after(note: str | None) -> None:
             if note is None:
                 return
+            from otaman_cli.console.journal import run_decision_action
             from otaman_cli.lifecycle import send_nudge
 
-            ok, msg = send_nudge(self.program, row, note=note)
-            self.app.notify(msg, severity="information" if ok else "error", timeout=6)
-            self._load()  # refresh so the last-nudged column updates
+            ok, _ = run_decision_action(
+                self.app,
+                action="nudge",
+                target=row.name,
+                fn=lambda: send_nudge(self.program, row, note=note),
+            )
+            if ok:
+                self._load()  # refresh so the last-nudged column updates
 
         self.app.push_screen(ReasonModal("nudge"), _after)
 
@@ -507,11 +517,16 @@ class LifecycleScreen(Screen):
                 self.app.notify("Ratify needs a reason.", severity="error", timeout=5)
                 return
             from otaman_cli.console.identity import resolve_identity
+            from otaman_cli.console.journal import run_decision_action
             from otaman_cli.console.lifecycle import ratify_change
 
             by = resolve_identity(self.program.root).operator
-            ok, msg = ratify_change(self.program, row.name, by=by, reason=reason)
-            self.app.notify(msg, severity="information" if ok else "error", timeout=8)
+            ok, _ = run_decision_action(
+                self.app,
+                action="ratify",
+                target=row.name,
+                fn=lambda: ratify_change(self.program, row.name, by=by, reason=reason),
+            )
             if ok:
                 self._load()
 
@@ -530,10 +545,15 @@ class LifecycleScreen(Screen):
                 f"Archive not applicable — {row.name} is not complete-unarchived.", timeout=5
             )
             return
+        from otaman_cli.console.journal import run_decision_action
         from otaman_cli.console.lifecycle import archive_change
 
-        ok, msg = archive_change(self.program, row.name)
-        self.app.notify(msg, severity="information" if ok else "error", timeout=8)
+        ok, _ = run_decision_action(
+            self.app,
+            action="archive",
+            target=row.name,
+            fn=lambda: archive_change(self.program, row.name),
+        )
         if ok:
             self._load()
 
@@ -757,14 +777,26 @@ class ChangeReviewScreen(Screen):
 
     def _apply(self, verb: str, reason: str) -> None:
         from otaman_cli.console import artifacts
+        from otaman_cli.console.journal import run_decision_action
 
         if verb == "approve":
-            ok, msg = artifacts.advance_to_spec_approved(
-                self.program, self.change.name, reason=reason
-            )
+
+            def fn():
+                return artifacts.advance_to_spec_approved(
+                    self.program, self.change.name, reason=reason
+                )
+
+            action = "approve (spec-approved)"
         else:
-            ok, msg = artifacts.request_changes(self.program, self.change.name, reason)
-        self.app.notify(msg, severity="information" if ok else "error", timeout=8)
+
+            def fn():
+                return artifacts.request_changes(self.program, self.change.name, reason)
+
+            action = "request-changes"
+        # The silent-loss net: an exception in fn (e.g. read_openspec on a
+        # .openspec.yaml being rewritten by a concurrent merge — the incident
+        # shape) is caught, journaled, and shown LOUDLY instead of vanishing.
+        ok, _ = run_decision_action(self.app, action=action, target=self.change.name, fn=fn)
         if ok:
             self.app.pop_screen()  # ArtifactBrowserScreen.on_screen_resume refreshes
 
@@ -789,12 +821,35 @@ class OtamanConsole(App):
     #identity-badge.unverified { color: $warning; }
     """
 
-    def __init__(self, programs: list[Program], *, search_root=None) -> None:
+    def __init__(self, programs: list[Program], *, search_root=None, log_dir=None) -> None:
         super().__init__()
         self._programs = programs
         self._search_root = search_root
+        self._log_dir = log_dir
+        # Per-session observability log (silent-approval-loss fix). Opened in
+        # on_mount so a filesystem hiccup degrades a live app, not construction.
+        self.session_log = None
+
+    def _open_session_log(self) -> None:
+        # Full-session trace to ~/.otaman/console-logs/<ts>.log: no tmux on
+        # Roman's seat means no scrollback, so the file IS the record. Identity
+        # is best-effort (first program's roster context, else the picker root).
+        from otaman_cli.console.identity import resolve_identity
+        from otaman_cli.console.journal import ConsoleLog
+
+        root = self._programs[0].root if self._programs else _NO_PROGRAM_ROOT
+        try:
+            ident = resolve_identity(root).audit_label
+        except Exception:  # noqa: BLE001 - identity is a label, never block logging
+            ident = ""
+        self.session_log = ConsoleLog.open(
+            log_dir=self._log_dir,
+            identity=ident,
+            programs=[p.name for p in self._programs],
+        )
 
     def on_mount(self) -> None:
+        self._open_session_log()
         # Restore the operator's saved theme (5.1 finding #2.3: the command
         # palette's theme choice didn't persist across sessions).
         from otaman_cli.console.prefs import load_prefs
@@ -806,6 +861,15 @@ class OtamanConsole(App):
             except Exception:  # noqa: BLE001 - unknown/removed theme → default
                 pass
         self.push_screen(ProgramPickerScreen(self._programs))
+
+    def push_screen(self, screen, *args, **kwargs):
+        # Journal every screen transition into the session log (spec-agent
+        # addendum 3: the full-session trace). Cosmetic-only — never block nav.
+        log = getattr(self, "session_log", None)
+        if log is not None:
+            name = screen if isinstance(screen, str) else type(screen).__name__
+            log.event("screen", to=name)
+        return super().push_screen(screen, *args, **kwargs)
 
     def on_key(self, event) -> None:
         # Keypress echo (Roman: "react on key pressing visually to confirm keys
