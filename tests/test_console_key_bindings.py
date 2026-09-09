@@ -25,6 +25,7 @@ def _screen_classes():
         ArtifactBrowserScreen,
         ChangeDetailScreen,
         ChangeReviewScreen,
+        HomeScreen,
         LifecycleScreen,
         PendingListScreen,
         ProgramPickerScreen,
@@ -34,6 +35,7 @@ def _screen_classes():
 
     return [
         ProgramPickerScreen,
+        HomeScreen,
         PendingListScreen,
         ProposalScreen,
         LifecycleScreen,
