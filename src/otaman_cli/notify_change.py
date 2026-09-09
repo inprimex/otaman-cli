@@ -363,7 +363,7 @@ def notify_change(project_root: Path, change_name: str) -> tuple[int, dict[str, 
 
 def cmd_notify_change(args: list[str]) -> int:
     """`otaman notify-change <change-name>` CLI entry point (task 1.1)."""
-    from otaman_cli.identity import find_project_root
+    from otaman_cli.identity import find_project_root, not_in_project_message
     from otaman_cli.main import UI
 
     if not args:
@@ -376,7 +376,7 @@ def cmd_notify_change(args: list[str]) -> int:
 
     root = find_project_root()
     if root is None:
-        UI.error("Not in an otaman project (no platform.yaml found)")
+        UI.error(not_in_project_message())
         return 1
 
     rc, summary = notify_change(root, change_name)

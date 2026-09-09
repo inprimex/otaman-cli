@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI
 from otaman_cli.registries.loader import (
     resolve_registry_path,
@@ -81,7 +81,7 @@ def _ctx(root: Path):
 def cmd_add(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     actor, roles, _ = _ctx(root)
     authz_advisory("persona.add", actor, roles)
 
@@ -121,7 +121,7 @@ def cmd_add(args: dict[str, Any]) -> int:
 def cmd_list(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     loaded = _load(root)
     if loaded is None:
         return 1
@@ -156,7 +156,7 @@ def cmd_list(args: dict[str, Any]) -> int:
 def cmd_show(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     loaded = _load(root)
     if loaded is None:
         return 1
@@ -180,7 +180,7 @@ def cmd_show(args: dict[str, Any]) -> int:
 def cmd_retire(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     actor, roles, _ = _ctx(root)
     authz_advisory("persona.retire", actor, roles)
 

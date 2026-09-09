@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI, C, _normalize_ce_platform_yaml_for_validation, run_script
 
 
@@ -37,7 +37,7 @@ def cmd_owner_paths(args: list[str]) -> int:
 
     root = find_project_root()
     if root is None:
-        UI.error("Not in an otaman project (no platform.yaml found)")
+        UI.error(not_in_project_message())
         return 1
 
     print("  Validating owner-paths in platform.yaml...")
@@ -177,7 +177,7 @@ def cmd_validate_messages(args: list[str]) -> int:
     """Validate bus message files."""
     root = find_project_root()
     if not root:
-        UI.error("Not in an otaman project")
+        UI.error(not_in_project_message())
         return 1
 
     UI.header("Bus Message Validation")
@@ -204,7 +204,7 @@ def cmd_compliance(args: list[str]) -> int:
 
     root = find_project_root()
     if not root:
-        UI.error("Not in an otaman project")
+        UI.error(not_in_project_message())
         return 1
     result = run_script("compliance-report.py", str(root), "--format", fmt)
     return result.returncode

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import sys
 
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI
 from otaman_cli.project._platform import (
     find_repo,
@@ -29,7 +29,7 @@ def cmd_project_remove(name: str, *, delete_remote: bool = False) -> int:
         return 1
     root = find_project_root()
     if root is None:
-        UI.error("Not in an otaman project")
+        UI.error(not_in_project_message())
         return 1
     try:
         data = load_platform_yaml(root)

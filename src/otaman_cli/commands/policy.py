@@ -42,7 +42,7 @@ delegation / drift per repo) — lives in ``commands/doctor.py``.
 from __future__ import annotations
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI, C
 
 DEFAULT_PACK = "git"
@@ -63,7 +63,7 @@ def _load_context() -> tuple[object | None, dict]:
 
     root = find_project_root()
     if root is None:
-        UI.error("Not in an otaman project (no platform.yaml in cwd or ancestors)")
+        UI.error(not_in_project_message())
         return None, {}
     pf = root / "platform.yaml"
     try:

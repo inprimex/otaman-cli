@@ -299,3 +299,44 @@ def resolve_agent_identity(
 
     # 6. Nothing found
     return None
+
+
+def _has_nearby_git_repos(cwd: Path) -> bool:
+    """Whether *cwd* or a sibling directory is a git repo — the signal that
+    ``otaman scan`` (adopt existing repos) fits better than ``otaman init``."""
+    if (cwd / ".git").is_dir():
+        return True
+    parent = cwd.parent
+    if parent == cwd:
+        return False
+    try:
+        for child in parent.iterdir():
+            if child != cwd and child.is_dir() and (child / ".git").is_dir():
+                return True
+    except OSError:
+        pass
+    return False
+
+
+def not_in_project_message(cwd: Path | None = None) -> str:
+    """cli-not-in-project-guidance 1.1 — the single actionable message shown when
+    a command can't find an otaman project.
+
+    States WHAT was searched (no platform.yaml in cwd or any ancestor) and the
+    recommended next step BY FOLDER SHAPE: ``otaman scan`` when git repos are
+    present nearby (adopt them), else ``otaman init`` (fresh wizard). One helper,
+    one helper, one message — the bare error string survives nowhere else
+    (grep-guarded), so every surface gives the human the same next step
+    instead of a dead-end error.
+    """
+    cwd = cwd or Path.cwd()
+    lines = [f"Not in an otaman project — no platform.yaml in {cwd} or any parent directory."]
+    if _has_nearby_git_repos(cwd):
+        lines.append(
+            "  Existing git repo(s) detected here — run `otaman scan .` to adopt "
+            "them and draft a config."
+        )
+    else:
+        lines.append("  Start a new project with `otaman init` (interactive setup wizard).")
+    lines.append("  Then re-run this command from inside the project.")
+    return "\n".join(lines)

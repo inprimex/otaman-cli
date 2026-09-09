@@ -14,7 +14,7 @@ except ImportError:
     PmAdapterCapabilities = None  # type: ignore[assignment]
 
 # Module-level import so tests can patch otaman_cli.pm.cmd_init.find_project_root
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_project_root, not_in_project_message
 
 
 def cmd_pm_init(args: list[str]) -> int:
@@ -78,7 +78,7 @@ def cmd_pm_init(args: list[str]) -> int:
     UI.action("Step 1: Read + validate config")
     root = find_project_root()
     if root is None:
-        UI.error("Not in an otaman project (no platform.yaml found)")
+        UI.error(not_in_project_message())
         return 1
 
     platform_yaml_path = root / "platform.yaml"

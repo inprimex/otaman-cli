@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.identity import find_project_root, resolve_agent_identity
+from otaman_cli.identity import find_project_root, not_in_project_message, resolve_agent_identity
 from otaman_cli.main import UI, C, _get_agent_ack_status, _resolve_bus_paths, run_script
 
 
@@ -77,7 +77,7 @@ def cmd_set_status(args: list[str]) -> int:
 
     root = find_project_root()
     if not root:
-        UI.error("Not in an otaman project")
+        UI.error(not_in_project_message())
         return 1
 
     agent = resolve_agent_identity(root, explicit=ns.explicit_agent)
@@ -179,7 +179,7 @@ def cmd_fleet_status(args: list[str]) -> int:
 
     root = find_project_root()
     if not root:
-        UI.error("Not in an otaman project")
+        UI.error(not_in_project_message())
         return 1
 
     if not is_agent_presence_enabled(root):
@@ -290,7 +290,7 @@ def _cmd_status_repos(args: list[str]) -> int:
     """Show cross-repo status dashboard. Also runs silent bus cleanup."""
     root = find_project_root()
     if not root:
-        UI.error("Not in an otaman project (no platform.yaml or .agents/ found)")
+        UI.error(not_in_project_message())
         return 1
 
     script_args = [str(root)]
@@ -420,7 +420,7 @@ def _cmd_whoami_for_path(raw_path: str) -> int:
 
     root = find_project_root()
     if root is None:
-        UI.error("Not in an otaman project (no platform.yaml found)")
+        UI.error(not_in_project_message())
         return 1
 
     target = _Path(raw_path)

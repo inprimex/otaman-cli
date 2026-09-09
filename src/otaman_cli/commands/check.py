@@ -15,7 +15,7 @@ from pathlib import Path
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.commands.bus_messaging import _file_is_for_agent
 from otaman_cli.commands.status_cluster import cmd_fleet_status
-from otaman_cli.identity import find_project_root, resolve_agent_identity
+from otaman_cli.identity import find_project_root, not_in_project_message, resolve_agent_identity
 from otaman_cli.main import UI, C, _get_agent_ack_status, _resolve_bus_paths
 
 
@@ -40,7 +40,7 @@ def cmd_check(args: list[str]) -> int:
 
     root = find_project_root()
     if not root:
-        UI.error("Not in an otaman project")
+        UI.error(not_in_project_message())
         return 1
 
     # Determine agent: explicit arg → CWD→repo→owner → .agents/current-agent
