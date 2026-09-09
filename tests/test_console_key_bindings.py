@@ -22,6 +22,7 @@ pytestmark = pytest.mark.skipif(not _HAS_TEXTUAL, reason="needs the 'console' ex
 
 def _screen_classes():
     from otaman_cli.console.app import (
+        AddProjectScreen,
         ArtifactBrowserScreen,
         ChangeDetailScreen,
         ChangeReviewScreen,
@@ -46,6 +47,7 @@ def _screen_classes():
         TreeScreen,
         SetupScreen,
         SetupResultScreen,
+        AddProjectScreen,
         PendingListScreen,
         ProposalScreen,
         LifecycleScreen,

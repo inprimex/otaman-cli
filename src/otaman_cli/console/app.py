@@ -291,6 +291,7 @@ class SetupScreen(Screen):
     against the picked program and surfaces its result."""
 
     BINDINGS = [
+        Binding("a", "add_project", "Add project", priority=True),
         Binding("escape", "back", "Back", priority=True),
         Binding("q", "app.quit", "Quit", priority=True),
     ]
@@ -304,7 +305,7 @@ class SetupScreen(Screen):
         yield _identity_badge_widget(self.program.root)
         yield _mode_banner(
             f"Setup — administration · {self.program.name}",
-            "enter run · esc back · q quit  (visibly shells out to otaman verbs)",
+            "enter run · a add project · esc back · q quit  (shells out to otaman verbs)",
         )
         yield ListView(id="setup-list")
         yield Footer()
@@ -320,6 +321,60 @@ class SetupScreen(Screen):
         item = event.item
         if isinstance(item, _SetupItem):
             self.app.push_screen(SetupResultScreen(self.program, tuple(item.verb.argv)))
+
+    def action_add_project(self) -> None:
+        self.app.push_screen(AddProjectScreen(self.program))
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
+class AddProjectScreen(Screen):
+    """Register a project without leaving the console (D4/S7): collect the repo
+    path + owner, then visibly shell out `otaman project assign <path> --owner
+    <agent>` and surface the result. A form over the tested verb — no new
+    administration logic in the TUI."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
+    ]
+
+    def __init__(self, program: Program) -> None:
+        super().__init__()
+        self.program = program
+
+    def compose(self) -> ComposeResult:
+        yield _header()
+        yield _identity_badge_widget(self.program.root)
+        yield _mode_banner(
+            f"Setup — add a project · {self.program.name}",
+            "type path + owner, Enter to run `otaman project assign` · esc back · q quit",
+        )
+        yield Static("Repo path (relative to the program, e.g. ../my-repo):", markup=False)
+        yield Input(placeholder="../my-repo", id="proj-path")
+        yield Static("Owner agent (e.g. backend-agent):", markup=False)
+        yield Input(placeholder="backend-agent", id="proj-owner")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.query_one("#proj-path", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        path = self.query_one("#proj-path", Input).value.strip()
+        owner = self.query_one("#proj-owner", Input).value.strip()
+        if not path:
+            self.query_one("#proj-path", Input).focus()
+            self.app.notify("Repo path is required.", severity="error", timeout=4)
+            return
+        if not owner:
+            self.query_one("#proj-owner", Input).focus()
+            self.app.notify("Owner agent is required.", severity="error", timeout=4)
+            return
+        # visible shell-out of the tested verb chain (S7 scenario)
+        self.app.push_screen(
+            SetupResultScreen(self.program, ("project", "assign", path, "--owner", owner))
+        )
 
     def action_back(self) -> None:
         self.app.pop_screen()
@@ -1375,6 +1430,7 @@ class OtamanConsole(App):
 
 
 __all__ = [
+    "AddProjectScreen",
     "HomeScreen",
     "InboxMessageScreen",
     "InboxScreen",
