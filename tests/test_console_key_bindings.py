@@ -26,6 +26,8 @@ def _screen_classes():
         ChangeDetailScreen,
         ChangeReviewScreen,
         HomeScreen,
+        InboxMessageScreen,
+        InboxScreen,
         LifecycleScreen,
         PendingListScreen,
         ProgramPickerScreen,
@@ -36,6 +38,8 @@ def _screen_classes():
     return [
         ProgramPickerScreen,
         HomeScreen,
+        InboxScreen,
+        InboxMessageScreen,
         PendingListScreen,
         ProposalScreen,
         LifecycleScreen,

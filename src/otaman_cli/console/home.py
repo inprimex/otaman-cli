@@ -61,37 +61,11 @@ def _load_cfg(program: Program) -> dict:
 
 
 def _count_inbox(program: Program) -> int:
-    """Active bus messages addressed to the human that are NOT decisions (those
-    are the queue) — the messages-to-human inbox count. The full read view is
-    task 1.2; this is the Home badge. Reuses the bounded-head bus parse."""
-    import yaml
+    """The messages-to-human inbox count (badge). Same reader the full inbox view
+    (task 1.2) uses, so Home and the inbox screen never disagree."""
+    from otaman_cli.console.inbox import list_inbox_messages
 
-    from otaman_cli.console.bus import _QUEUE_TYPES, _frontmatter_head
-
-    active_dir, acks_dir = program.bus_paths()
-    if not active_dir.is_dir():
-        return 0
-    try:
-        acked = {p.name for p in acks_dir.glob("*.human.ack")} if acks_dir.is_dir() else set()
-    except OSError:
-        acked = set()
-    n = 0
-    for f in active_dir.glob("*.md"):
-        fm_text = _frontmatter_head(f)
-        if fm_text is None or "human" not in fm_text:
-            continue
-        try:
-            fm = yaml.safe_load(fm_text)
-        except yaml.YAMLError:
-            continue
-        if not isinstance(fm, dict) or fm.get("to") != "human":
-            continue
-        if fm.get("type") in _QUEUE_TYPES or fm.get("x-cc"):
-            continue  # decisions belong to the queue; CC copies aren't the primary
-        if f"{f.stem}.human.ack" in acked:
-            continue
-        n += 1
-    return n
+    return len(list_inbox_messages(program))
 
 
 def _queue_counts(program: Program) -> tuple[int, int]:
