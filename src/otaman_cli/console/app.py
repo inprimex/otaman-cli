@@ -683,9 +683,6 @@ class ArtifactBrowserScreen(Screen):
         yield ListView(id="authored-list")
         yield Footer()
 
-    def on_mount(self) -> None:
-        self._load()
-
     def action_refresh(self) -> None:
         self._load()
 
@@ -693,7 +690,13 @@ class ArtifactBrowserScreen(Screen):
         self.app.pop_screen()
 
     def on_screen_resume(self) -> None:
-        self._load()  # returning from a review refreshes the authored list
+        # SINGLE load path: ScreenResume fires on the initial push AND on every
+        # return from a review, so this covers both. Loading ALSO from on_mount
+        # double-populated the list on first show — ListView.append adds children
+        # synchronously while clear() is deferred, so two loads in one burst
+        # briefly stacked to 2 items (the intermittent Windows `assert 2 == 1`
+        # in test_browser_lists_authored_changes). One trigger, no race.
+        self._load()
 
     def _load(self) -> None:
         from otaman_cli.console.artifacts import list_authored_changes
