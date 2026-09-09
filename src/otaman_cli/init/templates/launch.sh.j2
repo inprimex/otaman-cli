@@ -3,7 +3,56 @@
 # Self-contained: depends only on `otaman` CLI + `tmux`. No otaman-plugin runtime calls.
 
 set -u
+{% if connection.mode == "mesh" %}
+# ========== mesh: runner-mediated spawn (Path B — no SSH, no tmux) ==========
+command -v curl   >/dev/null 2>&1 || { echo "ERROR: curl is required for mesh mode" >&2; exit 1; }
+command -v otaman >/dev/null 2>&1 || { echo "ERROR: otaman is required" >&2; exit 1; }
 
+RUNNER_BASE="{{ connection.mesh.http_base }}"
+
+# Token is read at RUNTIME from the token source — NEVER embedded in this file.
+TOKEN_SRC="{{ connection.mesh.token_source or 'OTAMAN_RUNNER_TOKEN' }}"
+if [ -f "$TOKEN_SRC" ]; then
+  RUNNER_TOKEN="$(grep -E '^OTAMAN_RUNNER_TOKEN=' "$TOKEN_SRC" | tail -1 | cut -d= -f2- | tr -d '"')"
+else
+  RUNNER_TOKEN="${!TOKEN_SRC:-}"
+fi
+if [ -z "$RUNNER_TOKEN" ]; then
+  echo "ERROR: runner token not found (source: $TOKEN_SRC) — it is never stored in this launcher." >&2
+  echo "  set the token (env var or secrets.env line OTAMAN_RUNNER_TOKEN=...) before running." >&2
+  exit 1
+fi
+
+started=0
+failed=0
+spawn_agent() {
+  local agent="$1" repo="$2" tmp code
+  tmp="$(mktemp)"
+  code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST "$RUNNER_BASE/spawn" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $RUNNER_TOKEN" \
+    --data "{\"agent\":\"$agent\",\"repo\":\"$repo\",\"mode\":\"interactive\"}" 2>/dev/null || echo 000)"
+  if [ "$code" = "200" ] || [ "$code" = "201" ]; then
+    echo "  [ok]   $agent — spawned via runner ($RUNNER_BASE)"
+    started=$((started+1))
+  else
+    echo "  [fail] $agent — runner /spawn returned ${code:-unreachable}" >&2
+    sed 's/^/         /' "$tmp" >&2 2>/dev/null || true
+    failed=$((failed+1))
+  fi
+  rm -f "$tmp"
+}
+
+echo "Spawning otaman agents via runner $RUNNER_BASE"
+{% for agent in agents %}{% if agent.enabled %}
+spawn_agent "{{ agent.name }}" "{{ agent_repos.get(agent.name, '') }}"
+{% endif %}{% endfor %}
+
+echo
+echo "Summary: spawned=$started failed=$failed"
+[ "$failed" -eq 0 ] && [ "$started" -gt 0 ] || exit 1
+exit 0
+{% else %}
 # ---------- dependency check ----------
 missing=()
 command -v tmux >/dev/null 2>&1 || missing+=("tmux")
@@ -137,3 +186,4 @@ fi
 echo "Attach: tmux attach -t $PREFIX-{{ _enabled[0] }}"
 {% endif %}
 exit 0
+{% endif %}

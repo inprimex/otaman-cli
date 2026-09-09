@@ -52,6 +52,48 @@ class SSHParams(BaseModel):
         return v
 
 
+class MeshParams(BaseModel):
+    """Runner-mediated (Path B) spawn parameters. Required when
+    `connection.mode == 'mesh'` (mirror of the ssh validator, init-wizard-mesh-mode
+    D2). The launcher spawns via the runner HTTP API at a network-reachable
+    endpoint — no SSH, no tmux.
+
+    Provide EITHER ``runner_uri`` (``runner://host:port``) OR ``host`` + ``port``
+    (assembled into that URI) — both is a validation error. ``token_source`` names
+    where the launcher reads the runner token at runtime; the value is NEVER
+    embedded in the generated launcher (default: ``OTAMAN_RUNNER_TOKEN`` env)."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    runner_uri: str | None = Field(default=None, alias="runner_uri")
+    host: str | None = None
+    port: int | None = None
+    token_source: str | None = Field(default=None, alias="token_source")
+
+    @model_validator(mode="after")
+    def _one_of_uri_or_hostport(self) -> MeshParams:
+        has_uri = bool(self.runner_uri and self.runner_uri.strip())
+        has_hostport = bool(self.host and self.host.strip()) and self.port is not None
+        if has_uri and (self.host or self.port is not None):
+            raise ValueError("connection.mesh: provide runner_uri OR host+port, not both")
+        if not has_uri and not has_hostport:
+            raise ValueError("connection.mesh requires runner_uri, or both host and port")
+        return self
+
+    @property
+    def resolved_uri(self) -> str:
+        """The canonical ``runner://host:port`` form."""
+        if self.runner_uri:
+            return self.runner_uri
+        return f"runner://{self.host}:{self.port}"
+
+    @property
+    def http_base(self) -> str:
+        """The HTTP base URL the launcher POSTs /spawn to (``runner://`` → ``http://``)."""
+        uri = self.resolved_uri
+        return "http://" + uri.removeprefix("runner://")
+
+
 class Connection(BaseModel):
     """connection: block of launch-settings.yaml."""
 
@@ -59,11 +101,20 @@ class Connection(BaseModel):
 
     mode: ConnectionMode = "local"
     ssh: SSHParams | None = None
+    mesh: MeshParams | None = None
 
     @model_validator(mode="after")
     def _ssh_required_when_mode_is_ssh(self) -> Connection:
         if self.mode == "ssh" and self.ssh is None:
             raise ValueError("connection.mode='ssh' requires connection.ssh.{host,user} to be set")
+        return self
+
+    @model_validator(mode="after")
+    def _mesh_required_when_mode_is_mesh(self) -> Connection:
+        if self.mode == "mesh" and self.mesh is None:
+            raise ValueError(
+                "connection.mode='mesh' requires connection.mesh (runner_uri or host+port)"
+            )
         return self
 
 
@@ -163,6 +214,7 @@ __all__ = [
     "ConnectionMode",
     "TmuxLayout",
     "SSHParams",
+    "MeshParams",
     "Connection",
     "AgentEntry",
     "TmuxLayoutConfig",
