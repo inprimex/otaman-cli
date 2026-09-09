@@ -51,10 +51,35 @@ def program(tmp_path):
 
 def test_summary_reads_platform_panels(program):
     s = build_home_summary(program)
-    assert s.processes_enabled == ["outcomes"]  # disabled ones excluded
+    # processes come from platform_ext (F1): outcomes enabled, solutions disabled,
+    # personas defaults enabled — NOT a raw `processes:` parse.
+    assert s.processes_enabled == ["outcomes", "personas"]
     assert s.team_agents == 2 and s.team_humans == 1
     assert s.skills == 3  # profile + 2 extra
     assert s.policy == "warn"  # default enforcement
+
+
+def test_processes_consume_platform_ext_not_raw_parse(tmp_path):
+    # F1 regression (gate 3.1): a program with NO `processes:` block but a set
+    # spec_policy.process.level must show processes (platform_ext defaults all
+    # enabled) and the level — never "none", which is what the old raw parse said.
+    root = tmp_path / "meta"
+    (root / ".agents" / "bus" / "active" / "acks").mkdir(parents=True)
+    root.joinpath("platform.yaml").write_text(
+        "project: demo\nversion: '1.0'\nrepos: []\nspec_policy:\n  process:\n    level: outcomes\n",
+        encoding="utf-8",
+    )
+    s = build_home_summary(bus.Program(name="demo", root=root))
+    assert s.processes_enabled == ["outcomes", "solutions", "personas"]  # platform_ext defaults
+    assert s.process_level == "outcomes"  # the human-set signal is surfaced
+    body = HomeScreenBodyText(s)
+    assert "process level: outcomes" in body and "none enabled" not in body
+
+
+def HomeScreenBodyText(summary):
+    from otaman_cli.console.app import HomeScreen
+
+    return HomeScreen._body_text(summary)
 
 
 def test_summary_is_safe_on_empty_program(tmp_path):
@@ -63,9 +88,11 @@ def test_summary_is_safe_on_empty_program(tmp_path):
     root.joinpath("platform.yaml").write_text("project: bare\nversion: '1.0'\nrepos: []\n", "utf-8")
     s = build_home_summary(bus.Program(name="bare", root=root))
     # every stat degrades to a sentinel, never raises (presence default varies by
-    # env; the invariant is no records → empty fleet map)
+    # env; the invariant is no records → empty fleet map). Processes come from
+    # platform_ext, which defaults all three enabled even with no config (F1).
     assert s.decisions_total == 0 and s.changes_total == 0
-    assert s.processes_enabled == [] and s.fleet == {}
+    assert s.fleet == {}
+    assert s.processes_enabled == ["outcomes", "solutions", "personas"]
 
 
 # ---------------------------------------------------------------------------

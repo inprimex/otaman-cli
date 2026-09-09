@@ -45,6 +45,7 @@ class HomeSummary:
     secrets: int = 0
     skills: int = 0
     policy: str = "warn"
+    process_level: str | None = None  # human-set spec_policy.process.level (D7)
 
     @property
     def decisions_total(self) -> int:
@@ -142,15 +143,21 @@ def build_home_summary(program: Program) -> HomeSummary:
     except Exception:  # noqa: BLE001
         inbox = 0
 
-    program_block = cfg.get("program") or {}
-    procs = program_block.get("processes") or {}
-    if isinstance(procs, dict):
+    # PROCESSES — consume platform_ext (the SAME reader the tree/registries stack
+    # uses via tree.registries_enabled), NEVER re-parse the raw `processes:` key.
+    # F1 (gate 3.1): the raw parse disagreed with platform_ext live — a program
+    # with no `processes:` block but spec_policy.process.level=outcomes showed
+    # "none" here while the tree treated outcomes as enabled. One derivation.
+    try:
+        from otaman_cli.registries.platform_ext import load_program_extensions
+
+        procs = load_program_extensions(program.root / "platform.yaml").processes
         processes = [
-            n for n, v in procs.items() if (v.get("enabled") if isinstance(v, dict) else bool(v))
+            n
+            for n in ("outcomes", "solutions", "personas")
+            if getattr(getattr(procs, n, None), "enabled", False)
         ]
-    elif isinstance(procs, list):
-        processes = list(procs)
-    else:
+    except Exception:  # noqa: BLE001
         processes = []
 
     try:
@@ -184,10 +191,14 @@ def build_home_summary(program: Program) -> HomeSummary:
         else 0
     )
 
+    policy = "warn"
+    process_level = None
     try:
         from otaman_cli.console.lifecycle import _load_policy
 
-        policy = _load_policy(program).enforcement
+        sp = _load_policy(program)
+        policy = sp.enforcement
+        process_level = sp.process_level  # the human-set signal (D7)
     except Exception:  # noqa: BLE001
         policy = "warn"
 
@@ -208,6 +219,7 @@ def build_home_summary(program: Program) -> HomeSummary:
         secrets=secrets,
         skills=skills,
         policy=policy,
+        process_level=process_level,
     )
 
 
