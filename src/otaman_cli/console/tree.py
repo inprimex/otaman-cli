@@ -43,6 +43,7 @@ class TreeNode:
     closed: bool = False
     dormant: bool = False
     marker: str = ""  # e.g. ★ for the chosen solution
+    pm_sync_id: str | None = None  # linked issue/ticket id (S10)
     children: list[TreeNode] = field(default_factory=list)
 
     @property
@@ -52,10 +53,14 @@ class TreeNode:
             bits.append(self.title)
         line = " ".join(bits)
         tail = []
+        if self.priority:
+            tail.append(self.priority)
         if self.status:
             tail.append(f"[{self.status}]")
         if self.marker:
             tail.append(self.marker)
+        if self.pm_sync_id:
+            tail.append(f"#{self.pm_sync_id}")
         if self.blocked_by:
             tail.append(f"BLOCKED by {self.blocked_by}")
         return f"{line}   {' '.join(tail)}".rstrip()
@@ -151,6 +156,16 @@ def _change_outcome_id(program: Program, change_name: str) -> str | None:
 
 
 def _change_node(program: Program, row, blocked: dict[str, str]) -> TreeNode:
+    pm_id = None
+    try:
+        from otaman_cli.console.lifecycle import _specs_changes_dir
+        from otaman_cli.console.metadata import read_pm_sync
+
+        changes = _specs_changes_dir(program)
+        if changes is not None:
+            pm_id, _ = read_pm_sync(changes / row.name)
+    except Exception:  # noqa: BLE001 - pm-sync id is decorative on the row
+        pm_id = None
     return TreeNode(
         kind="change",
         id=row.name,
@@ -160,6 +175,7 @@ def _change_node(program: Program, row, blocked: dict[str, str]) -> TreeNode:
         next_actor=row.next_actor,
         closed=(row.triage == "absorbed"),
         dormant=(row.triage == "dormant"),
+        pm_sync_id=pm_id,
     )
 
 
@@ -215,6 +231,7 @@ def build_artifact_tree(program: Program, *, show_closed: bool = False) -> list[
                 )
         for name, oid in change_outcome.items():
             if oid == outcome.id:
+                change_nodes[name].priority = str(outcome.priority)  # inherited (S9)
                 node.children.append(change_nodes[name])
                 linked_changes.add(name)
         node.children = [c for c in node.children if _visible(c)]
