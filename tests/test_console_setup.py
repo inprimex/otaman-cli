@@ -135,3 +135,72 @@ def test_setup_verb_runs_and_shows_output(program, monkeypatch):
             await app.action_quit()
 
     asyncio.run(go())
+
+
+@_textual
+def test_add_project_shells_out_assign(program, monkeypatch):
+    # the 3.1 scenario: register a project without leaving the console → the
+    # console visibly runs `otaman project assign <path> --owner <agent>`.
+    seen = {}
+
+    def _run(cmd, **kw):
+        seen["cmd"] = cmd
+        return SimpleNamespace(returncode=0, stdout="assigned ../my-repo\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _run)
+    from textual.widgets import Input
+
+    from otaman_cli.console.app import (
+        AddProjectScreen,
+        OtamanConsole,
+        SetupResultScreen,
+        SetupScreen,
+    )
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(SetupScreen(program))
+            await pilot.pause()
+            await app.screen.run_action("add_project")
+            await pilot.pause()
+            assert isinstance(app.screen, AddProjectScreen)
+            app.screen.query_one("#proj-path", Input).value = "../my-repo"
+            app.screen.query_one("#proj-owner", Input).value = "backend-agent"
+            app.screen.query_one("#proj-owner", Input).focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert isinstance(app.screen, SetupResultScreen)
+            # the tested verb chain ran with the collected args
+            assert seen["cmd"][-4:] == ["project", "assign", "../my-repo", "--owner"] or seen[
+                "cmd"
+            ][-5:] == ["project", "assign", "../my-repo", "--owner", "backend-agent"]
+            assert "assigned" in app.screen._result.output
+            await app.action_quit()
+
+    asyncio.run(go())
+
+
+@_textual
+def test_add_project_requires_both_fields(program):
+    from textual.widgets import Input
+
+    from otaman_cli.console.app import AddProjectScreen, OtamanConsole
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(AddProjectScreen(program))
+            await pilot.pause()
+            # submit with empty fields → stays on the form (no shell-out)
+            app.screen.query_one("#proj-path", Input).focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, AddProjectScreen)
+            await app.action_quit()
+
+    asyncio.run(go())
