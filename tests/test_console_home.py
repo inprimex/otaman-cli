@@ -172,10 +172,11 @@ def test_jump_keys_land_on_real_screens(program, key, target):
 
 
 @_textual
-@pytest.mark.parametrize("key", ["tree", "setup"])
+@pytest.mark.parametrize("key", ["setup"])
 def test_reserved_keys_dispatch_without_dead_key(program, key):
-    # t (wave 1.3) and s (wave 2) aren't built yet — the key must still dispatch
-    # with a visible ack and NOT navigate away or crash (no dead advertised key).
+    # s (wave 2) isn't built yet — the key must still dispatch with a visible ack
+    # and NOT navigate away or crash (no dead advertised key). (t now opens the
+    # real tree — covered in test_console_tree.)
     from otaman_cli.console.app import HomeScreen, OtamanConsole
 
     async def go():

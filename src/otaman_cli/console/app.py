@@ -26,6 +26,7 @@ from textual.widgets import (
     ListView,
     MarkdownViewer,
     Static,
+    Tree,
 )
 
 from otaman_cli.console.bus import Program, Proposal, discover_programs, list_pending_proposals
@@ -268,9 +269,7 @@ class HomeScreen(Screen):
         self.app.push_screen(InboxScreen(self.program))
 
     def action_tree(self) -> None:
-        # Reserved: the linked artifact tree lands in wave 1 task 1.3. The key
-        # still dispatches with a visible ack (no dead advertised keys, D3).
-        self.app.notify("Artifact tree lands in wave 1 (task 1.3).", timeout=5)
+        self.app.push_screen(TreeScreen(self.program))
 
     def action_setup(self) -> None:
         self.app.notify("Setup lands in wave 2.", timeout=5)
@@ -342,6 +341,109 @@ class InboxScreen(Screen):
         item = event.item
         if isinstance(item, _InboxItem):
             self.app.push_screen(InboxMessageScreen(self.program, item.message))
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
+_STATUS_STYLE = {
+    "Done": "green",
+    "Complete": "green",
+    "Approved": "green",
+    "complete-unarchived": "green",
+    "Discarded": "red",
+    "Retired": "dim",
+    "In-Progress": "yellow",
+    "in-flight": "yellow",
+    "Drafting": "yellow",
+    "Considering": "yellow",
+    "Backlog": "cyan",
+}
+
+
+class TreeScreen(Screen):
+    """The linked artifact tree (console-ux-redesign 1.3 / D2): outcomes →
+    solutions → changes as one navigable tree, priority-sorted, status-colored,
+    BLOCKED naming the blocker; outcome-first where registries are enabled,
+    simplified otherwise. Native ↑↓/→/← move+expand+collapse; enter opens the
+    change detail; f toggles closed items (hidden by default). Loads off-thread."""
+
+    BINDINGS = [
+        Binding("f", "toggle_closed", "Show/hide closed", priority=True),
+        Binding("r", "refresh", "Refresh", priority=True),
+        Binding("escape", "back", "Back", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
+    ]
+
+    def __init__(self, program: Program) -> None:
+        super().__init__()
+        self.program = program
+        self._show_closed = False
+
+    def compose(self) -> ComposeResult:
+        yield _header()
+        yield _identity_badge_widget(self.program.root)
+        yield _mode_banner(
+            f"Artifact tree · {self.program.name}",
+            "↑↓ move · → expand · ← collapse · enter open · "
+            "f closed · r refresh · esc back · q quit",
+        )
+        yield Tree("artifacts", id="artifact-tree")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self._reload()
+
+    def action_refresh(self) -> None:
+        self._reload()
+
+    def action_toggle_closed(self) -> None:
+        self._show_closed = not self._show_closed
+        self._reload()
+
+    def _reload(self) -> None:
+        self.run_worker(self._load, thread=True, exclusive=True, group="tree")
+
+    def _load(self) -> None:
+        from otaman_cli.console.tree import build_artifact_tree
+
+        roots = build_artifact_tree(self.program, show_closed=self._show_closed)
+        self.app.call_from_thread(self._populate, roots)
+
+    def _populate(self, roots) -> None:
+        tree = self.query_one("#artifact-tree", Tree)
+        tree.clear()
+        closed_hint = "showing closed" if self._show_closed else "closed hidden"
+        tree.root.set_label(f"artifacts ({closed_hint})")
+        tree.root.expand()
+        if not roots:
+            tree.root.add_leaf("(no artifacts)")
+            return
+        for r in roots:
+            self._add(tree.root, r)
+
+    def _add(self, parent, node) -> None:
+        from rich.text import Text
+
+        label = Text(
+            node.label, style="red" if node.blocked_by else _STATUS_STYLE.get(node.status, "")
+        )
+        if node.children:
+            branch = parent.add(label, data=node, expand=True)
+            for child in node.children:
+                self._add(branch, child)
+        else:
+            parent.add_leaf(label, data=node)
+
+    def on_tree_node_selected(self, event) -> None:
+        node = getattr(event.node, "data", None)
+        if node is None:
+            return
+        if node.kind == "change":
+            self.app.push_screen(ChangeDetailScreen(self.program, node.id))
+        else:
+            extra = f" — BLOCKED by {node.blocked_by}" if node.blocked_by else ""
+            self.app.notify(f"{node.id}: {node.status or node.kind}{extra}", timeout=5)
 
     def action_back(self) -> None:
         self.app.pop_screen()
@@ -1170,4 +1272,5 @@ __all__ = [
     "ProgramPickerScreen",
     "ProposalScreen",
     "ReasonModal",
+    "TreeScreen",
 ]

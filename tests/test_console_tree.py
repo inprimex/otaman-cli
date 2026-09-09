@@ -1,0 +1,201 @@
+"""console-ux-redesign wave 1, task 1.3 — the linked artifact tree (D2/S4).
+
+Outcomes → solutions → changes join into one adaptive tree: outcome-first when
+registries are enabled, simplified (flat changes) otherwise; siblings sort by the
+inherited outcome priority; changes read BLOCKED naming the blocker; closed items
+hide by default with dormant last. The join logic is unit-tested by faking the
+underlying readers (the real registry/lifecycle/status readers are tested
+elsewhere); pilots cover Home `t` → tree and the closed-toggle.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import importlib.util
+from types import SimpleNamespace
+
+import pytest
+
+from otaman_cli.console import bus, tree
+
+_HAS_TEXTUAL = importlib.util.find_spec("textual") is not None
+_textual = pytest.mark.skipif(not _HAS_TEXTUAL, reason="needs the 'console' extra (Textual)")
+
+
+@pytest.fixture
+def program(tmp_path):
+    root = tmp_path / "prog"
+    (root / ".agents" / "bus" / "active" / "acks").mkdir(parents=True)
+    root.joinpath("platform.yaml").write_text(
+        "project: demo\nversion: '1.0'\nrepos: []\n", encoding="utf-8"
+    )
+    return bus.Program(name="demo", root=root)
+
+
+def _row(name, *, state="in-flight", triage="active", next_actor="cli-agent"):
+    return SimpleNamespace(
+        name=name, state=state, stage="authored", triage=triage, next_actor=next_actor
+    )
+
+
+def _fake_registries(monkeypatch, outcomes, solutions_for):
+    monkeypatch.setattr(tree, "registries_enabled", lambda program: True)
+    reg_out = SimpleNamespace(outcomes=outcomes)
+    reg_sol = SimpleNamespace(for_outcome=lambda oid: solutions_for.get(oid, []))
+    monkeypatch.setattr(tree, "_load_registries", lambda program: (reg_out, reg_sol))
+
+
+def _outcome(oid, *, status="Approved", priority="P1", chosen=None, incr="do the thing"):
+    return SimpleNamespace(
+        id=oid,
+        status=status,
+        priority=priority,
+        chosen_solution=chosen,
+        statement=SimpleNamespace(incremental_outcome=incr),
+    )
+
+
+def _solution(sid, *, status="Considering", desc="a way"):
+    return SimpleNamespace(id=sid, status=status, description=desc)
+
+
+# ---------------------------------------------------------------------------
+# pure helpers
+
+
+def test_extract_outcome_id_from_free_text():
+    assert tree._extract_outcome_id("JTBD-117 lineage (interactive surfaces)") == "JTBD-117"
+    assert tree._extract_outcome_id("JTBD-99-102 (pack)") == "JTBD-99-102"
+    assert tree._extract_outcome_id("no id here") is None
+    assert tree._extract_outcome_id(None) is None
+
+
+# ---------------------------------------------------------------------------
+# simplified mode (registries absent)
+
+
+def test_simplified_flat_changes_when_no_registries(program, monkeypatch):
+    monkeypatch.setattr(tree, "registries_enabled", lambda program: False)
+    monkeypatch.setattr(tree, "_change_rows", lambda program: [_row("alpha"), _row("beta")])
+    monkeypatch.setattr(tree, "_blocked_map", lambda program: {})
+    roots = tree.build_artifact_tree(program)
+    assert [n.id for n in roots] == ["alpha", "beta"]
+    assert all(n.kind == "change" for n in roots)  # no outcome scaffolding
+
+
+def test_absorbed_hidden_by_default_dormant_last(program, monkeypatch):
+    monkeypatch.setattr(tree, "registries_enabled", lambda program: False)
+    monkeypatch.setattr(
+        tree,
+        "_change_rows",
+        lambda program: [_row("a"), _row("gone", triage="absorbed"), _row("z", triage="dormant")],
+    )
+    monkeypatch.setattr(tree, "_blocked_map", lambda program: {})
+    ids = [n.id for n in tree.build_artifact_tree(program)]
+    assert ids == ["a", "z"]  # absorbed hidden, dormant sorts last
+    ids_all = [n.id for n in tree.build_artifact_tree(program, show_closed=True)]
+    assert "gone" in ids_all  # show_closed re-includes it
+
+
+# ---------------------------------------------------------------------------
+# outcome-first linked mode
+
+
+def test_outcome_first_links_and_priority_sort(program, monkeypatch):
+    _fake_registries(
+        monkeypatch,
+        outcomes=[
+            _outcome("JTBD-1", priority="P1", chosen="SOL-1"),
+            _outcome("JTBD-2", priority="P0"),
+        ],
+        solutions_for={"JTBD-1": [_solution("SOL-1"), _solution("SOL-9", status="Discarded")]},
+    )
+    monkeypatch.setattr(tree, "_change_rows", lambda program: [_row("impl-1"), _row("orphan-x")])
+    monkeypatch.setattr(
+        tree,
+        "_change_outcome_id",
+        lambda program, name: "JTBD-1" if name == "impl-1" else None,
+    )
+    monkeypatch.setattr(tree, "_blocked_map", lambda program: {})
+
+    roots = tree.build_artifact_tree(program)
+    # P0 outcome sorts before P1; unlinked group is last
+    assert [r.id for r in roots] == ["JTBD-2", "JTBD-1", "(unlinked changes)"]
+    jtbd1 = next(r for r in roots if r.id == "JTBD-1")
+    kinds = {c.kind for c in jtbd1.children}
+    assert "solution" in kinds and "change" in kinds
+    chosen = next(c for c in jtbd1.children if c.kind == "solution" and c.id == "SOL-1")
+    assert chosen.marker == "★"  # chosen solution flagged
+    assert not any(c.id == "SOL-9" for c in jtbd1.children)  # Discarded hidden by default
+    assert any(c.id == "impl-1" for c in jtbd1.children)  # change linked under its outcome
+    orphan = next(r for r in roots if r.kind == "group")
+    assert [c.id for c in orphan.children] == ["orphan-x"]
+
+
+def test_blocked_by_named_on_change(program, monkeypatch):
+    monkeypatch.setattr(tree, "registries_enabled", lambda program: False)
+    monkeypatch.setattr(tree, "_change_rows", lambda program: [_row("blocked-change")])
+    monkeypatch.setattr(tree, "_blocked_map", lambda program: {"blocked-change": "core-agent"})
+    (node,) = tree.build_artifact_tree(program)
+    assert node.blocked_by == "core-agent"
+    assert "BLOCKED by core-agent" in node.label
+
+
+def test_done_outcome_hidden_by_default(program, monkeypatch):
+    _fake_registries(monkeypatch, outcomes=[_outcome("JTBD-7", status="Done")], solutions_for={})
+    monkeypatch.setattr(tree, "_change_rows", lambda program: [])
+    monkeypatch.setattr(tree, "_change_outcome_id", lambda program, name: None)
+    monkeypatch.setattr(tree, "_blocked_map", lambda program: {})
+    assert tree.build_artifact_tree(program) == []
+    assert [r.id for r in tree.build_artifact_tree(program, show_closed=True)] == ["JTBD-7"]
+
+
+# ---------------------------------------------------------------------------
+# pilots
+
+
+@_textual
+def test_home_t_opens_tree(program):
+    from otaman_cli.console.app import HomeScreen, OtamanConsole, TreeScreen
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(HomeScreen(program))
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await app.screen.run_action("tree")
+            await pilot.pause()
+            assert isinstance(app.screen, TreeScreen)
+            await app.action_quit()
+
+    asyncio.run(go())
+
+
+@_textual
+def test_tree_populates_and_closed_toggle(program, monkeypatch):
+    monkeypatch.setattr(tree, "registries_enabled", lambda program: False)
+    monkeypatch.setattr(tree, "_change_rows", lambda program: [_row("alpha")])
+    monkeypatch.setattr(tree, "_blocked_map", lambda program: {})
+    from textual.widgets import Tree as _TreeWidget
+
+    from otaman_cli.console.app import OtamanConsole, TreeScreen
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(TreeScreen(program))
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            w = app.screen.query_one("#artifact-tree", _TreeWidget)
+            assert len(w.root.children) == 1  # the one change rendered
+            await app.screen.run_action("toggle_closed")  # must not crash
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            assert isinstance(app.screen, TreeScreen)
+            await app.action_quit()
+
+    asyncio.run(go())

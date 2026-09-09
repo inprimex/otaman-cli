@@ -33,6 +33,7 @@ def _screen_classes():
         ProgramPickerScreen,
         ProposalScreen,
         ReasonModal,
+        TreeScreen,
     )
 
     return [
@@ -40,6 +41,7 @@ def _screen_classes():
         HomeScreen,
         InboxScreen,
         InboxMessageScreen,
+        TreeScreen,
         PendingListScreen,
         ProposalScreen,
         LifecycleScreen,
