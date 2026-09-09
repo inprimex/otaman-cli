@@ -145,6 +145,7 @@ class HomeScreen(Screen):
 
     BINDINGS = [
         Binding("d", "decisions", "Decisions", priority=True),
+        Binding("m", "messages", "Messages", priority=True),
         Binding("t", "tree", "Artifact tree", priority=True),
         Binding("l", "lifecycle", "Lifecycle", priority=True),
         Binding("b", "review", "Spec review", priority=True),
@@ -165,7 +166,8 @@ class HomeScreen(Screen):
         yield Static("", id="home-header", markup=False)
         yield _mode_banner(
             f"Home — orientation for {self.program.name}",
-            "d decisions · t tree · l lifecycle · b review · s setup · r refresh · q quit",
+            "d decisions · m messages · t tree · l lifecycle · "
+            "b review · s setup · r refresh · q quit",
         )
         with VerticalScroll(id="home-scroll"):
             yield Static("Loading…", id="home-body", markup=False)
@@ -229,7 +231,7 @@ class HomeScreen(Screen):
         lines.append(f"  {summary.spec_review} awaiting spec review")
         lines.append("")
         lines.append("MESSAGES TO YOU")
-        lines.append(f"  {summary.inbox_count} in inbox   (t… full view: task 1.2)")
+        lines.append(f"  {summary.inbox_count} in inbox   (m to open)")
         lines.append("")
         lines.append("PROGRAM")
         lines.append(f"  {summary.changes_total} active changes")
@@ -262,6 +264,9 @@ class HomeScreen(Screen):
     def action_review(self) -> None:
         self.app.push_screen(ArtifactBrowserScreen(self.program))
 
+    def action_messages(self) -> None:
+        self.app.push_screen(InboxScreen(self.program))
+
     def action_tree(self) -> None:
         # Reserved: the linked artifact tree lands in wave 1 task 1.3. The key
         # still dispatches with a visible ack (no dead advertised keys, D3).
@@ -269,6 +274,111 @@ class HomeScreen(Screen):
 
     def action_setup(self) -> None:
         self.app.notify("Setup lands in wave 2.", timeout=5)
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
+class _InboxItem(ListItem):
+    def __init__(self, message) -> None:
+        tag = message.msg_type
+        sender = f"{message.from_agent}{' (human)' if message.from_human else ''}"
+        super().__init__(
+            Label(
+                f"[{tag}] [{message.priority}] {message.subject}  —  from {sender}",
+                markup=False,
+            )
+        )
+        self.message = message
+
+
+class InboxScreen(Screen):
+    """Messages-to-human inbox (console-ux-redesign 1.2): bus messages addressed
+    to the human — from agents OR other humans — that aren't decisions. Enter opens
+    the full read view. Reuses the pending-list machinery (ListView + off-thread
+    refresh)."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back", priority=True),
+        Binding("r", "refresh", "Refresh", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
+    ]
+
+    def __init__(self, program: Program) -> None:
+        super().__init__()
+        self.program = program
+
+    def compose(self) -> ComposeResult:
+        yield _header()
+        yield _identity_badge_widget(self.program.root)
+        yield _mode_banner(
+            f"Messages to you — inbox · {self.program.name}",
+            "enter open · r refresh · esc back · q quit",
+        )
+        yield ListView(id="inbox-list")
+        yield Footer()
+
+    def action_refresh(self) -> None:
+        self._load()
+
+    def on_screen_resume(self) -> None:
+        # SINGLE load path (fires on push AND on return) — loading also from
+        # on_mount double-populates the list (the #99 ArtifactBrowser race).
+        self._load()
+
+    def _load(self) -> None:
+        from otaman_cli.console.inbox import list_inbox_messages
+
+        lv = self.query_one("#inbox-list", ListView)
+        lv.clear()
+        messages = list_inbox_messages(self.program)
+        if messages:
+            for m in messages:
+                lv.append(_InboxItem(m))
+        else:
+            lv.append(ListItem(Label("No messages to you.")))
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        item = event.item
+        if isinstance(item, _InboxItem):
+            self.app.push_screen(InboxMessageScreen(self.program, item.message))
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
+class InboxMessageScreen(Screen):
+    """Full read view of one inbox message (console-ux-redesign 1.2)."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
+    ]
+
+    def __init__(self, program: Program, message) -> None:
+        super().__init__()
+        self.program = program
+        self.message = message
+
+    def compose(self) -> ComposeResult:
+        yield _header()
+        yield _identity_badge_widget(self.program.root)
+        sender = f"{self.message.from_agent}{' (human)' if self.message.from_human else ''}"
+        yield _mode_banner(
+            f"Message — {self.message.subject}",
+            f"from {sender} · {self.message.msg_type} · esc back · q quit",
+        )
+        yield Static(
+            f"{self.message.subject}   —   from {sender}   ({self.message.timestamp})",
+            id="inbox-msg-title",
+            markup=False,
+        )
+        yield MarkdownViewer(
+            self.message.body or "(empty message)",
+            show_table_of_contents=False,
+            id="inbox-msg-body",
+        )
+        yield Footer()
 
     def action_back(self) -> None:
         self.app.pop_screen()
@@ -1053,6 +1163,8 @@ class OtamanConsole(App):
 
 __all__ = [
     "HomeScreen",
+    "InboxMessageScreen",
+    "InboxScreen",
     "OtamanConsole",
     "PendingListScreen",
     "ProgramPickerScreen",
