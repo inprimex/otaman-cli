@@ -98,7 +98,7 @@ class ProgramPickerScreen(Screen):
     # priority=True so plain q/r fire even when the ListView has focus
     # (5.1 finding #2.2: plain keys previously did nothing; only ctrl+ worked).
     BINDINGS = [
-        Binding("q", "quit", "Quit", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
         Binding("r", "rescan", "Rescan", priority=True),
     ]
 
@@ -140,7 +140,7 @@ class PendingListScreen(Screen):
         Binding("r", "refresh", "Refresh", priority=True),
         Binding("l", "lifecycle", "Lifecycle", priority=True),
         Binding("b", "browse", "Spec review", priority=True),
-        Binding("q", "quit", "Quit", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
     ]
 
     def action_lifecycle(self) -> None:
@@ -286,7 +286,7 @@ class ProposalScreen(Screen):
         Binding("x", "reject", "Reject", priority=True),
         Binding("d", "defer", "Defer", priority=True),
         Binding("escape", "back", "Back", priority=True),
-        Binding("q", "quit", "Quit", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
     ]
 
     def __init__(self, program: Program, proposal: Proposal) -> None:
@@ -374,7 +374,7 @@ class LifecycleScreen(Screen):
         Binding("n", "nudge", "Nudge", priority=True),
         Binding("y", "ratify", "Ratify", priority=True),
         Binding("a", "archive", "Archive", priority=True),
-        Binding("q", "quit", "Quit", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
     ]
 
     _COLUMNS = (
@@ -545,7 +545,7 @@ class ChangeDetailScreen(Screen):
 
     BINDINGS = [
         Binding("escape", "back", "Back", priority=True),
-        Binding("q", "quit", "Quit", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
     ]
 
     def __init__(self, program: Program, name: str) -> None:
@@ -646,7 +646,7 @@ class ArtifactBrowserScreen(Screen):
     BINDINGS = [
         Binding("escape", "back", "Back", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
-        Binding("q", "quit", "Quit", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
     ]
 
     def __init__(self, program: Program) -> None:
@@ -700,7 +700,7 @@ class ChangeReviewScreen(Screen):
         Binding("a", "approve", "Approve (spec-approved)", priority=True),
         Binding("c", "request_changes", "Request changes", priority=True),
         Binding("escape", "back", "Back", priority=True),
-        Binding("q", "quit", "Quit", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
     ]
 
     def __init__(self, program: Program, change) -> None:
@@ -806,6 +806,24 @@ class OtamanConsole(App):
             except Exception:  # noqa: BLE001 - unknown/removed theme → default
                 pass
         self.push_screen(ProgramPickerScreen(self._programs))
+
+    def on_key(self, event) -> None:
+        # Keypress echo (Roman: "react on key pressing visually to confirm keys
+        # were caught"). The lightest native affordance — flash the caught key in
+        # the header sub-title. on_key sees UNBOUND keys; bound keys are echoed by
+        # run_action below (their priority binding consumes the event first).
+        self.sub_title = f"⌨ {event.key}"
+
+    async def run_action(self, action, *args, **kwargs):
+        # Echo BOUND keys: every binding dispatches through run_action, so flash
+        # the action that fired (confirms the key was caught, even when a priority
+        # binding consumed it before on_key).
+        try:
+            if isinstance(action, str):
+                self.sub_title = f"⌨ {action.split('(')[0].removeprefix('app.')}"
+        except Exception:  # noqa: BLE001 - echo is cosmetic, never break dispatch
+            pass
+        return await super().run_action(action, *args, **kwargs)
 
     def watch_theme(self, theme: str) -> None:
         # Persist whenever the theme changes (e.g. via the ctrl+p palette).
