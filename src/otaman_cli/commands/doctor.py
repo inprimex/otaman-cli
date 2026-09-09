@@ -622,6 +622,86 @@ def _print_docs_format_report(result: dict) -> None:
     print("  Fix: otaman validate docs --fix <files|folders>  (doctor never modifies files)")
 
 
+def _check_local_ownership(*, deep: bool = False) -> dict:
+    """tenant-local-ownership-doctor 1.1 — verify the tenant's ~/.local (top,
+    bin, venv roots) is owned by the tenant's own OS user. Foreign ownership
+    breaks uv self-install + runner self-upgrade. Detection only — never chowns.
+
+    Fast by default (a handful of stats); ``deep`` walks the whole tree and counts
+    foreign-owned files GROUPED BY OWNER (the cross-tenant contamination case).
+    POSIX-only (ownership is a POSIX concept)."""
+    out: dict = {"applicable": False, "foreign": [], "scan": None}
+    if os.name != "posix":
+        return out
+    import pwd
+
+    home = Path.home()
+    local = home / ".local"
+    if not local.is_dir():
+        return out
+    out["applicable"] = True
+    me = os.getuid()
+
+    def _owner(uid: int) -> str:
+        try:
+            return pwd.getpwuid(uid).pw_name
+        except (KeyError, OSError):
+            return f"uid:{uid}"
+
+    # Fast pass: ~/.local, ~/.local/bin, and venv roots (shallow pyvenv.cfg scan).
+    targets = [local, local / "bin"]
+    targets += [c.parent for c in local.glob("*/pyvenv.cfg")]
+    targets += [c.parent for c in local.glob("*/*/pyvenv.cfg")]
+    seen: set = set()
+    for p in targets:
+        if p in seen or not p.exists():
+            continue
+        seen.add(p)
+        try:
+            uid = p.stat().st_uid
+        except OSError:
+            continue
+        if uid != me:
+            out["foreign"].append({"path": str(p), "owner": _owner(uid)})
+
+    if deep:
+        counts: dict[int, int] = {}
+        for dirpath, dirnames, filenames in os.walk(local):
+            for name in (*filenames, *dirnames):
+                try:
+                    uid = os.lstat(os.path.join(dirpath, name)).st_uid
+                except OSError:
+                    continue
+                if uid != me:
+                    counts[uid] = counts.get(uid, 0) + 1
+        out["scan"] = {_owner(uid): n for uid, n in sorted(counts.items(), key=lambda kv: -kv[1])}
+    return out
+
+
+def _print_local_ownership_report(result: dict, *, deep: bool = False) -> None:
+    """~/.local ownership row: OK when self-owned (no noise), ERROR naming foreign
+    owners + remediation pointer; deep scan prints per-owner foreign counts."""
+    if not result.get("applicable"):
+        return
+    print()
+    UI.header("Local Ownership (~/.local)")
+    foreign = result.get("foreign", [])
+    if foreign:
+        for f in foreign:
+            print(f"  {UI.badge('FAIL', C.RED)}  {f['path']} owned by {f['owner']} (not you)")
+        print("  Remediation (run as root): sudo chown -R $(id -un) ~/.local")
+    else:
+        print(f"  {UI.badge('OK', C.GREEN)}  ~/.local is self-owned")
+    if deep:
+        scan = result.get("scan") or {}
+        if scan:
+            print("  Deep scan — foreign-owned files by owner:")
+            for owner, n in scan.items():
+                print(f"    {UI.badge('FAIL', C.RED)}  {owner}: {n} file(s)")
+        else:
+            print("  Deep scan: no foreign-owned files")
+
+
 def cmd_doctor(args: list[str]) -> int:
     """Check environment readiness — git, runtimes, CLI tools, MCP.
 
@@ -631,12 +711,16 @@ def cmd_doctor(args: list[str]) -> int:
     The harness check is additive — all existing checks still run.
     """
     org: str | None = None
+    scan = False  # tenant-local-ownership-doctor 1.1 — deep ~/.local ownership scan
     positional: list[str] = []
     i = 0
     while i < len(args):
         if args[i] == "--org" and i + 1 < len(args):
             org = args[i + 1]
             i += 2
+        elif args[i] == "--scan":
+            scan = True
+            i += 1
         else:
             positional.append(args[i])
             i += 1
@@ -874,6 +958,14 @@ def cmd_doctor(args: list[str]) -> int:
     # docs-format-check 1.3 — advisory count of markdown table violations across
     # the platform.yaml docs-format globs. WARN-only; doctor never fixes.
     _print_docs_format_report(_check_docs_format(root))
+
+    # tenant-local-ownership-doctor 1.1 — foreign-owned ~/.local (breaks uv
+    # self-install / runner self-upgrade). ERROR folds into the exit code; --scan
+    # adds the deep per-owner count. Detection only.
+    own = _check_local_ownership(deep=scan)
+    _print_local_ownership_report(own, deep=scan)
+    if own.get("foreign") or own.get("scan"):
+        base_rc = 1
 
     # ce-bootstrap-harness-deps task 3.1 — additive `--org` harness check
     if org:
