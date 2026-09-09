@@ -927,6 +927,7 @@ class ChangeDetailScreen(Screen):
         self.program = program
         self.change_name = name
         self._detail: dict = {}
+        self._meta = None
 
     def compose(self) -> ComposeResult:
         yield _header()
@@ -943,8 +944,10 @@ class ChangeDetailScreen(Screen):
 
     def on_mount(self) -> None:
         from otaman_cli.console.lifecycle import change_detail
+        from otaman_cli.console.metadata import change_metadata
 
         self._detail = change_detail(self.program, self.change_name)
+        self._meta = change_metadata(self.program, self.change_name)
         self.query_one("#detail-summary", Static).update(self._summary_text())
         files = self._detail.get("artifacts", [])
         lv = self.query_one("#detail-files", ListView)
@@ -967,6 +970,12 @@ class ChangeDetailScreen(Screen):
             "gates: " + " · ".join(self._gate_labels(d.get("gates", {}))),
             "actions: " + ", ".join(d.get("actions", [])),
         ]
+        # S9/S10 metadata (creator/when/priority/deadline slot/pm-sync id).
+        meta = getattr(self, "_meta", None)
+        if meta is not None:
+            from otaman_cli.console.metadata import metadata_lines
+
+            lines.extend(metadata_lines(meta))
         return "\n".join(lines)
 
     @staticmethod
