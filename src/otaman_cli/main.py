@@ -517,6 +517,23 @@ def _normalize_ce_platform_yaml_for_validation(config_path: Path) -> tuple[Path,
             )
             changed = True
 
+    # 3b. scan-schema-conformance 1.1 — tolerantly strip known-RETIRED fields
+    # (e.g. `is_spec_repo`, stamped onto spec repos by older scans) that the live
+    # schema's additionalProperties:false rejects. Never FAIL on a field we know
+    # is retired; strip it from the validation copy with a printed note. The
+    # on-disk file is untouched — re-run `otaman scan --update` to rewrite it.
+    from otaman_cli.onboard.schema_fields import strip_retired_fields
+
+    retired = strip_retired_fields(doc)
+    if retired:
+        hints.append(
+            "platform.yaml: stripped retired field(s) for validation: "
+            + ", ".join(retired)
+            + " — the top-level `specs:` block is the spec-repo marker now. "
+            "Re-run `otaman scan --update` (or hand-edit) to drop them from the file."
+        )
+        changed = True
+
     # 4. Empty / missing `repos:` for fresh CE org-dir scaffolds.  The
     # schema's `repos: minItems: 1` constraint remains even after the
     # 2026-06-10 schema extension (otaman-core commit 27f2c7c) that
