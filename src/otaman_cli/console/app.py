@@ -468,6 +468,12 @@ class LifecycleScreen(Screen):
 
         self.app.push_screen(ReasonModal("nudge"), _after)
 
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        # Enter opens the per-change detail view (1.3).
+        idx = event.cursor_row
+        if 0 <= idx < len(self._rows):
+            self.app.push_screen(ChangeDetailScreen(self.program, self._rows[idx].name))
+
     def _highlighted(self):
         table = self.query_one("#lifecycle-table", DataTable)
         idx = table.cursor_row
@@ -519,6 +525,91 @@ class LifecycleScreen(Screen):
         self.app.notify(msg, severity="information" if ok else "error", timeout=8)
         if ok:
             self._load()
+
+
+class ChangeDetailScreen(Screen):
+    """Per-change detail (console-lifecycle-actions 1.3): stage, triage, tasks,
+    gate results with block reasons, delivery badge, artifacts (per-file), and the
+    actions available to the viewer on this change."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back", priority=True),
+        Binding("q", "quit", "Quit", priority=True),
+    ]
+
+    def __init__(self, program: Program, name: str) -> None:
+        super().__init__()
+        self.program = program
+        self.change_name = name
+        self._detail: dict = {}
+
+    def compose(self) -> ComposeResult:
+        yield _header()
+        yield _identity_badge_widget(self.program.root)
+        yield _mode_banner(
+            f"Change detail — {self.change_name}",
+            "↑↓ files · esc back · q quit",
+        )
+        yield Static("", id="detail-summary", markup=False)
+        yield ListView(id="detail-files")
+        with VerticalScroll(id="detail-view-scroll"):
+            yield Static("", id="detail-view", markup=False)
+        yield Footer()
+
+    def on_mount(self) -> None:
+        from otaman_cli.console.lifecycle import change_detail
+
+        self._detail = change_detail(self.program, self.change_name)
+        self.query_one("#detail-summary", Static).update(self._summary_text())
+        files = self._detail.get("artifacts", [])
+        lv = self.query_one("#detail-files", ListView)
+        for f in files:
+            lv.append(_FileItem(f))
+        if files:
+            self._show(files[0])
+
+    def _summary_text(self) -> str:
+        d = self._detail
+        if not d:
+            return f"(no detail for {self.change_name})"
+        badge = "  [auto-delivery]" if d.get("delivery") == "auto" else ""
+        lines = [
+            f"stage: {d.get('stage') or '—'}   state: {d.get('state')}{badge}",
+            f"triage: {d.get('triage') or 'untriaged'}"
+            + (f" — {d['triage_note']}" if d.get("triage_note") else ""),
+            f"tasks: {d.get('tasks_done', 0)}/{len(d.get('tasks', []))}"
+            f"   next: {d.get('next_actor')}",
+            "gates: " + " · ".join(self._gate_labels(d.get("gates", {}))),
+            "actions: " + ", ".join(d.get("actions", [])),
+        ]
+        return "\n".join(lines)
+
+    @staticmethod
+    def _gate_labels(gates: dict) -> list[str]:
+        out = []
+        for g, v in gates.items():
+            if v["violations"]:
+                out.append(f"{g}=BLOCKED(" + "; ".join(v["violations"]) + ")")
+            else:
+                out.append(f"{g}=ok")
+        return out
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        item = event.item
+        if isinstance(item, _FileItem):
+            self._show(item.relname)
+
+    def _show(self, relname: str) -> None:
+        change_dir = self._detail.get("change_dir")
+        if change_dir is None:
+            return
+        from otaman_cli.console.artifacts import read_artifact
+
+        text = read_artifact(change_dir, relname) or "(empty)"
+        self.query_one("#detail-view", Static).update(f"── {relname} ──\n\n{text}")
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
 
 
 class _AuthoredItem(ListItem):

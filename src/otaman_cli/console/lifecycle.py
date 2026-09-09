@@ -190,12 +190,115 @@ def archive_change(program: Program, name: str) -> tuple[bool, str]:
     return True, f"archived {name}{_durability_suffix(committed, pushed, detail)}"
 
 
+# ---------------------------------------------------------------------------
+# row detail (console-lifecycle-actions 1.3): the per-change deep view — stage,
+# triage, tasks tick-state, artifacts, gate results with block reasons, delivery
+# badge, and the actions available to the viewer on this row.
+
+
+def _available_actions(state: str, next_actor: str, archive_clean: bool) -> list[str]:
+    actions = ["nudge (n)"]
+    if "human" in next_actor and "ratify" in next_actor:
+        actions.insert(0, "ratify (y)")
+    if state == COMPLETE_UNARCHIVED and archive_clean:
+        actions.insert(0, "archive (a)")
+    return actions
+
+
+def change_detail(program: Program, name: str) -> dict:
+    """Assemble the per-change detail (values-free) the detail screen renders."""
+    import re
+
+    from otaman_core.spec_lifecycle import (
+        check_archive_gate,
+        check_dispatch_gate,
+        check_merge_gate,
+        has_approval,
+        is_research,
+        read_openspec,
+    )
+
+    changes = _specs_changes_dir(program)
+    if changes is None:
+        return {}
+    d = changes / name
+    if not d.is_dir():
+        return {}
+    data = read_openspec(d / ".openspec.yaml")
+    policy = _load_policy(program)
+
+    tasks: list[tuple[bool, str]] = []
+    tf = d / "tasks.md"
+    if tf.is_file():
+        for line in tf.read_text(encoding="utf-8").splitlines():
+            m = re.match(r"^\s*-\s*\[([ xX])\]\s*(.*)", line)
+            if m:
+                tasks.append((m.group(1).lower() == "x", m.group(2).strip()))
+    done = sum(1 for t, _ in tasks if t)
+
+    artifacts = [
+        f.name
+        for f in (d / "proposal.md", d / "design.md", d / "tasks.md", d / ".openspec.yaml")
+        if f.is_file()
+    ]
+    specs = d / "specs"
+    if specs.is_dir():
+        artifacts += [str(p.relative_to(d)) for p in sorted(specs.rglob("*.md"))]
+
+    gates: dict[str, dict] = {}
+    for gname, fn in (
+        ("merge", check_merge_gate),
+        ("dispatch", check_dispatch_gate),
+        ("archive", check_archive_gate),
+    ):
+        try:
+            dec = fn(data, policy)
+            gates[gname] = {
+                "allowed": dec.allowed,
+                "mode": dec.mode,
+                "violations": list(dec.violations),
+                "notices": list(dec.notices),
+            }
+        except Exception:  # noqa: BLE001 - a gate error shouldn't sink the detail view
+            continue
+
+    state = "—"
+    next_actor = "—"
+    if tasks:
+        if done < len(tasks):
+            state = IN_FLIGHT
+        else:
+            state = COMPLETE_UNARCHIVED
+            next_actor = (
+                f"human (otaman ratify {name})"
+                if (not is_research(data) and not has_approval(data))
+                else "spec-agent"
+            )
+    archive_clean = not gates.get("archive", {}).get("violations")
+    return {
+        "name": name,
+        "stage": data.get("stage"),
+        "triage": data.get("triage"),
+        "triage_note": str(data.get("triage_note") or ""),
+        "delivery": data.get("delivery"),
+        "tasks": tasks,
+        "tasks_done": done,
+        "artifacts": artifacts,
+        "gates": gates,
+        "state": state,
+        "next_actor": next_actor,
+        "actions": _available_actions(state, next_actor, archive_clean),
+        "change_dir": d,
+    }
+
+
 __all__ = [
     "APPROVED_UNAUTHORED",
     "COMPLETE_UNARCHIVED",
     "IN_FLIGHT",
     "LifecycleRow",
     "archive_change",
+    "change_detail",
     "list_lifecycle_states",
     "ratify_change",
 ]
