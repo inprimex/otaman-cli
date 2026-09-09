@@ -13,6 +13,7 @@ from otaman_cli.init.schema import (
     AgentEntry,
     Connection,
     LaunchSettings,
+    MeshParams,
     SSHParams,
     TmuxLayoutConfig,
 )
@@ -128,6 +129,7 @@ def run_wizard(
     mode = _prompt_choice("Mode", choices=["local", "ssh", "mesh"], default="local")
 
     ssh_params: SSHParams | None = None
+    mesh_params: MeshParams | None = None
     if mode == "ssh":
         print()
         print("  SSH connection details")
@@ -135,6 +137,24 @@ def run_wizard(
         user = _prompt("SSH user", default="deploy") or "deploy"
         key_path = _prompt("SSH key path (blank for ~/.ssh/id_rsa)") or None
         ssh_params = SSHParams(host=host, user=user, key_path=key_path)
+    elif mode == "mesh":
+        # Runner-mediated spawn over the mesh network (init-wizard-mesh-mode D3):
+        # a remote runner endpoint — host has NO default (the whole point is a
+        # remote target); port defaults to the ce-bootstrap ws-port (8200).
+        print()
+        print("  Mesh connection details — the runner HTTP endpoint to spawn against")
+        while True:
+            m_host = _prompt("Runner host (required, e.g. runner.mesh.internal)").strip()
+            if m_host:
+                break
+            print("  ! runner host is required for mesh mode")
+        m_port_raw = (_prompt("Runner port", default="8200") or "8200").strip()
+        m_port = int(m_port_raw) if m_port_raw.isdigit() else 8200
+        token_source = (
+            _prompt("Token source (blank for OTAMAN_RUNNER_TOKEN env)").strip()
+            or "OTAMAN_RUNNER_TOKEN"
+        )
+        mesh_params = MeshParams(host=m_host, port=m_port, token_source=token_source)
 
     print()
     print("  Agents to launch")
@@ -158,7 +178,7 @@ def run_wizard(
 
     return LaunchSettings(
         version=1,
-        connection=Connection(mode=mode, ssh=ssh_params),
+        connection=Connection(mode=mode, ssh=ssh_params, mesh=mesh_params),
         agents=agents,
         tmux=TmuxLayoutConfig(session_prefix=name, layout=layout),
     )

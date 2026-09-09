@@ -7,6 +7,49 @@ if ((Get-ExecutionPolicy) -eq 'Restricted') {
     Write-Host "  Set-ExecutionPolicy -Scope CurrentUser RemoteSigned"
 }
 
+{% if connection.mode == "mesh" %}
+# ========== mesh: runner-mediated spawn (Path B — no SSH, no tmux) ==========
+if (-not (Get-Command otaman -ErrorAction SilentlyContinue)) { Write-Error "otaman is required"; exit 1 }
+
+$RunnerBase = "{{ connection.mesh.http_base }}"
+
+# Token is read at RUNTIME from the token source — NEVER embedded in this file.
+$TokenSrc = "{{ connection.mesh.token_source or 'OTAMAN_RUNNER_TOKEN' }}"
+if (Test-Path $TokenSrc) {
+    $RunnerToken = (Select-String -Path $TokenSrc -Pattern '^OTAMAN_RUNNER_TOKEN=' | Select-Object -Last 1).Line -replace '^OTAMAN_RUNNER_TOKEN=', '' -replace '"', ''
+} else {
+    $RunnerToken = [Environment]::GetEnvironmentVariable($TokenSrc)
+}
+if ([string]::IsNullOrEmpty($RunnerToken)) {
+    Write-Error "runner token not found (source: $TokenSrc) — it is never stored in this launcher."
+    Write-Host  "  set the token (env var or secrets.env line OTAMAN_RUNNER_TOKEN=...) before running."
+    exit 1
+}
+
+$Started = 0
+$Failed = 0
+function Spawn-Agent($agent, $repo) {
+    $body = @{ agent = $agent; repo = $repo; mode = "interactive" } | ConvertTo-Json -Compress
+    try {
+        Invoke-RestMethod -Method Post -Uri "$RunnerBase/spawn" -Headers @{ Authorization = "Bearer $RunnerToken" } -ContentType "application/json" -Body $body | Out-Null
+        Write-Host "  [ok]   $agent — spawned via runner ($RunnerBase)"
+        $script:Started++
+    } catch {
+        Write-Error "  [fail] $agent — runner /spawn failed: $($_.Exception.Message)"
+        $script:Failed++
+    }
+}
+
+Write-Host "Spawning otaman agents via runner $RunnerBase"
+{% for agent in agents %}{% if agent.enabled %}
+Spawn-Agent "{{ agent.name }}" "{{ agent_repos.get(agent.name, '') }}"
+{% endif %}{% endfor %}
+
+Write-Host ""
+Write-Host "Summary: spawned=$Started failed=$Failed"
+if ($Failed -gt 0 -or $Started -eq 0) { exit 1 }
+exit 0
+{% else %}
 # ---------- dependency check ----------
 $missing = @()
 if (-not (Get-Command tmux -ErrorAction SilentlyContinue))    { $missing += "tmux" }
@@ -138,3 +181,4 @@ if ($Started -eq 0 -and $Skipped -eq 0) { exit 1 }
 Write-Host "Attach: tmux attach -t $Prefix-{{ _enabled[0] }}"
 {% endif %}
 exit 0
+{% endif %}
