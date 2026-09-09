@@ -72,6 +72,8 @@ class PostScanResult:
     openspec_scaffolded: Path | None = None
     # scan-init-edition-backfill 1.1 — org-implied sections copied into the draft
     org_sections_backfilled: list[str] = field(default_factory=list)
+    # scan-schema-conformance 1.1 — retired fields (e.g. is_spec_repo) removed
+    retired_fields_stripped: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
 
 
@@ -385,6 +387,11 @@ def run(
     result = PostScanResult()
     gaps = analyze_draft(draft_path, scan_root, program_slug)
 
+    # scan-schema-conformance 1.1 — strip retired fields (e.g. is_spec_repo) the
+    # live schema rejects, so the scan OUTPUT validates. Runs UNCONDITIONALLY
+    # (independent of the four draft gaps), before the early return.
+    _strip_retired_from_draft(draft_path, result)
+
     # scan-init-edition-backfill 1.1 — org-implied sections
     # (runner:/terminal:/human-roster:) are independent of the four draft gaps
     # below, so backfill runs UNCONDITIONALLY (even a draft with no other gaps
@@ -464,6 +471,24 @@ def run(
         result.launcher_block_added = True
 
     return result
+
+
+def _strip_retired_from_draft(draft_path: Path, result: PostScanResult) -> None:
+    """Remove known-retired fields (e.g. is_spec_repo) from the draft so it
+    validates against the live schema, preserving formatting via ruamel."""
+    try:
+        from otaman_cli.onboard.schema_fields import strip_retired_fields
+
+        if not draft_path.is_file():
+            return
+        doc = _YAML.load(draft_path.read_text(encoding="utf-8")) or {}
+        removed = strip_retired_fields(doc)
+        if removed:
+            with draft_path.open("w", encoding="utf-8") as f:
+                _YAML.dump(doc, f)
+            result.retired_fields_stripped = removed
+    except Exception as exc:  # noqa: BLE001 - additive cleanup; never break the scan
+        result.skipped.append(f"retired-field strip failed: {exc}")
 
 
 def _backfill_org_sections(draft_path: Path, result: PostScanResult) -> None:

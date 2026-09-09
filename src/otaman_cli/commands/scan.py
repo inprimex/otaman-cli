@@ -335,6 +335,11 @@ def cmd_scan(args: list[str]) -> int:
                         + ", ".join(_ps_result.org_sections_backfilled)
                         + " from the org primary platform (consistent tenant-wide bootstrap)"
                     )
+                if _ps_result.retired_fields_stripped:
+                    UI.ok(
+                        "Removed retired field(s) the schema rejects: "
+                        + ", ".join(_ps_result.retired_fields_stripped)
+                    )
                 for s in _ps_result.skipped:
                     UI.muted(f"  skipped: {s}")
             except Exception as _post_exc:
