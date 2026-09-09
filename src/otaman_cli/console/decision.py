@@ -91,11 +91,23 @@ def _write_audit(
 
 
 def approve(
-    program: Program, proposal: Proposal, identity: ConsoleIdentity, *, reason: str = ""
+    program: Program,
+    proposal: Proposal,
+    identity: ConsoleIdentity,
+    *,
+    reason: str = "",
+    delivery: str | None = None,
 ) -> tuple[bool, str]:
     """Approve *proposal*, stamped with identity. SCR → the privileged
     `spec-change-approved` writer (parity with `/otaman:approve`); outcome-proposal
-    → an audit sign-off. Returns ``(ok, message)`` — never raises into the TUI."""
+    → an audit sign-off. Returns ``(ok, message)`` — never raises into the TUI.
+
+    ``delivery="auto"`` is the approve-as-auto variant (console-lifecycle-actions
+    1.4): it records the durable intent in the approval so spec-agent stamps
+    ``delivery: auto`` into the change's .openspec.yaml at authoring (the change
+    folder doesn't exist yet at SCR-approval time). D4: auto skips only the
+    human-acceptance STOP — the auto verified→archived transition (core 2.1) still
+    requires every gate to pass."""
     refusal = _approver_refusal(program)
     if refusal is not None:
         return False, f"Approval refused — {refusal}."
@@ -110,6 +122,10 @@ def approve(
     now_iso, now_ts = _now()
     tail = f"Confirmed in otaman -i by {identity.audit_label}"
     comment = f"{reason} — {tail}" if reason else tail
+    if delivery == "auto":
+        # durable delivery intent carried in the approval (spec-agent stamps it
+        # into .openspec.yaml at authoring; core 2.1 reads it for auto-archive).
+        comment = f"{comment} [delivery: auto]"
     with contextlib.redirect_stdout(io.StringIO()):
         rc = _perform_approval(
             _target(proposal),

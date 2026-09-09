@@ -156,7 +156,8 @@ def _cmd_status(root: Path, rest: list[str]) -> int:
 
     for r in rows:
         stage = f"stage={r.stage} " if r.stage else ""
-        UI.bullet(f"{r.change}{_SEV_MARK.get(r.severity, '')}")
+        badge = "  [auto-delivery]" if getattr(r, "delivery", None) == "auto" else ""
+        UI.bullet(f"{r.change}{_SEV_MARK.get(r.severity, '')}{badge}")
         UI.kv("  state", f"{stage}{r.state} ({r.age} in state)")
         UI.kv("  next", r.next_actor)
     n_err = sum(1 for r in rows if r.severity == "error")

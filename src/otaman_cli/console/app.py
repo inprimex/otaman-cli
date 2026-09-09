@@ -282,6 +282,7 @@ class ProposalScreen(Screen):
 
     BINDINGS = [
         Binding("a", "approve", "Approve", priority=True),
+        Binding("A", "approve_auto", "Approve (auto-delivery)", priority=True),
         Binding("x", "reject", "Reject", priority=True),
         Binding("d", "defer", "Defer", priority=True),
         Binding("escape", "back", "Back", priority=True),
@@ -298,7 +299,7 @@ class ProposalScreen(Screen):
         yield _identity_badge_widget(self.program.root)
         yield _mode_banner(
             "Proposal — read & decide",
-            "a approve · x reject · d defer · esc back · q quit",
+            "a approve · A approve-auto · x reject · d defer · esc back · q quit",
         )
         yield Static(
             f"{self.proposal.subject}   —   from {self.proposal.from_agent}",
@@ -313,21 +314,30 @@ class ProposalScreen(Screen):
         if ok:
             self.app.pop_screen()  # PendingListScreen.on_screen_resume refreshes
 
-    def _apply_decision(self, verb: str, reason: str) -> None:
+    def _apply_decision(self, verb: str, reason: str, *, delivery: str | None = None) -> None:
         from otaman_cli.console import decision
         from otaman_cli.console.identity import resolve_identity
 
         identity = resolve_identity(self.program.root)
-        fn = {"approve": decision.approve, "reject": decision.reject, "defer": decision.defer}[verb]
-        ok, message = fn(self.program, self.proposal, identity, reason=reason)
+        if verb == "approve":
+            ok, message = decision.approve(
+                self.program, self.proposal, identity, reason=reason, delivery=delivery
+            )
+        else:
+            fn = {"reject": decision.reject, "defer": decision.defer}[verb]
+            ok, message = fn(self.program, self.proposal, identity, reason=reason)
         self._decide(ok, message)
 
-    def _prompt_and_decide(self, verb: str) -> None:
+    def _prompt_and_decide(self, verb: str, *, delivery: str | None = None) -> None:
         def _after(reason: str | None) -> None:
             if reason is not None:  # None = cancelled
-                self._apply_decision(verb, reason)
+                self._apply_decision(verb, reason, delivery=delivery)
 
-        self.app.push_screen(ReasonModal(verb), _after)
+        label = "approve-auto" if delivery == "auto" else verb
+        self.app.push_screen(ReasonModal(label), _after)
+
+    def action_approve_auto(self) -> None:
+        self._prompt_and_decide("approve", delivery="auto")
 
     def action_approve(self) -> None:
         self._prompt_and_decide("approve")
@@ -427,9 +437,10 @@ class LifecycleScreen(Screen):
         table = self.query_one("#lifecycle-table", DataTable)
         table.clear()
         for r in rows:
+            name_cell = f"{r.name} [auto]" if r.delivery == "auto" else r.name
             table.add_row(
                 _TRIAGE_ABBR.get(r.triage, r.triage or "—"),
-                r.name,
+                name_cell,
                 r.stage or "—",
                 r.state,
                 f"{r.tasks_done}/{r.tasks_total}",

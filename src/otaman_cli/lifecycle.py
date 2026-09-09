@@ -49,6 +49,7 @@ class LifecycleRow:
     owner: str
     next_actor: str
     severity: str
+    delivery: str | None = None  # 'auto' → [auto-delivery] badge (D3/D4)
 
 
 def _slug(text: str) -> str:
@@ -147,6 +148,15 @@ def _stage_of(change_dir: Path) -> str | None:
     return read_stage(change_dir / ".openspec.yaml")
 
 
+def _delivery_of(change_dir: Path) -> str | None:
+    """The change's ``delivery:`` mode (``auto``/``hitl``) from .openspec.yaml, or None."""
+    from otaman_core.spec_lifecycle import read_openspec
+
+    data = read_openspec(change_dir / ".openspec.yaml")
+    v = data.get("delivery") if isinstance(data, dict) else None
+    return v if isinstance(v, str) else None
+
+
 def derive_lifecycle(
     *,
     changes_dir: Path | None,
@@ -194,6 +204,7 @@ def derive_lifecycle(
             )
             days = _age_days(secs)
             stage = _stage_of(d)
+            deliv = _delivery_of(d)
             if _UNTICKED.search(text):
                 rows.append(
                     LifecycleRow(
@@ -205,6 +216,7 @@ def derive_lifecycle(
                         owner=_unticked_owners(text),
                         next_actor=_unticked_owners(text),
                         severity=SEV_OK,  # active work is not an alarm
+                        delivery=deliv,
                     )
                 )
             elif _TICKED.search(text):
@@ -218,6 +230,7 @@ def derive_lifecycle(
                         owner="spec-agent",
                         next_actor="spec-agent (archive the change)",
                         severity=_bucket_severity(days),
+                        delivery=deliv,
                     )
                 )
     return rows
@@ -248,6 +261,7 @@ class ChangeRow:
     triage_note: str
     last_touch: str  # last non-chore commit date (YYYY-MM-DD) or "?"
     last_nudged: str  # date of the most recent nudge for this change, or ""
+    delivery: str | None = None  # 'auto' → [auto-delivery] badge (D3/D4)
 
 
 def triage_rank(triage: str | None) -> int:
@@ -358,6 +372,7 @@ def derive_change_table(
                 triage_note=triage_note,
                 last_touch=_last_real_touch(d),
                 last_nudged=_last_nudged(bus_active_dir, d.name),
+                delivery=(data.get("delivery") if isinstance(data, dict) else None),
             )
         )
     rows.sort(key=lambda r: (triage_rank(r.triage), r.name))
