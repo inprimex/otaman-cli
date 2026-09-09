@@ -23,7 +23,7 @@ from otaman_cli.hitl.messages import (
     list_pending,
     write_resolved_ack,
 )
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI, _resolve_bus_paths
 
 
@@ -35,7 +35,7 @@ def _bail(msg: str, code: int = 1) -> int:
 def _ctx() -> tuple[Path, Path] | None:
     root = find_project_root()
     if root is None:
-        _bail("Not in an otaman project (no platform.yaml in cwd or ancestors)")
+        _bail(not_in_project_message())
         return None
     active_dir, _acks = _resolve_bus_paths(root)
     return root, active_dir

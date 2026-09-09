@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI, _resolve_bus_paths
 from otaman_cli.registries import bus_messages
 from otaman_cli.registries.loader import (
@@ -95,7 +95,7 @@ def _emit_bus(root: Path, msg: dict) -> None:
 def cmd_add(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     actor, roles, platform = _ctx(root)
     authz_advisory("solution.add", actor, roles)
 
@@ -202,7 +202,7 @@ def cmd_add(args: dict[str, Any]) -> int:
 def cmd_list(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     loaded = _load(root)
     if loaded is None:
         return 1
@@ -245,7 +245,7 @@ def cmd_list(args: dict[str, Any]) -> int:
 def cmd_show(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     loaded = _load(root)
     if loaded is None:
         return 1
@@ -293,7 +293,7 @@ def cmd_show(args: dict[str, Any]) -> int:
 def cmd_history(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     loaded = _load(root)
     if loaded is None:
         return 1
@@ -330,7 +330,7 @@ def cmd_propose(args: dict[str, Any]) -> int:
     """
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     actor, roles, _ = _ctx(root)
     authz_advisory("solution.propose", actor, roles)
 
@@ -370,7 +370,7 @@ def cmd_propose(args: dict[str, Any]) -> int:
 def cmd_promote_to_complete(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     actor, roles, _ = _ctx(root)
     authz_advisory("solution.promote-to-complete", actor, roles)
 
@@ -433,7 +433,7 @@ def cmd_promote_to_complete(args: dict[str, Any]) -> int:
 def cmd_discard(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     actor, roles, _ = _ctx(root)
     authz_advisory("solution.discard", actor, roles)
 

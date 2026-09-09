@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI
 from otaman_cli.project._platform import (
     append_repo,
@@ -54,7 +54,7 @@ def cmd_project_assign(
 
     root = find_project_root()
     if root is None:
-        return _bail("Not in an otaman project (no platform.yaml found)")
+        return _bail(not_in_project_message())
 
     repo_path = Path(target).expanduser().resolve()
     if not repo_path.is_dir():

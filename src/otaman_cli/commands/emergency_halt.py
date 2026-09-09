@@ -14,7 +14,7 @@ import re
 from datetime import datetime, timezone
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI, _resolve_bus_paths
 from otaman_cli.safety import confirm_human_decision
 
@@ -43,7 +43,7 @@ def cmd_emergency_halt(args: list[str]) -> int:
 
     root = find_project_root()
     if not root:
-        UI.error("Not in an otaman project")
+        UI.error(not_in_project_message())
         return 1
 
     active_dir, _acks_dir = _resolve_bus_paths(root)

@@ -10,7 +10,7 @@ sharers were still unmigrated).
 from __future__ import annotations
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI, run_script
 
 
@@ -26,7 +26,7 @@ def cmd_cleanup(args: list[str]) -> int:
 
     root = find_project_root()
     if not root:
-        UI.error("Not in an otaman project")
+        UI.error(not_in_project_message())
         return 1
 
     UI.header("Otaman Bus Cleanup")

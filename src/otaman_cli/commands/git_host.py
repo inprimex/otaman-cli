@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI
 
 
@@ -54,7 +54,7 @@ def cmd_git_host(args: list[str]) -> int:
     if sub == "list":
         root = find_project_root()
         if not root:
-            UI.error("Not in an otaman project")
+            UI.error(not_in_project_message())
             return 1
         cfg = gh.load_git_host_config(root)
         if cfg:
@@ -85,7 +85,7 @@ def cmd_git_host(args: list[str]) -> int:
     if sub == "check":
         root = find_project_root()
         if not root:
-            UI.error("Not in an otaman project")
+            UI.error(not_in_project_message())
             return 1
         cfg = gh.load_git_host_config(root)
         if cfg is None:
@@ -251,7 +251,7 @@ def _git_host_pr(gh, args: list[str]) -> int:
     if action == "target-branch":
         root = find_project_root()
         if not root:
-            UI.error("Not in an otaman project")
+            UI.error(not_in_project_message())
             return 1
         return _git_host_pr_target_branch(root)
 
@@ -273,7 +273,7 @@ def _git_host_pr(gh, args: list[str]) -> int:
 
     root = find_project_root()
     if not root:
-        UI.error("Not in an otaman project")
+        UI.error(not_in_project_message())
         return 1
 
     cfg = gh.load_git_host_config(root)
@@ -410,7 +410,7 @@ def _git_host_post_review(gh, args: list[str]) -> int:
 
     root = find_project_root()
     if not root:
-        UI.error("Not in an otaman project")
+        UI.error(not_in_project_message())
         return 1
 
     cfg = gh.load_git_host_config(root)
@@ -501,7 +501,7 @@ def _git_host_add_interactive(gh, args: list[str]) -> int:
     exactly the lines to add to platform.yaml + .otaman/secrets.env."""
     root = find_project_root()
     if not root:
-        UI.error("Not in an otaman project")
+        UI.error(not_in_project_message())
         return 1
 
     # Try to auto-detect from the first repo that has a remote.

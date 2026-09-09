@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI
 
 _ACTIONS = ("status", "gate")
@@ -33,7 +33,7 @@ def cmd_spec(args: list[str]) -> int:
         return 2
     root = find_project_root()
     if root is None:
-        UI.error("Not in an otaman project (no platform.yaml in cwd or ancestors)")
+        UI.error(not_in_project_message())
         return 1
     if action == "gate":
         return _cmd_gate(root, rest)
@@ -325,7 +325,7 @@ def cmd_ratify(args: list[str]) -> int:
 
     root = find_project_root()
     if root is None:
-        UI.error("Not in an otaman project")
+        UI.error(not_in_project_message())
         return 1
     d = _change_dir(root, name)
     if d is None:

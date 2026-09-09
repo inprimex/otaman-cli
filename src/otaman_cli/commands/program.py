@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI
 
 _TRANSITIONS = ("limit", "suspend", "resume", "archive", "unarchive")
@@ -46,7 +46,7 @@ def _resolve_context():
 
     root = find_project_root()
     if root is None:
-        UI.error("Not in an otaman project (no platform.yaml in cwd or ancestors)")
+        UI.error(not_in_project_message())
         return None
     ctx = derive_local_context(root)
     if ctx is None:

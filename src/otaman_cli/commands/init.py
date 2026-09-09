@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI, _normalize_ce_platform_yaml_for_validation, run_script
 
 
@@ -529,7 +529,7 @@ def _cmd_init_update(dry_run: bool = False) -> int:
         root = cwd
 
     if not root:
-        UI.error("Not in an otaman project")
+        UI.error(not_in_project_message())
         return 1
 
     platform_yaml = root / "platform.yaml"

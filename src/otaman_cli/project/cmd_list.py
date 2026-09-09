@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI
 from otaman_cli.project._platform import load_platform_yaml
 
@@ -23,7 +23,7 @@ def _normalised_status(entry: dict[str, Any]) -> str:
 def cmd_project_list(status: str = "active") -> int:
     root = find_project_root()
     if root is None:
-        UI.error("Not in an otaman project")
+        UI.error(not_in_project_message())
         return 1
     try:
         data = load_platform_yaml(root)

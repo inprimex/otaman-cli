@@ -19,7 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI, _resolve_bus_paths
 from otaman_cli.registries import bus_messages
 from otaman_cli.registries.loader import (
@@ -103,7 +103,7 @@ def cmd_add(args: dict[str, Any]) -> int:
     """
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     actor, roles, _ = _ctx(root)
     authz_advisory("outcome.add", actor, roles)
 
@@ -167,7 +167,7 @@ def cmd_add(args: dict[str, Any]) -> int:
 def cmd_list(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     loaded = _load(root)
     if loaded is None:
         return 1
@@ -215,7 +215,7 @@ def cmd_list(args: dict[str, Any]) -> int:
 def cmd_show(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     loaded = _load(root)
     if loaded is None:
         return 1
@@ -257,7 +257,7 @@ def cmd_show(args: dict[str, Any]) -> int:
 def cmd_history(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     loaded = _load(root)
     if loaded is None:
         return 1
@@ -297,7 +297,7 @@ def _mutate_status(args: dict[str, Any], op: str, action: str, target: str | Non
     """Shared helper for promote/demote/retire."""
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     actor, roles, _ = _ctx(root)
     authz_advisory(op, actor, roles)
 
@@ -366,7 +366,7 @@ def cmd_retire(args):
 def cmd_request_estimate(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     actor, roles, _ = _ctx(root)
     authz_advisory("outcome.request-estimate", actor, roles)
 
@@ -400,7 +400,7 @@ def cmd_request_estimate(args: dict[str, Any]) -> int:
 def cmd_accept_cost(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     if not args.get("solution"):
         return _bail("--solution <SOL-id> is required")
     actor, roles, _ = _ctx(root)
@@ -459,7 +459,7 @@ def cmd_accept_cost(args: dict[str, Any]) -> int:
 def cmd_reject_cost(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
-        return _bail("Not in an otaman project")
+        return _bail(not_in_project_message())
     actor, roles, _ = _ctx(root)
     authz_advisory("outcome.reject-cost", actor, roles)
 

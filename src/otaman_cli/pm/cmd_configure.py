@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from otaman_cli.identity import find_project_root
+from otaman_cli.identity import find_project_root, not_in_project_message
 
 
 def cmd_pm_configure(args: list[str]) -> int:
@@ -55,7 +55,7 @@ def cmd_pm_configure(args: list[str]) -> int:
 
     root = find_project_root()
     if root is None:
-        UI.error("Not in an otaman project (no platform.yaml found)")
+        UI.error(not_in_project_message())
         return 1
 
     platform_yaml_path = root / "platform.yaml"
