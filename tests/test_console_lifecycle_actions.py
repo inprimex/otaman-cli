@@ -119,6 +119,25 @@ def test_archive_refused_when_gate_blocks(program):
     assert (changes / "unappr").exists()  # untouched
 
 
+def test_ratify_commits_past_a_direct_main_block_hook(program):
+    # gate-3.1 defect: a pre-commit hook that blocks unless OTAMAN_ALLOW_MAIN=1
+    # (the branch-policy hook's shape). The console is the human seat and passes
+    # the override, so the commit lands instead of being refused.
+    specs = program.root / "specs"
+    hooks = specs / ".git" / "hooks"
+    hook = hooks / "pre-commit"
+    hook.write_text(
+        '#!/bin/sh\nif [ "$OTAMAN_ALLOW_MAIN" != "1" ]; then\n'
+        '  echo "BLOCKED: Direct commits to main are not allowed" >&2; exit 1\nfi\n',
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+    _change(program, "hooked", ticks=(True, True))
+    ok, msg = L.ratify_change(program, "hooked", by="roman", reason="human seat")
+    assert ok and "committed" in msg  # not "commit needed" — the override worked
+    assert "ratify hooked" in _git_log(program)
+
+
 def test_ratify_then_archive_full_loop(program):
     _change(program, "loop", ticks=(True, True))
     assert L.ratify_change(program, "loop", by="roman", reason="ship")[0] is True

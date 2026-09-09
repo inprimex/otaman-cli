@@ -160,49 +160,18 @@ def advance_to_spec_approved(
         set_stage(oy, SPEC_APPROVED_STAGE)
     except SpecLifecycleError as exc:
         return False, str(exc)
-    # Repo is truth (D1): the stage change must be committed, not left dirty in
-    # the checkout. Best-effort commit+push; a failure is flagged so spec-agent
-    # can commit it (gap #2 from Roman's live session).
-    committed, pushed, detail = _commit_stage(d, change_name, approver.name)
+    # Repo is truth (D1): commit the stage change (human-seat override for the
+    # branch-policy hook — gate-3.1 defect fix; the actor is the present human).
+    from otaman_cli.console.lifecycle import _commit_push, _durability_suffix, _specs_root
+
+    committed, pushed, detail = _commit_push(
+        _specs_root(program),
+        f"chore(spec): {change_name} -> spec-approved (via otaman -i by {approver.name})",
+        paths=[f"openspec/changes/{change_name}/.openspec.yaml"],
+    )
     _broadcast(program, change_name, approver.name, reason, committed=committed, pushed=pushed)
-    if not committed:
-        return (
-            True,
-            f"{change_name} → spec-approved (by {approver.name}) — ⚠ commit needed: {detail}",
-        )
-    if not pushed:
-        return (
-            True,
-            f"{change_name} → spec-approved (by {approver.name}) — committed (push pending)",
-        )
-    return True, f"{change_name} → spec-approved (by {approver.name}) — committed + pushed"
-
-
-def _commit_stage(change_dir: Path, change_name: str, by: str) -> tuple[bool, bool, str]:
-    """Commit (and try to push) the change's .openspec.yaml stage bump. Best-effort.
-
-    Returns (committed, pushed, detail). A non-git checkout / no remote is not an
-    error the caller fails on — it degrades to a flagged 'commit needed'.
-    """
-    import subprocess
-
-    def _git(*a, timeout=30):
-        return subprocess.run(
-            ["git", "-C", str(change_dir), *a], capture_output=True, text=True, timeout=timeout
-        )
-
-    try:
-        if _git("add", ".openspec.yaml").returncode != 0:
-            return False, False, "git add failed (not a git checkout?)"
-        msg = f"chore(spec): {change_name} -> spec-approved (via otaman -i by {by})"
-        commit = _git("commit", "-m", msg, "--", ".openspec.yaml")
-        if commit.returncode != 0:
-            reason = (commit.stderr or commit.stdout or "").strip().splitlines()
-            return False, False, reason[0] if reason else "git commit failed"
-        push = _git("push")
-        return True, push.returncode == 0, "" if push.returncode == 0 else "push failed"
-    except (OSError, subprocess.SubprocessError) as exc:
-        return False, False, str(exc)
+    suffix = _durability_suffix(committed, pushed, detail)
+    return True, f"{change_name} → spec-approved (by {approver.name}){suffix}"
 
 
 def request_changes(program: Program, change_name: str, comments: str) -> tuple[bool, str]:
