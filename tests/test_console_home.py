@@ -171,24 +171,5 @@ def test_jump_keys_land_on_real_screens(program, key, target):
     asyncio.run(go())
 
 
-@_textual
-@pytest.mark.parametrize("key", ["setup"])
-def test_reserved_keys_dispatch_without_dead_key(program, key):
-    # s (wave 2) isn't built yet — the key must still dispatch with a visible ack
-    # and NOT navigate away or crash (no dead advertised key). (t now opens the
-    # real tree — covered in test_console_tree.)
-    from otaman_cli.console.app import HomeScreen, OtamanConsole
-
-    async def go():
-        app = OtamanConsole([program], search_root=program.root)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            app.push_screen(HomeScreen(program))
-            await pilot.pause()
-            await app.workers.wait_for_complete()
-            await app.screen.run_action(key)
-            await pilot.pause()
-            assert isinstance(app.screen, HomeScreen)  # stayed put, no crash
-            await app.action_quit()
-
-    asyncio.run(go())
+# (t → tree, s → setup are now real screens, covered in test_console_tree /
+# test_console_setup; no reserved-key placeholders remain on Home.)

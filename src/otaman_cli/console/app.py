@@ -272,7 +272,109 @@ class HomeScreen(Screen):
         self.app.push_screen(TreeScreen(self.program))
 
     def action_setup(self) -> None:
-        self.app.notify("Setup lands in wave 2.", timeout=5)
+        self.app.push_screen(SetupScreen(self.program))
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
+class _SetupItem(ListItem):
+    def __init__(self, verb) -> None:
+        hint = "otaman " + " ".join(verb.argv)
+        super().__init__(Label(f"{verb.label}   ($ {hint})", markup=False))
+        self.verb = verb
+
+
+class SetupScreen(Screen):
+    """Setup — administration by visibly shelling out to the tested CLI verbs
+    (console-ux-redesign wave 2 / D4 / S7). Read-first menu; enter runs the verb
+    against the picked program and surfaces its result."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
+    ]
+
+    def __init__(self, program: Program) -> None:
+        super().__init__()
+        self.program = program
+
+    def compose(self) -> ComposeResult:
+        yield _header()
+        yield _identity_badge_widget(self.program.root)
+        yield _mode_banner(
+            f"Setup — administration · {self.program.name}",
+            "enter run · esc back · q quit  (visibly shells out to otaman verbs)",
+        )
+        yield ListView(id="setup-list")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        from otaman_cli.console.setup import SETUP_VERBS
+
+        lv = self.query_one("#setup-list", ListView)
+        for verb in SETUP_VERBS:
+            lv.append(_SetupItem(verb))
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        item = event.item
+        if isinstance(item, _SetupItem):
+            self.app.push_screen(SetupResultScreen(self.program, tuple(item.verb.argv)))
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
+class SetupResultScreen(Screen):
+    """Runs one Setup verb and surfaces its output (visible execution, D4)."""
+
+    BINDINGS = [
+        Binding("r", "rerun", "Re-run", priority=True),
+        Binding("escape", "back", "Back", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
+    ]
+
+    def __init__(self, program: Program, argv: tuple[str, ...]) -> None:
+        super().__init__()
+        self.program = program
+        self.argv = argv
+        self._result = None
+
+    def compose(self) -> ComposeResult:
+        yield _header()
+        yield _identity_badge_widget(self.program.root)
+        yield _mode_banner(
+            f"Setup — otaman {' '.join(self.argv)}",
+            "r re-run · esc back · q quit",
+        )
+        with VerticalScroll(id="setup-result-scroll"):
+            yield Static("running…", id="setup-result", markup=False)
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self._run()
+
+    def action_rerun(self) -> None:
+        self._run()
+
+    def _run(self) -> None:
+        self.query_one("#setup-result", Static).update(
+            f"$ otaman {' '.join(self.argv)}\n\nrunning…"
+        )
+        self.run_worker(self._exec, thread=True, exclusive=True, group="setup")
+
+    def _exec(self) -> None:
+        from otaman_cli.console.setup import run_verb
+
+        result = run_verb(self.program, self.argv)
+        self.app.call_from_thread(self._show_result, result)
+
+    def _show_result(self, result) -> None:
+        self._result = result
+        status = "OK" if result.ok else f"FAILED (rc={result.returncode})"
+        self.query_one("#setup-result", Static).update(
+            f"$ {result.command}   [{status}]\n\n{result.output}"
+        )
 
     def action_back(self) -> None:
         self.app.pop_screen()
@@ -1281,5 +1383,7 @@ __all__ = [
     "ProgramPickerScreen",
     "ProposalScreen",
     "ReasonModal",
+    "SetupResultScreen",
+    "SetupScreen",
     "TreeScreen",
 ]

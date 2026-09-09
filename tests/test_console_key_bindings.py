@@ -33,6 +33,8 @@ def _screen_classes():
         ProgramPickerScreen,
         ProposalScreen,
         ReasonModal,
+        SetupResultScreen,
+        SetupScreen,
         TreeScreen,
     )
 
@@ -42,6 +44,8 @@ def _screen_classes():
         InboxScreen,
         InboxMessageScreen,
         TreeScreen,
+        SetupScreen,
+        SetupResultScreen,
         PendingListScreen,
         ProposalScreen,
         LifecycleScreen,
