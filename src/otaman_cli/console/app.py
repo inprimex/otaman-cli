@@ -150,6 +150,7 @@ class HomeScreen(Screen):
         Binding("t", "tree", "Artifact tree", priority=True),
         Binding("l", "lifecycle", "Lifecycle", priority=True),
         Binding("b", "review", "Spec review", priority=True),
+        Binding("a", "agents", "Agents", priority=True),
         Binding("s", "setup", "Setup", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
         Binding("escape", "back", "Back", priority=True),
@@ -167,8 +168,8 @@ class HomeScreen(Screen):
         yield Static("", id="home-header", markup=False)
         yield _mode_banner(
             f"Home — orientation for {self.program.name}",
-            "d decisions · m messages · t tree · l lifecycle · "
-            "b review · s setup · r refresh · q quit",
+            "d decisions · m messages · t tree · l lifecycle · b review · "
+            "a agents · s setup · r refresh · q quit",
         )
         with VerticalScroll(id="home-scroll"):
             yield Static("Loading…", id="home-body", markup=False)
@@ -267,6 +268,9 @@ class HomeScreen(Screen):
 
     def action_messages(self) -> None:
         self.app.push_screen(InboxScreen(self.program))
+
+    def action_agents(self) -> None:
+        self.app.push_screen(AgentsScreen(self.program))
 
     def action_tree(self) -> None:
         self.app.push_screen(TreeScreen(self.program))
@@ -430,6 +434,119 @@ class SetupResultScreen(Screen):
         self.query_one("#setup-result", Static).update(
             f"$ {result.command}   [{status}]\n\n{result.output}"
         )
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
+class _AgentItem(ListItem):
+    def __init__(self, tasks) -> None:
+        summary = (
+            f"active {len(tasks.active)} · queued {len(tasks.queued)} · "
+            f"blocked {len(tasks.blocked)}"
+        )
+        super().__init__(Label(f"{tasks.agent}   ({summary})", markup=False))
+        self.tasks = tasks
+
+
+class AgentsScreen(Screen):
+    """Assigned tasks per agent (interactive-human-console): one row per agent
+    with its open-work counts, from the program's queue files. Enter drills into
+    an agent's tasks. A read view — not the captured-items/backlog concept."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back", priority=True),
+        Binding("r", "refresh", "Refresh", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
+    ]
+
+    def __init__(self, program: Program) -> None:
+        super().__init__()
+        self.program = program
+
+    def compose(self) -> ComposeResult:
+        yield _header()
+        yield _identity_badge_widget(self.program.root)
+        yield _mode_banner(
+            f"Agents — assigned tasks · {self.program.name}",
+            "enter open · r refresh · esc back · q quit",
+        )
+        yield ListView(id="agents-list")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.run_worker(self._load, thread=True, exclusive=True, group="agents")
+
+    def action_refresh(self) -> None:
+        self.on_mount()
+
+    def _load(self) -> None:
+        from otaman_cli.console.tasks import list_agent_tasks
+
+        rows = list_agent_tasks(self.program)
+        self.app.call_from_thread(self._populate, rows)
+
+    def _populate(self, rows) -> None:
+        lv = self.query_one("#agents-list", ListView)
+        lv.clear()
+        # agents with open work first, then by name
+        rows = sorted(rows, key=lambda t: (t.open_count == 0, t.agent))
+        if rows:
+            for t in rows:
+                lv.append(_AgentItem(t))
+        else:
+            lv.append(ListItem(Label("No agent queues found for this program.")))
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        item = event.item
+        if isinstance(item, _AgentItem):
+            self.app.push_screen(AgentTasksScreen(self.program, item.tasks))
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
+class AgentTasksScreen(Screen):
+    """One agent's assigned tasks, grouped active / queued / blocked."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
+    ]
+
+    def __init__(self, program: Program, tasks) -> None:
+        super().__init__()
+        self.program = program
+        self.tasks = tasks
+
+    def compose(self) -> ComposeResult:
+        yield _header()
+        yield _identity_badge_widget(self.program.root)
+        yield _mode_banner(
+            f"Tasks — {self.tasks.agent} · {self.program.name}",
+            "esc back · q quit",
+        )
+        with VerticalScroll(id="agent-tasks-scroll"):
+            yield Static(self._body_text(self.tasks), id="agent-tasks-body", markup=False)
+        yield Footer()
+
+    @staticmethod
+    def _body_text(tasks) -> str:
+        lines: list[str] = []
+        for label, items in (
+            ("ACTIVE", tasks.active),
+            ("QUEUED", tasks.queued),
+            ("BLOCKED", tasks.blocked),
+        ):
+            lines.append(f"{label} ({len(items)})")
+            if items:
+                for t in items:
+                    lines.append(f"  • {t[:110]}")
+            else:
+                lines.append("  —")
+            lines.append("")
+        lines.append(f"(done: {tasks.done})")
+        return "\n".join(lines)
 
     def action_back(self) -> None:
         self.app.pop_screen()
@@ -1431,6 +1548,8 @@ class OtamanConsole(App):
 
 __all__ = [
     "AddProjectScreen",
+    "AgentTasksScreen",
+    "AgentsScreen",
     "HomeScreen",
     "InboxMessageScreen",
     "InboxScreen",
