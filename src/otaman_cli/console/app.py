@@ -129,7 +129,149 @@ class ProgramPickerScreen(Screen):
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         program = getattr(event.item, "program", None)
         if program is not None:
-            self.app.push_screen(PendingListScreen(program))
+            self.app.push_screen(HomeScreen(program))
+
+
+class HomeScreen(Screen):
+    """The orientation landing after program pick (console-ux-redesign 1.1 / D1).
+
+    Aggregates existing surfaces into one glance — the human's queue, fleet and
+    program status in the lifecycle canon's own vocabulary, the messages-to-human
+    inbox, enabled processes, and team/connections/secrets/skills stats — before
+    any navigation (S1). Jump keys prefer the action's first letter (D3). The
+    feature-usage score is a RESERVED slot: an undefined number is never shown.
+    Data loads off the UI thread; Home aggregates, never re-derives.
+    """
+
+    BINDINGS = [
+        Binding("d", "decisions", "Decisions", priority=True),
+        Binding("t", "tree", "Artifact tree", priority=True),
+        Binding("l", "lifecycle", "Lifecycle", priority=True),
+        Binding("b", "review", "Spec review", priority=True),
+        Binding("s", "setup", "Setup", priority=True),
+        Binding("r", "refresh", "Refresh", priority=True),
+        Binding("escape", "back", "Back", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
+    ]
+
+    def __init__(self, program: Program) -> None:
+        super().__init__()
+        self.program = program
+        self._summary = None
+
+    def compose(self) -> ComposeResult:
+        yield _header()
+        yield _identity_badge_widget(self.program.root)
+        yield Static("", id="home-header", markup=False)
+        yield _mode_banner(
+            f"Home — orientation for {self.program.name}",
+            "d decisions · t tree · l lifecycle · b review · s setup · r refresh · q quit",
+        )
+        with VerticalScroll(id="home-scroll"):
+            yield Static("Loading…", id="home-body", markup=False)
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.run_worker(self._load, thread=True, exclusive=True, group="home")
+
+    def action_refresh(self) -> None:
+        self.on_mount()
+
+    def _load(self) -> None:
+        from otaman_cli.console.home import build_home_summary
+
+        summary = build_home_summary(self.program)
+        self.app.call_from_thread(self._apply_summary, summary)
+
+    def _apply_summary(self, summary) -> None:
+        self._summary = summary
+        self.query_one("#home-header", Static).update(self._header_text(summary))
+        self.query_one("#home-body", Static).update(self._body_text(summary))
+
+    # -- text builders (pure, unit-tested via build_home_summary + these) -----
+
+    def _header_text(self, summary) -> str:
+        from otaman_cli.console.identity import resolve_identity
+
+        try:
+            ident = resolve_identity(self.program.root).audit_label
+        except Exception:  # noqa: BLE001
+            ident = "(unresolved)"
+        fleet = self._fleet_line(summary)
+        return "\n".join(
+            [
+                f"OTAMAN  ▸ program: {self.program.name}   you: {ident}",
+                f"{fleet}    decisions: {summary.decisions_total} ⏳",
+                f"[HOME]    policy: {summary.policy}",
+            ]
+        )
+
+    @staticmethod
+    def _fleet_line(summary) -> str:
+        if not summary.presence_enabled:
+            return "agents: presence disabled"
+        if not summary.fleet:
+            return "agents: none reporting"
+        # adaptive: only the states that actually exist, in a stable order
+        order = ["working", "waiting", "blocked", "idle"]
+        keys = [k for k in order if k in summary.fleet] + [
+            k for k in sorted(summary.fleet) if k not in order
+        ]
+        return "agents: " + " · ".join(f"{summary.fleet[k]} {k}" for k in keys)
+
+    @staticmethod
+    def _body_text(summary) -> str:
+        lines: list[str] = []
+        lines.append("YOUR QUEUE")
+        lines.append(f"  {summary.scr_count} spec-change requests ⏳")
+        lines.append(f"  {summary.outcome_count} outcome-proposals")
+        lines.append(f"  {summary.ratify_blocked} ratify-blocked")
+        lines.append(f"  {summary.spec_review} awaiting spec review")
+        lines.append("")
+        lines.append("MESSAGES TO YOU")
+        lines.append(f"  {summary.inbox_count} in inbox   (t… full view: task 1.2)")
+        lines.append("")
+        lines.append("PROGRAM")
+        lines.append(f"  {summary.changes_total} active changes")
+        if summary.triage:
+            for t, n in summary.triage.items():
+                if n:
+                    lines.append(f"    {n} {t}")
+        lines.append("")
+        lines.append("PROCESSES")
+        if summary.processes_enabled:
+            lines.append("  " + ", ".join(summary.processes_enabled))
+        else:
+            lines.append("  none enabled")
+        lines.append("")
+        lines.append("SETUP STATS")
+        lines.append(f"  team: {summary.team_humans} humans · {summary.team_agents} agents")
+        lines.append(f"  connections: {summary.connections}   secrets: {summary.secrets}")
+        lines.append(f"  skills: {summary.skills}")
+        # feature-usage score: RESERVED — an undefined number is never displayed.
+        return "\n".join(lines)
+
+    # -- navigation (every advertised key dispatches with a visible ack) ------
+
+    def action_decisions(self) -> None:
+        self.app.push_screen(PendingListScreen(self.program))
+
+    def action_lifecycle(self) -> None:
+        self.app.push_screen(LifecycleScreen(self.program))
+
+    def action_review(self) -> None:
+        self.app.push_screen(ArtifactBrowserScreen(self.program))
+
+    def action_tree(self) -> None:
+        # Reserved: the linked artifact tree lands in wave 1 task 1.3. The key
+        # still dispatches with a visible ack (no dead advertised keys, D3).
+        self.app.notify("Artifact tree lands in wave 1 (task 1.3).", timeout=5)
+
+    def action_setup(self) -> None:
+        self.app.notify("Setup lands in wave 2.", timeout=5)
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
 
 
 class PendingListScreen(Screen):
@@ -910,6 +1052,7 @@ class OtamanConsole(App):
 
 
 __all__ = [
+    "HomeScreen",
     "OtamanConsole",
     "PendingListScreen",
     "ProgramPickerScreen",
