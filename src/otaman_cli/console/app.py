@@ -243,8 +243,10 @@ class HomeScreen(Screen):
                     lines.append(f"    {n} {t}")
         lines.append("")
         lines.append("PROCESSES")
+        if summary.process_level:
+            lines.append(f"  process level: {summary.process_level}")
         if summary.processes_enabled:
-            lines.append("  " + ", ".join(summary.processes_enabled))
+            lines.append("  enabled: " + ", ".join(summary.processes_enabled))
         else:
             lines.append("  none enabled")
         lines.append("")
