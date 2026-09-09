@@ -370,6 +370,92 @@ def _ensure_routing_rules(platform_yaml: Path) -> int:
         return 0
 
 
+def _ask_yes_no_init(question: str, *, default: bool = True) -> bool:
+    """Prompt-based yes/no; returns *default* on EOF / Ctrl-C (non-interactive safe)."""
+    hint = "Y/n" if default else "y/N"
+    try:
+        raw = input(f"  ? {question} [{hint}]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return default
+    if not raw:
+        return default
+    return raw in ("y", "yes")
+
+
+def _openspec_cli_present() -> bool:
+    """Whether the OpenSpec CLI is reachable — as a global command or via npx."""
+    import shutil
+    import subprocess
+
+    if shutil.which("openspec"):
+        return True
+    npx = shutil.which("npx")
+    if npx:
+        try:
+            r = subprocess.run(
+                [npx, "openspec", "--version"], capture_output=True, text=True, timeout=15
+            )
+            return r.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return False
+    return False
+
+
+def _ensure_openspec_cli(config: dict, *, interactive: bool | None = None) -> None:
+    """scan-init-edition-backfill 1.3 — re-evaluate the openspec bootstrap gate
+    PER PROGRAM.
+
+    When this program declares ``specs.format: openspec`` but the pinned
+    OpenSpec CLI is absent (because the org skipped it at bootstrap), OFFER to
+    install it per the org's pinned convention rather than leaving a bare FAIL as
+    the only outcome. Class rule: org-bootstrap gates are per-need, not
+    once-forever. Non-TTY prints the precise install command (never FAIL-only);
+    never aborts init.
+    """
+    specs = config.get("specs") if isinstance(config.get("specs"), dict) else {}
+    if specs.get("format") != "openspec":
+        return
+    if _openspec_cli_present():
+        return
+
+    from otaman_cli.doctor import OPENSPEC_INSTALL_HINT, OPENSPEC_PINNED_VERSION
+
+    if interactive is None:
+        interactive = sys.stdin.isatty()
+    print()
+    UI.warn(
+        f"specs.format is 'openspec' but the pinned OpenSpec CLI "
+        f"(@fission-ai/openspec@{OPENSPEC_PINNED_VERSION}) is not installed."
+    )
+    if not interactive:
+        UI.muted("  Install it per the org convention (this is offered, not a hard failure):")
+        UI.muted(f"    {OPENSPEC_INSTALL_HINT}")
+        return
+    if not _ask_yes_no_init(f"Install it now ({OPENSPEC_INSTALL_HINT})?", default=True):
+        UI.muted(f"  Skipped. Install later with:  {OPENSPEC_INSTALL_HINT}")
+        return
+
+    import subprocess
+
+    try:
+        r = subprocess.run(
+            OPENSPEC_INSTALL_HINT.split(), capture_output=True, text=True, timeout=300
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        UI.error(f"Install failed to launch: {exc}")
+        UI.muted(f"  Run it manually:  {OPENSPEC_INSTALL_HINT}")
+        return
+    if r.returncode == 0 and _openspec_cli_present():
+        UI.ok(f"Installed OpenSpec CLI (@fission-ai/openspec@{OPENSPEC_PINNED_VERSION})")
+    else:
+        UI.warn("Install command did not complete cleanly.")
+        detail = (r.stderr or r.stdout or "").strip()
+        if detail:
+            UI.muted(f"  {detail[:300]}")
+        UI.muted(f"  Run it manually:  {OPENSPEC_INSTALL_HINT}")
+
+
 def _ensure_org_sections(platform_yaml: Path, *, interactive: bool | None = None) -> int:
     """scan-init-edition-backfill 1.1 — backfill runner:/terminal:/human-roster:
     from the org's PRIMARY registered platform (the runner's alphabetical-first
@@ -1171,6 +1257,18 @@ def cmd_init(args: list[str]) -> int:
         _scaffold_launcher_after_init(config_path, yes=yes)
     except Exception as _scaffold_exc:
         UI.warn(f"Launcher scaffold skipped: {_scaffold_exc}")
+
+    # scan-init-edition-backfill 1.3 — re-evaluate the openspec bootstrap gate
+    # for THIS program before doctor runs: offer the pinned install rather than
+    # letting doctor report a bare FAIL (org-bootstrap gates are per-need).
+    try:
+        import yaml as _yaml
+
+        _cfg = _yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        if isinstance(_cfg, dict):
+            _ensure_openspec_cli(_cfg)
+    except Exception as _osc_exc:  # noqa: BLE001 - the offer is additive; never break init
+        UI.muted(f"openspec gate re-check skipped: {_osc_exc}")
 
     if skip_doctor:
         print()
