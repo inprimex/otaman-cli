@@ -71,6 +71,17 @@ class TestPlatformsRegistry:
         with pytest.raises(rr.PlatformsError, match="name"):
             rr.platforms_add(p, dir_override=str(tmp_path / "platforms"))
 
+    def test_add_derives_name_from_project(self, tmp_path: Path) -> None:
+        # deploy onboarding finding: scan/init write `project:` but no `name:`;
+        # registration must derive the program name from `project:` so a scanned
+        # program isn't silently invisible to the runner.
+        pdir = tmp_path / "platforms"
+        p = tmp_path / "platform.yaml"
+        p.write_text("project: pmeets\nversion: '1.0'\nrepos: []\n", encoding="utf-8")
+        result = rr.platforms_add(p, dir_override=str(pdir))
+        assert result["status"] == "installed"
+        assert (pdir / "pmeets.yaml").is_symlink()
+
     @pytest.mark.parametrize("bad", ["../rogue", "a/b", ".hidden", "a b", "..", "x" * 65])
     def test_add_pathy_name_raises(self, tmp_path: Path, bad: str) -> None:
         """Review finding #3: unsanitized names became symlink paths
