@@ -587,7 +587,7 @@ def cmd_help() -> int:
   {C.GREEN}init companion-repos{C.RESET} [opts]     Scaffold business/strategy companion repos (CE local; no bridge)
   {C.GREEN}migrate{C.RESET} [name] [--dry-run] [--yes]   Migrate legacy layout to dedicated otaman folder
   {C.GREEN}clone{C.RESET} <source> [--target D]    Clone all repos from otaman config (git URL, SSH, local)
-  {C.GREEN}doctor{C.RESET}                        Check environment readiness (git, runtimes, CLI, tmux, MCP)
+  {C.GREEN}doctor{C.RESET} [--org N] [--scan]      Check environment readiness (git, runtimes, CLI, tmux, MCP, ~/.local ownership; --scan deep-scans ownership)
   {C.GREEN}validate{C.RESET} [config]             Validate platform.yaml against the schema
   {C.GREEN}validate docs{C.RESET} [--fix|--align] <t...>  Lint/fix markdown tables (R1-R4, fence+span-aware, backtick-first; explicit targets)
   {C.GREEN}validate-messages{C.RESET} [file]      Validate bus message files
