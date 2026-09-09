@@ -47,7 +47,9 @@ def _bus_dir(program):
     return program.root / ".agents" / "bus" / "active"
 
 
-def _change(program, name, *, stage=None, triage=None, note="", ticks=(), owner="cli"):
+def _change(
+    program, name, *, stage=None, triage=None, note="", ticks=(), owner="cli", approved_by=None
+):
     d = _changes_dir(program) / name
     d.mkdir(parents=True)
     oy = {}
@@ -57,6 +59,8 @@ def _change(program, name, *, stage=None, triage=None, note="", ticks=(), owner=
         oy["triage"] = triage
     if note:
         oy["triage_note"] = note
+    if approved_by:
+        oy["approved_by"] = approved_by
     if oy:
         (d / ".openspec.yaml").write_text(yaml.safe_dump(oy), encoding="utf-8")
     if ticks:
@@ -114,6 +118,49 @@ def test_tasks_counts_and_states(program):
     assert rows["in-flight-one"].tasks_done == 1 and rows["in-flight-one"].tasks_total == 3
     assert rows["complete-one"].state == "complete-unarchived"
     assert rows["no-tasks"].tasks_total == 0 and rows["no-tasks"].state == "—"
+
+
+# ---------------------------------------------------------------------------
+# 1.1 next-actor fix: ratify-blocked -> human (Roman's misrouted-nudge incident)
+
+
+def test_ratify_blocked_change_next_actor_is_human(program):
+    # complete-unarchived delta change lacking approval → archive gate blocks on
+    # approved_by; the next actor is the human with `otaman ratify`, not spec-agent.
+    _change(
+        program,
+        "auto-clear-blocked-entries",
+        stage="dispatched",
+        triage="dormant",
+        ticks=[True, True],
+    )
+    (row,) = derive_change_table(changes_dir=_changes_dir(program), bus_active_dir=None)
+    assert row.state == "complete-unarchived"
+    assert "human" in row.next_actor and "ratify" in row.next_actor
+    assert "auto-clear-blocked-entries" in row.next_actor
+
+
+def test_approved_complete_change_next_actor_is_spec_agent(program):
+    _change(
+        program,
+        "done-approved",
+        stage="dispatched",
+        ticks=[True, True],
+        approved_by="ratified: roman — shipped",
+    )
+    (row,) = derive_change_table(changes_dir=_changes_dir(program), bus_active_dir=None)
+    assert row.next_actor == "spec-agent"  # approved → archive is spec-agent's
+
+
+def test_ratify_blocked_nudge_routes_to_human(program):
+    _change(program, "stuck", stage="dispatched", triage="dormant", ticks=[True, True])
+    (row,) = derive_change_table(
+        changes_dir=_changes_dir(program), bus_active_dir=_bus_dir(program)
+    )
+    assert nudge_target(row.next_actor, row.triage) == "human"  # not spec-agent (the bug)
+    ok, msg = send_nudge(program, row)
+    assert ok and "human" in msg
+    assert list(_bus_dir(program).glob("*-nudge-stuck.md"))[0].read_text("utf-8").count("to: human")
 
 
 # ---------------------------------------------------------------------------
