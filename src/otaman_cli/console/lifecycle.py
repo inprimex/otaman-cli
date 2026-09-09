@@ -93,17 +93,37 @@ def _git(repo: Path, *args: str):
     )
 
 
-def _commit_push(repo: Path, message: str) -> tuple[bool, bool, str]:
-    """Commit staged changes + best-effort push. Returns (committed, pushed, detail)."""
+def _commit_push(
+    repo: Path, message: str, *, add_all: bool = False, paths: list[str] | None = None
+) -> tuple[bool, bool, str]:
+    """Commit the console write + best-effort push. Returns (committed, pushed, detail).
+
+    The console is the HUMAN's seat (SSH-identified, keypress = confirmation), so
+    the commit runs with the branch-policy hook's own human override
+    (OTAMAN_ALLOW_MAIN=1) — the identity-correct answer to "the actor is Roman, not
+    the fleet agent" (gate-3.1 defect: the agent-identity commit was refused on
+    main). Any git failure leaves the write flagged loudly (last-resort D2 path)."""
+    import os
     import subprocess
 
+    env = {**os.environ, "OTAMAN_ALLOW_MAIN": "1"}  # human seat: sanctioned override
+
+    def _run(*args):
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=30, env=env
+        )
+
     try:
-        c = _git(repo, "commit", "-m", message)
-        if c.returncode != 0:
-            reason = (c.stderr or c.stdout or "").strip().splitlines()
+        if add_all:
+            _run("add", "-A", "--", "openspec/changes")
+        elif paths:
+            _run("add", "--", *paths)
+        commit = _run("commit", "-m", message)
+        if commit.returncode != 0:
+            reason = (commit.stderr or commit.stdout or "").strip().splitlines()
             return False, False, reason[0] if reason else "git commit failed"
-        p = _git(repo, "push")
-        return True, p.returncode == 0, "" if p.returncode == 0 else "push failed"
+        push = _run("push")
+        return True, push.returncode == 0, "" if push.returncode == 0 else "push failed"
     except (OSError, subprocess.SubprocessError) as exc:
         return False, False, str(exc)
 
@@ -146,9 +166,10 @@ def ratify_change(program: Program, name: str, *, by: str, reason: str) -> tuple
     updated["ratified_at"] = at
     _write_openspec(oy, updated)
     repo = _specs_root(program)
-    _git(repo, "add", "--", f"openspec/changes/{name}/.openspec.yaml")
     committed, pushed, detail = _commit_push(
-        repo, f"chore(spec): ratify {name} (via otaman -i by {by})"
+        repo,
+        f"chore(spec): ratify {name} (via otaman -i by {by})",
+        paths=[f"openspec/changes/{name}/.openspec.yaml"],
     )
     return True, f"ratified {name}{_durability_suffix(committed, pushed, detail)}"
 
@@ -185,8 +206,9 @@ def archive_change(program: Program, name: str) -> tuple[bool, str]:
     except Exception:  # noqa: BLE001 - stage write best-effort; the move is the archive
         pass
     repo = _specs_root(program)
-    _git(repo, "add", "-A", "--", "openspec/changes")
-    committed, pushed, detail = _commit_push(repo, f"chore(spec): archive {name} (via otaman -i)")
+    committed, pushed, detail = _commit_push(
+        repo, f"chore(spec): archive {name} (via otaman -i)", add_all=True
+    )
     return True, f"archived {name}{_durability_suffix(committed, pushed, detail)}"
 
 
