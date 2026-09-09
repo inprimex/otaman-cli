@@ -213,10 +213,10 @@ def change_detail(program: Program, name: str) -> dict:
         check_archive_gate,
         check_dispatch_gate,
         check_merge_gate,
-        has_approval,
-        is_research,
         read_openspec,
     )
+
+    from otaman_cli.lifecycle import _completed_next_actor
 
     changes = _specs_changes_dir(program)
     if changes is None:
@@ -269,11 +269,7 @@ def change_detail(program: Program, name: str) -> dict:
             state = IN_FLIGHT
         else:
             state = COMPLETE_UNARCHIVED
-            next_actor = (
-                f"human (otaman ratify {name})"
-                if (not is_research(data) and not has_approval(data))
-                else "spec-agent"
-            )
+            next_actor = _completed_next_actor(data, name)
     archive_clean = not gates.get("archive", {}).get("violations")
     return {
         "name": name,

@@ -129,7 +129,8 @@ def test_complete_unarchived_change(tmp_path):
     rows = list_lifecycle_states(program, now=_NOW)
     (row,) = [r for r in rows if r.change == "done-change"]
     assert row.state == COMPLETE_UNARCHIVED
-    assert "spec-agent" in row.next_actor
+    # unapproved → ratify-blocked → human next actor (gate 3.1 shared-derivation fix)
+    assert "human" in row.next_actor and "ratify" in row.next_actor
 
 
 def test_archived_change_is_not_listed(tmp_path):

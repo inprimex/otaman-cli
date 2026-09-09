@@ -149,7 +149,7 @@ def test_approved_complete_change_next_actor_is_spec_agent(program):
         approved_by="ratified: roman — shipped",
     )
     (row,) = derive_change_table(changes_dir=_changes_dir(program), bus_active_dir=None)
-    assert row.next_actor == "spec-agent"  # approved → archive is spec-agent's
+    assert "spec-agent" in row.next_actor  # approved → archive is spec-agent's
 
 
 def test_ratify_blocked_nudge_routes_to_human(program):

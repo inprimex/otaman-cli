@@ -148,6 +148,21 @@ def _stage_of(change_dir: Path) -> str | None:
     return read_stage(change_dir / ".openspec.yaml")
 
 
+def _completed_next_actor(data: dict, change_name: str) -> str:
+    """Next actor for a complete-unarchived change — SHARED by both renderers
+    (spec status via derive_lifecycle + the console table via derive_change_table),
+    so the ratify-blocked→human rule can never drift between them (gate 3.1).
+
+    A delta change that is done but lacks approval is ratify-blocked at the archive
+    gate → the human with ``otaman ratify``. Approved / research → spec-agent."""
+    from otaman_core.spec_lifecycle import has_approval, is_research
+
+    data = data if isinstance(data, dict) else {}
+    if not is_research(data) and not has_approval(data):
+        return f"human (otaman ratify {change_name})"
+    return "spec-agent (archive the change)"
+
+
 def _delivery_of(change_dir: Path) -> str | None:
     """The change's ``delivery:`` mode (``auto``/``hitl``) from .openspec.yaml, or None."""
     from otaman_core.spec_lifecycle import read_openspec
@@ -203,8 +218,12 @@ def derive_lifecycle(
                 datetime.fromtimestamp(d.stat().st_mtime, timezone.utc).isoformat(), now
             )
             days = _age_days(secs)
+            from otaman_core.spec_lifecycle import read_openspec
+
             stage = _stage_of(d)
-            deliv = _delivery_of(d)
+            oy_data = read_openspec(d / ".openspec.yaml")
+            deliv = oy_data.get("delivery") if isinstance(oy_data, dict) else None
+            deliv = deliv if isinstance(deliv, str) else None
             if _UNTICKED.search(text):
                 rows.append(
                     LifecycleRow(
@@ -220,6 +239,9 @@ def derive_lifecycle(
                     )
                 )
             elif _TICKED.search(text):
+                # gate 3.1 fix: ratify-blocked complete changes route to the human
+                # in spec status too, not just the console table (shared helper).
+                nxt = _completed_next_actor(oy_data, d.name)
                 rows.append(
                     LifecycleRow(
                         change=d.name,
@@ -228,7 +250,7 @@ def derive_lifecycle(
                         age=_human_age(secs),
                         age_days=days,
                         owner="spec-agent",
-                        next_actor="spec-agent (archive the change)",
+                        next_actor=nxt,
                         severity=_bucket_severity(days),
                         delivery=deliv,
                     )
@@ -323,7 +345,7 @@ def derive_change_table(
     now: datetime | None = None,
 ) -> list[ChangeRow]:
     """One ChangeRow per active (non-archived) change, sorted by triage then name."""
-    from otaman_core.spec_lifecycle import has_approval, is_research, read_openspec
+    from otaman_core.spec_lifecycle import read_openspec
 
     now = now or datetime.now(timezone.utc)
     rows: list[ChangeRow] = []
@@ -349,14 +371,7 @@ def derive_change_table(
                 next_actor = _unticked_owners(text)
             elif _TICKED.search(text):
                 state = COMPLETE_UNARCHIVED
-                # console-lifecycle-actions 1.1: a delta change that is done but
-                # lacks approval is ratify-blocked at the archive gate — the next
-                # actor is the HUMAN with `otaman ratify`, not spec-agent (Roman's
-                # misrouted-nudge incident). Approved / research changes → archive.
-                if not is_research(data) and not has_approval(data):
-                    next_actor = f"human (otaman ratify {d.name})"
-                else:
-                    next_actor = "spec-agent"
+                next_actor = _completed_next_actor(data, d.name)
         secs = _delta_secs(datetime.fromtimestamp(d.stat().st_mtime, timezone.utc).isoformat(), now)
         rows.append(
             ChangeRow(
