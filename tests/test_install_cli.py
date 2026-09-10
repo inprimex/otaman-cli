@@ -228,3 +228,28 @@ class TestRun:
         assert rc == 0
         # Dry-run: symlink still there.
         assert (bin_dir / "otaman").is_symlink()
+
+
+# ---------------------------------------------------------------------------
+# regression: `otaman install-cli` dispatches through run_script, which requires
+# a main() entry point — install_cli previously only defined run() (deploy live
+# breakage 2026-09-10: "no main() entry point").
+
+
+@pytestmark_posix
+def test_main_entrypoint_exists_and_is_dry_run_safe(fake_bin):
+    assert callable(install_cli.main)
+    rc = install_cli.main(["--bin-dir", str(fake_bin)])  # no --apply → preview
+    assert isinstance(rc, int)
+    assert not (fake_bin / "otaman").exists()  # preview only, nothing written
+
+
+@pytestmark_posix
+def test_run_script_finds_install_cli_main(fake_bin):
+    from otaman_cli.main import run_script
+
+    r = run_script("install_cli.py", "--bin-dir", str(fake_bin))
+    # dispatched to main() (not the "no main() entry point" rc=2 error) and wrote
+    # nothing in dry-run.
+    assert isinstance(r.returncode, int) and r.returncode != 2
+    assert not (fake_bin / "otaman").exists()

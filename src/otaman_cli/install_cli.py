@@ -332,5 +332,14 @@ def run(argv: list[str] | None = None) -> int:
     return posix_install(bin_dir, apply=args.apply)
 
 
+def main(argv: list[str] | None = None) -> int:
+    """Entry point for the CLI dispatcher's run_script (which requires ``main``).
+
+    `otaman install-cli` dispatches via run_script → SCRIPT_MAP → this module and
+    calls ``main(argv)``; without it the command failed with "no main() entry
+    point" (deploy live breakage 2026-09-10). Thin alias over :func:`run`."""
+    return run(argv)
+
+
 if __name__ == "__main__":
     sys.exit(run())
