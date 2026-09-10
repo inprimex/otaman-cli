@@ -25,7 +25,7 @@ from otaman_cli.registries.loader import (
 )
 from otaman_cli.registries.platform_ext import load_program_extensions
 from otaman_cli.registries.roles import (
-    authz_advisory,
+    hat_advisory,
     resolve_operating_actor,
     resolve_roles,
 )
@@ -42,8 +42,8 @@ def _load(root: Path) -> tuple[Path, Any] | None:
     path = resolve_registry_path(root, "solutions")
     if path is None:
         _bail(
-            "Cannot locate solutions.yaml — no business repo found.\n"
-            "  Set OTAMAN_BUSINESS_DIR, or add a repo with owner: cpo-agent in platform.yaml."
+            "Cannot locate solutions.yaml — the registry home is not configured.\n"
+            "  Set program.registries.strategy_repo in platform.yaml (or OTAMAN_STRATEGY_DIR)."
         )
         return None
     raw = yaml_load(path)
@@ -96,8 +96,8 @@ def cmd_add(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
         return _bail(not_in_project_message())
-    actor, roles, platform = _ctx(root)
-    authz_advisory("solution.add", actor, roles)
+    actor, _roles, platform = _ctx(root)
+    hat_advisory("solution.add", ("cto",), root)
 
     required = ("id", "outcome", "description")
     missing = [k for k in required if not args.get(k)]
@@ -331,8 +331,8 @@ def cmd_propose(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
         return _bail(not_in_project_message())
-    actor, roles, _ = _ctx(root)
-    authz_advisory("solution.propose", actor, roles)
+    actor, _roles, _ = _ctx(root)
+    hat_advisory("solution.propose", ("cto",), root)
 
     loaded = _load(root)
     if loaded is None:
@@ -371,8 +371,8 @@ def cmd_promote_to_complete(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
         return _bail(not_in_project_message())
-    actor, roles, _ = _ctx(root)
-    authz_advisory("solution.promote-to-complete", actor, roles)
+    actor, _roles, _ = _ctx(root)
+    hat_advisory("solution.promote-to-complete", ("cto",), root)
 
     loaded = _load(root)
     if loaded is None:
@@ -434,8 +434,8 @@ def cmd_discard(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
         return _bail(not_in_project_message())
-    actor, roles, _ = _ctx(root)
-    authz_advisory("solution.discard", actor, roles)
+    actor, _roles, _ = _ctx(root)
+    hat_advisory("solution.discard", ("cto",), root)
 
     loaded = _load(root)
     if loaded is None:

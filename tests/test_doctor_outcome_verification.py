@@ -21,7 +21,7 @@ def prog(tmp_path, monkeypatch):
     root.mkdir()
     business = tmp_path / "business"
     business.mkdir()
-    monkeypatch.setenv("OTAMAN_BUSINESS_DIR", str(business))
+    monkeypatch.setenv("OTAMAN_STRATEGY_DIR", str(business))
     return root, business
 
 
@@ -80,7 +80,7 @@ def test_verified_all_done_verified_is_clean(prog):
 def test_verified_no_business_repo_is_graceful(tmp_path, monkeypatch):
     root = tmp_path / "prog"
     root.mkdir()
-    monkeypatch.delenv("OTAMAN_BUSINESS_DIR", raising=False)
+    monkeypatch.delenv("OTAMAN_STRATEGY_DIR", raising=False)
     _platform(root, level="verified")
     # no business repo resolvable → applicable but nothing to lint (no crash)
     result = _check_outcome_verification(root)

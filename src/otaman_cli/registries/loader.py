@@ -1,11 +1,11 @@
 """Path discovery + round-trip YAML I/O for registry files.
 
-Path resolution order:
-1. ``OTAMAN_BUSINESS_DIR`` env var if set (test + scripted override)
-2. The repo owned by ``cpo-agent`` (or ``main-agent`` in single-repo mode)
-   as declared in ``platform.yaml`` ``repos[]``
-3. ``find_project_root() / "outcomes.yaml"`` etc. (cwd fallback for
-   simple single-repo programs)
+The registry HOME is configuration, not convention (team-mode Phase A 1.1):
+1. ``OTAMAN_STRATEGY_DIR`` env var if set (test + scripted override)
+2. ``program.registries.strategy_repo`` — a repo slug resolved against
+   ``platform.yaml`` ``repos[]``
+3. otherwise None — no silent fallback (the old ``find_business_repo``
+   cpo-agent/main-agent owner-scan is retired; a missing key is a doctor error)
 
 YAML I/O uses ruamel.yaml round-trip mode so existing comments and
 formatting survive mutations.
@@ -68,29 +68,37 @@ def _read_repos(root: Path) -> list[dict[str, Any]]:
     return [r for r in repos if isinstance(r, dict)]
 
 
-def find_business_repo(root: Path) -> Path | None:
-    """Locate the program's business repo from ``platform.yaml``.
+def _resolve_repo_by_name(root: Path, name: str) -> Path | None:
+    """Absolute path of the ``repos[]`` entry named *name*, or None."""
+    for r in _read_repos(root):
+        if r.get("name") == name:
+            rel = r.get("path") or ""
+            if rel:
+                # path is relative to platform.yaml's dir (otaman-meta root)
+                return (root / rel).expanduser().resolve()
+    return None
 
-    Resolution chain:
-    1. ``OTAMAN_BUSINESS_DIR`` env var (absolute path; for tests/scripts)
-    2. Repo with ``owner: cpo-agent``
-    3. Repo with ``owner: main-agent`` (single-repo programs from
-       cli-init-smart-entry-point)
-    4. ``None`` (caller decides whether to error)
+
+def strategy_repo(root: Path) -> Path | None:
+    """The registry home from ``program.registries.strategy_repo`` (team-mode
+    Phase A 1.1 — "roles are hats, repos are homes").
+
+    Resolution: an explicit ``OTAMAN_STRATEGY_DIR`` override (tests/ops), else
+    the ``program.registries.strategy_repo`` repo slug resolved against
+    ``repos[]``. NO silent convention-based fallback — a registries program that
+    hasn't set the key resolves to None (doctor reports it). This RETIRES the old
+    find_business_repo owner-scan (cpo-agent/main-agent) discovery.
     """
-    env_override = os.environ.get("OTAMAN_BUSINESS_DIR", "").strip()
+    env_override = os.environ.get("OTAMAN_STRATEGY_DIR", "").strip()
     if env_override:
         return Path(env_override).expanduser().resolve()
 
-    repos = _read_repos(root)
-    for owner_hint in ("cpo-agent", "main-agent"):
-        for r in repos:
-            if r.get("owner") == owner_hint:
-                rel = r.get("path") or ""
-                if not rel:
-                    continue
-                # Path is relative to platform.yaml's directory (otaman-meta root)
-                return (root / rel).expanduser().resolve()
+    cfg = yaml_load(_platform_yaml_path(root)) or {}
+    program = cfg.get("program") if isinstance(cfg, dict) else None
+    regs = program.get("registries") if isinstance(program, dict) else None
+    slug = regs.get("strategy_repo") if isinstance(regs, dict) else None
+    if isinstance(slug, str) and slug.strip():
+        return _resolve_repo_by_name(root, slug.strip())
     return None
 
 
@@ -98,13 +106,15 @@ def resolve_registry_path(root: Path, kind: str) -> Path | None:
     """Resolve the absolute path to ``outcomes.yaml`` / ``solutions.yaml`` /
     ``personas.yaml`` for the program rooted at *root*.
 
-    *kind* is one of ``outcomes`` | ``solutions`` | ``personas``.
+    *kind* is one of ``outcomes`` | ``solutions`` | ``personas``. Reads the
+    registry HOME from ``program.registries.strategy_repo`` (team-mode 1.1);
+    returns None when the key is unset — no fallback.
     """
     if kind not in ("outcomes", "solutions", "personas"):
         raise ValueError(f"unknown registry kind: {kind!r}")
 
-    business = find_business_repo(root)
-    if business is None:
+    home = strategy_repo(root)
+    if home is None:
         return None
 
     # Read program extensions to get per-kind path override (defaults to
@@ -115,12 +125,12 @@ def resolve_registry_path(root: Path, kind: str) -> Path | None:
         ext = ProgramExtensions()
 
     process_cfg = getattr(ext.processes, kind)
-    return business / process_cfg.path
+    return home / process_cfg.path
 
 
 __all__ = [
     "yaml_load",
     "yaml_dump",
-    "find_business_repo",
+    "strategy_repo",
     "resolve_registry_path",
 ]
