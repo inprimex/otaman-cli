@@ -708,19 +708,25 @@ class TreeScreen(Screen):
         if not roots:
             tree.root.add_leaf("(no artifacts)")
             return
+        # clip rows to the tree's content width so no row overflows → ←/→ stay
+        # collapse/expand instead of being hijacked into horizontal scroll.
+        width = tree.size.width - 4 if tree.size.width else 0
         for r in roots:
-            self._add(tree.root, r)
+            self._add(tree.root, r, width)
 
-    def _add(self, parent, node) -> None:
+    def _add(self, parent, node, width=0) -> None:
         from rich.text import Text
 
         label = Text(
-            node.label, style="red" if node.blocked_by else _STATUS_STYLE.get(node.status, "")
+            node.display_label(),
+            style="red" if node.blocked_by else _STATUS_STYLE.get(node.status, ""),
         )
+        if width and label.cell_len > width:
+            label.truncate(width, overflow="ellipsis")
         if node.children:
             branch = parent.add(label, data=node, expand=True)
             for child in node.children:
-                self._add(branch, child)
+                self._add(branch, child, width)
         else:
             parent.add_leaf(label, data=node)
 
@@ -730,9 +736,51 @@ class TreeScreen(Screen):
             return
         if node.kind == "change":
             self.app.push_screen(ChangeDetailScreen(self.program, node.id))
+        elif node.kind in ("outcome", "solution"):
+            # enter opens the FULL artifact content (otaman <kind> show, in-console),
+            # not a status-only popup (cofounder addendum, Roman feedback).
+            self.app.push_screen(RegistryDetailScreen(self.program, node.kind, node.id))
         else:
             extra = f" — BLOCKED by {node.blocked_by}" if node.blocked_by else ""
             self.app.notify(f"{node.id}: {node.status or node.kind}{extra}", timeout=5)
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
+class RegistryDetailScreen(Screen):
+    """Full outcome/solution artifact detail (console-ux-redesign, cofounder
+    addendum): the in-console equivalent of ``otaman outcome show`` / ``otaman
+    solution show``, opened by enter on an outcome/solution node — replacing the
+    old status-only popup so a clipped row's full content is one keypress away."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
+    ]
+
+    def __init__(self, program: Program, kind: str, node_id: str) -> None:
+        super().__init__()
+        self.program = program
+        self.kind = kind
+        self.node_id = node_id
+
+    def compose(self) -> ComposeResult:
+        yield _header()
+        yield _identity_badge_widget(self.program.root)
+        yield _mode_banner(
+            f"{self.kind.capitalize()} detail — {self.node_id}",
+            "↑↓ scroll · esc back · q quit",
+        )
+        with VerticalScroll(id="registry-detail-scroll"):
+            yield Static("Loading…", id="registry-detail", markup=False)
+        yield Footer()
+
+    def on_mount(self) -> None:
+        from otaman_cli.console.registry_detail import node_detail_text
+
+        text = node_detail_text(self.program, self.kind, self.node_id) or "(no detail)"
+        self.query_one("#registry-detail", Static).update(text)
 
     def action_back(self) -> None:
         self.app.pop_screen()
@@ -1573,6 +1621,7 @@ __all__ = [
     "ProgramPickerScreen",
     "ProposalScreen",
     "ReasonModal",
+    "RegistryDetailScreen",
     "SetupResultScreen",
     "SetupScreen",
     "TreeScreen",
