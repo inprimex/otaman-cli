@@ -200,11 +200,25 @@ def scaffold_companion_repos_ce(
         result.repos.append(ScaffoldedRepo(kind=kind, path=target, owner=owner))
         new_repo_entries.append(_build_repo_entry(program_slug, kind, owner))
 
-    # platform.yaml round-trip update (skip in dry-run)
-    if new_repo_entries and not dry_run:
+    # platform.yaml round-trip update (skip in dry-run): append repos[] and set
+    # the registry-home key (team-mode 1.5) so a fresh registries program is
+    # configured out of the box. The registry home is the strategy repo when one
+    # is scaffolded, else the business repo (which holds outcomes/solutions/
+    # personas for level>=solutions programs); either satisfies doctor's
+    # program.registries.strategy_repo requirement.
+    if "strategy" in repo_kinds:
+        registry_home = f"{program_slug}-strategy"
+    elif "business" in repo_kinds:
+        registry_home = f"{program_slug}-business"
+    else:
+        registry_home = None
+    if (new_repo_entries or registry_home) and not dry_run:
         try:
-            _append_to_platform_yaml(meta_dir / "platform.yaml", new_repo_entries)
-            result.platform_yaml_updated = True
+            result.platform_yaml_updated = _append_to_platform_yaml(
+                meta_dir / "platform.yaml",
+                new_repo_entries,
+                strategy_repo=registry_home,
+            )
         except Exception as exc:
             raise ScaffoldError(
                 f"Created companion repos but failed to update platform.yaml: {exc}. "
@@ -308,10 +322,16 @@ def _git_init_and_commit(target: Path, program_slug: str, kind: str) -> None:
 def _append_to_platform_yaml(
     platform_yaml_path: Path,
     new_entries: list[dict[str, Any]],
-) -> None:
-    """Append entries to platform.yaml `repos[]` via ruamel round-trip.
+    *,
+    strategy_repo: str | None = None,
+) -> bool:
+    """Append entries to platform.yaml `repos[]` via ruamel round-trip, and set
+    ``program.registries.strategy_repo`` when *strategy_repo* is given (team-mode
+    1.5 — so a fresh program's registry home is configured out of the box and
+    doctor doesn't error). Returns True iff the file changed.
 
-    Idempotent: if an entry with the same `name` already exists, it's skipped.
+    Idempotent: an existing repo `name` is skipped, and an existing
+    ``strategy_repo`` key is respected (never overwritten).
     """
     if not platform_yaml_path.is_file():
         raise ScaffoldError(f"platform.yaml not found at {platform_yaml_path}")
@@ -330,11 +350,28 @@ def _append_to_platform_yaml(
             continue
         existing_repos.append(entry)
         added_any = True
-
     if added_any:
         doc["repos"] = existing_repos
+
+    key_set = False
+    if strategy_repo:
+        program = doc.get("program")
+        if not isinstance(program, dict):
+            program = {}
+        regs = program.get("registries")
+        if not isinstance(regs, dict):
+            regs = {}
+        if not regs.get("strategy_repo"):  # respect an existing key
+            regs["strategy_repo"] = strategy_repo
+            program["registries"] = regs
+            doc["program"] = program
+            key_set = True
+
+    if added_any or key_set:
         with platform_yaml_path.open("w", encoding="utf-8") as f:
             _YAML.dump(doc, f)
+        return True
+    return False
 
 
 __all__ = [
