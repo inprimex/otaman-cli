@@ -253,50 +253,67 @@ class TestNotifyChangeBusMessage:
         assert "to: spec-agent" in body
 
 
-# ----------------------------------------------------- task 1.4 — map-tasks.py graceful degradation
-class TestMapTasksFallback:
-    def test_map_tasks_absent_does_not_fail(self, tmp_path: Path, monkeypatch):
-        """When map-tasks.py is nowhere to be found, summary records absence + rc=0."""
+# ----------------------------------------- task 1.4 / B3 — map-tasks dispatch via run_script
+class TestMapTasksDispatch:
+    """B3: dispatch goes through run_script (SCRIPT_MAP → otaman_plugin.map_tasks),
+    which works under site-packages — not a filesystem search for a loose
+    map-tasks.py that installed deployments never have."""
+
+    @staticmethod
+    def _fake_run_script(returncode: int, stdout: str = ""):
+        from types import SimpleNamespace
+
+        def _fake(name, *args, **kwargs):
+            assert name == "map-tasks.py"
+            return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=None)
+
+        return _fake
+
+    def test_map_tasks_dispatch_fires_when_tasks_md_present(self, tmp_path: Path, monkeypatch):
         project, specs = _stage_workspace(tmp_path)
         _stage_change(specs, "ch1", "- [ ] @otaman-cli\n")
-        # Force the finder to return None
-        monkeypatch.setattr(
-            "otaman_cli.notify_change._find_map_tasks_py",
-            lambda: None,
-        )
+        monkeypatch.setattr("otaman_cli.main.run_script", self._fake_run_script(0))
+        rc, summary = notify_change(project, "ch1")
+        assert rc == 0
+        assert summary["map_tasks_called"] is True
+        assert summary["map_tasks_path"] == "otaman_plugin.map_tasks"
+
+    def test_dispatch_failure_does_not_break_notify(self, tmp_path: Path, monkeypatch):
+        project, specs = _stage_workspace(tmp_path)
+        _stage_change(specs, "ch1", "- [ ] @otaman-cli\n")
+        monkeypatch.setattr("otaman_cli.main.run_script", self._fake_run_script(99, "boom"))
+        rc, summary = notify_change(project, "ch1")
+        assert rc == 0  # notify itself doesn't fail
+        assert summary["map_tasks_called"] is False
+        assert "map_tasks_error" in summary
+
+    def test_dispatch_exception_degrades_gracefully(self, tmp_path: Path, monkeypatch):
+        project, specs = _stage_workspace(tmp_path)
+        _stage_change(specs, "ch1", "- [ ] @otaman-cli\n")
+
+        def _raise(*a, **k):
+            raise RuntimeError("import blew up")
+
+        monkeypatch.setattr("otaman_cli.main.run_script", _raise)
+        rc, summary = notify_change(project, "ch1")
+        assert rc == 0
+        assert summary["map_tasks_called"] is False
+        assert "import blew up" in summary.get("map_tasks_error", "")
+
+    def test_no_tasks_md_skips_dispatch(self, tmp_path: Path, monkeypatch):
+        project, specs = _stage_workspace(tmp_path)
+        _stage_change(specs, "ch1", "- [ ] @otaman-cli\n")
+        # remove tasks.md so there's nothing to map
+        (specs / "openspec" / "changes" / "ch1" / "tasks.md").unlink()
+
+        def _must_not_call(*a, **k):
+            raise AssertionError("run_script must not be called without tasks.md")
+
+        monkeypatch.setattr("otaman_cli.main.run_script", _must_not_call)
         rc, summary = notify_change(project, "ch1")
         assert rc == 0
         assert summary["map_tasks_called"] is False
         assert summary["map_tasks_path"] is None
-
-    def test_map_tasks_called_when_found(self, tmp_path: Path, monkeypatch):
-        """When a stub map-tasks.py exists, the subprocess invocation fires."""
-        project, specs = _stage_workspace(tmp_path)
-        _stage_change(specs, "ch1", "- [ ] @otaman-cli\n")
-        # Stage a no-op stub script
-        stub = tmp_path / "stub-map-tasks.py"
-        stub.write_text("import sys; sys.exit(0)\n", encoding="utf-8")
-        monkeypatch.setattr(
-            "otaman_cli.notify_change._find_map_tasks_py",
-            lambda: stub,
-        )
-        rc, summary = notify_change(project, "ch1")
-        assert rc == 0
-        assert summary["map_tasks_called"] is True
-        assert summary["map_tasks_path"] == str(stub)
-
-    def test_map_tasks_invocation_failure_does_not_break_notify(self, tmp_path: Path, monkeypatch):
-        """If map-tasks.py errors out, notify still succeeds."""
-        project, specs = _stage_workspace(tmp_path)
-        _stage_change(specs, "ch1", "- [ ] @otaman-cli\n")
-        crash = tmp_path / "crash-map-tasks.py"
-        crash.write_text("import sys; sys.exit(99)\n", encoding="utf-8")
-        monkeypatch.setattr(
-            "otaman_cli.notify_change._find_map_tasks_py",
-            lambda: crash,
-        )
-        rc, summary = notify_change(project, "ch1")
-        assert rc == 0  # notify itself doesn't fail
 
 
 # ---------------------------------------------------------------- task 1.6(d) — exit codes
@@ -316,11 +333,13 @@ class TestExitCodes:
         assert rc == 1
 
     def test_success_exits_0(self, tmp_path: Path, monkeypatch):
+        from types import SimpleNamespace
+
         project, specs = _stage_workspace(tmp_path)
         _stage_change(specs, "ch1", "- [ ] @otaman-cli\n")
         monkeypatch.setattr(
-            "otaman_cli.notify_change._find_map_tasks_py",
-            lambda: None,
+            "otaman_cli.main.run_script",
+            lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=None),
         )
         rc, _ = notify_change(project, "ch1")
         assert rc == 0
@@ -359,15 +378,13 @@ class TestCmdNotifyChange:
         # Error in stdout (UI.error prints to stdout)
         assert "not found" in r.stdout.lower() or "not found" in r.stderr.lower()
 
-    def test_cli_summary_includes_map_tasks_warning_when_absent(self, tmp_path: Path):
+    def test_cli_summary_reports_map_tasks_dispatch(self, tmp_path: Path):
         project, specs = _stage_workspace(tmp_path)
         _stage_change(specs, "ch1", "- [ ] @otaman-cli\n")
         r = self._run_cli(project, "notify-change", "ch1")
-        # When map-tasks.py isn't on the search path, output mentions it
+        # notify never fails on the dispatch outcome (B3 graceful degradation)
         assert r.returncode == 0
-        # Either "invoked" or "not found" should appear depending on env
-        assert (
-            "map-tasks.py invoked" in r.stdout
-            or "map-tasks.py not found" in r.stdout
-            or "map-tasks.py found but invocation skipped" in r.stdout
-        )
+        # dispatch is ATTEMPTED via run_script — output reports invoked OR failed,
+        # never the old filesystem "not found" path-search wording.
+        assert "map-tasks dispatch invoked" in r.stdout or "map-tasks dispatch failed" in r.stdout
+        assert "not found" not in r.stdout
