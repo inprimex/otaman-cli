@@ -106,11 +106,24 @@ def _existing_change_slugs(changes_dir: Path) -> set[str]:
     return slugs
 
 
-def _approved_titles(bus_active_dir: Path) -> list[tuple[str, str]]:
-    """(title, timestamp) for each spec-change-approved broadcast on the bus."""
+def _compact_ts(stem: str) -> str:
+    """The leading ``YYYYMMDDThhmmss`` token of a bus-message filename stem, or "".
+
+    This is the form that ``.openspec.yaml`` ``approved_by`` notes and
+    ``dispositions.yaml`` ``approval`` stems cite an approval broadcast by."""
+    m = re.match(r"^(\d{8}T\d{6})", stem)
+    return m.group(1) if m else ""
+
+
+def _approved_titles(bus_active_dir: Path) -> list[tuple[str, str, str]]:
+    """(title, timestamp, ts_key) for each spec-change-approved broadcast.
+
+    ``ts_key`` is the broadcast's compact filename timestamp — how archived
+    changes' ``approved_by`` notes and the disposition ledger reference it.
+    """
     if not bus_active_dir.is_dir():
         return []
-    out: list[tuple[str, str]] = []
+    out: list[tuple[str, str, str]] = []
     for f in sorted(bus_active_dir.glob("*spec-change-approved*.md")):
         try:
             text = f.read_text(encoding="utf-8")
@@ -126,8 +139,68 @@ def _approved_titles(bus_active_dir: Path) -> list[tuple[str, str]]:
                 title = re.sub(
                     r"^Approved:\s*", "", s.replace("## Subject:", "").strip(), flags=re.IGNORECASE
                 )
-        out.append((title or f.stem, ts))
+        out.append((title or f.stem, ts, _compact_ts(f.stem)))
     return out
+
+
+def _approved_by_blob(changes_dir: Path) -> str:
+    """Raw text of every ``.openspec.yaml`` (active AND archived). An approval
+    broadcast whose compact ``YYYYMMDDThhmmss`` timestamp appears here already
+    authored a change — even when the change's folder slug doesn't resemble the
+    broadcast title (archive-aware match, IHC D8).
+
+    Deliberately reads RAW text rather than parsing YAML: real ``.openspec.yaml``
+    ``approved_by`` / ``archived`` notes carry free prose with mid-scalar ``: ``
+    that breaks a strict loader, and the compact timestamp only ever appears in
+    approval references, so a substring scan is both safe and robust."""
+    if not changes_dir.is_dir():
+        return ""
+    dirs = [p for p in changes_dir.iterdir() if p.is_dir() and p.name != "archive"]
+    archive = changes_dir / "archive"
+    if archive.is_dir():
+        dirs += [p for p in archive.iterdir() if p.is_dir()]
+    parts: list[str] = []
+    for d in dirs:
+        oy = d / ".openspec.yaml"
+        if not oy.is_file():
+            continue
+        try:
+            parts.append(oy.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+    return "\n".join(parts)
+
+
+def _dispositions(changes_dir: Path) -> tuple[set[str], set[str]]:
+    """(approval-timestamp-tokens, title-slugs) from ``openspec/dispositions.yaml``.
+
+    Approvals recorded there are absorbed/withdrawn — closed, not unauthored (the
+    SLE ledger is authoritative for folderless approvals)."""
+    tokens: set[str] = set()
+    slugs: set[str] = set()
+    ledger = changes_dir.parent / "dispositions.yaml"
+    if not ledger.is_file():
+        return tokens, slugs
+    try:
+        import yaml
+
+        data = yaml.safe_load(ledger.read_text(encoding="utf-8")) or []
+    except Exception:  # noqa: BLE001 - malformed ledger → nothing to exclude
+        return tokens, slugs
+    if not isinstance(data, list):
+        return tokens, slugs
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        appr = entry.get("approval")
+        if isinstance(appr, str):
+            m = re.match(r"^(\d{8}T\d{0,6})", appr.strip())
+            if m:
+                tokens.add(m.group(1))
+        title = entry.get("title")
+        if isinstance(title, str):
+            slugs.add(_slug(title))
+    return tokens, slugs
 
 
 def _unticked_owners(tasks_text: str) -> str:
@@ -182,12 +255,26 @@ def derive_lifecycle(
     now = now or datetime.now(timezone.utc)
     rows: list[LifecycleRow] = []
     existing = _existing_change_slugs(changes_dir) if changes_dir else set()
+    approved_by_blob = _approved_by_blob(changes_dir) if changes_dir else ""
+    disp_tokens, disp_slugs = _dispositions(changes_dir) if changes_dir else (set(), set())
 
-    # approved-unauthored: an approval with no matching change folder anywhere.
+    # approved-unauthored: an approval that authored NO change anywhere. An
+    # approval is considered authored/closed — not unauthored — when it (a) title-
+    # matches a change folder (active or archived), (b) is cited by its compact
+    # timestamp in some change's `approved_by` note (archived changes reference
+    # the broadcast stem, not their own slug), or (c) is closed in the disposition
+    # ledger (absorbed/withdrawn). Without (b)+(c) the lint false-positives on
+    # every archived-but-renamed and every folderless approval.
     if bus_active_dir is not None:
-        for title, ts in _approved_titles(bus_active_dir):
+        for title, ts, ts_key in _approved_titles(bus_active_dir):
             s = _slug(title)
             if s and any(s == e or s in e or e in s for e in existing):
+                continue
+            if ts_key and ts_key in approved_by_blob:
+                continue
+            if ts_key and ts_key in disp_tokens:
+                continue
+            if s and any(s == d or s in d or d in s for d in disp_slugs):
                 continue
             secs = _delta_secs(ts, now)
             days = _age_days(secs)
