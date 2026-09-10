@@ -278,7 +278,14 @@ def cmd_send(args: list[str]) -> int:
     ts = now.strftime("%Y%m%dT%H%M%S")
     ts_iso = now.isoformat()
     slug = re.sub(r"[^a-z0-9]+", "-", ns.subject.lower())[:40].strip("-")
-    filename = f"{ts}-{agent}-to-{to_agent}-{slug}.md"
+    # B2: the message id must equal the unique filename stem. The old
+    # `{ts}-{agent[:8]}` was second-resolution AND truncated, so distinct
+    # messages collided (agent-pmeets-{infra,worker,…} all → 'agent-pm') and
+    # `otaman ack` — which keys on the id — matched the wrong file. The
+    # route-carrying stem is unique per recipient+subject; a same-second
+    # same-route collision gets a suffix on write, patched into the id below.
+    filename_stem = f"{ts}-{agent}-to-{to_agent}-{slug}"
+    filename = f"{filename_stem}.md"
 
     # cli-send-cc-fanout-parity (tasks 1.1-1.5) — compute the effective CC
     # list as the union of explicit --cc and routing-rule-derived CC, then
@@ -331,7 +338,7 @@ def cmd_send(args: list[str]) -> int:
     cc_line = f"cc: [{', '.join(effective_cc)}]\n" if effective_cc else ""
     content = (
         f"---\n"
-        f"id: {ts}-{agent[:8]}\n"
+        f"id: {filename_stem}\n"
         f"from: {agent}\n"
         f"to: {to_agent}\n"
         f"{cc_line}"
@@ -355,6 +362,11 @@ def cmd_send(args: list[str]) -> int:
     # Never overwrite: same-second sends on the same route share a stem; the
     # returned path carries any collision suffix (propose-hardening).
     msg_path = write_message_exclusive(active_dir / filename, content)
+    # Keep id == the actual unique stem even when a same-second same-route
+    # collision forced a `-N` suffix on the written file (B2 collision-proofing).
+    if msg_path.stem != filename_stem:
+        content = content.replace(f"id: {filename_stem}\n", f"id: {msg_path.stem}\n", 1)
+        msg_path.write_text(content, encoding="utf-8")
 
     # Per-CC copies (task 1.5): one extra file per effective_cc recipient,
     # frontmatter augmented with `x-cc: true`.  Stem includes the recipient
