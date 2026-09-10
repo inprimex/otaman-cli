@@ -71,6 +71,56 @@ def test_extract_outcome_id_from_free_text():
 
 
 # ---------------------------------------------------------------------------
+# loud fallback notice — registries enabled but the file won't load (Roman req)
+
+
+def test_fallback_notice_when_enabled_but_load_fails(program, monkeypatch):
+    monkeypatch.setattr(tree, "registries_enabled", lambda program: True)
+    monkeypatch.setattr(tree, "_load_registries", lambda program: (None, None))
+    assert tree.tree_fallback_notice(program) == tree.FALLBACK_NOTICE
+
+
+def test_no_notice_when_registries_loaded(program, monkeypatch):
+    monkeypatch.setattr(tree, "registries_enabled", lambda program: True)
+    reg = SimpleNamespace(outcomes=[])
+    monkeypatch.setattr(tree, "_load_registries", lambda program: (reg, None))
+    assert tree.tree_fallback_notice(program) is None
+
+
+def test_no_notice_when_registries_disabled(program, monkeypatch):
+    # genuine absence (process off / no file) is not a failure → no scary banner
+    monkeypatch.setattr(tree, "registries_enabled", lambda program: False)
+    assert tree.tree_fallback_notice(program) is None
+
+
+@_textual
+def test_tree_shows_loud_banner_on_load_failure(program, monkeypatch):
+    # registries enabled but load fails → flat tree AND a visible red notice.
+    monkeypatch.setattr(tree, "registries_enabled", lambda program: True)
+    monkeypatch.setattr(tree, "_load_registries", lambda program: (None, None))
+    monkeypatch.setattr(tree, "_change_rows", lambda program: [_row("alpha")])
+    monkeypatch.setattr(tree, "_blocked_map", lambda program: {})
+    from textual.widgets import Static as _Static
+
+    from otaman_cli.console.app import OtamanConsole, TreeScreen
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(TreeScreen(program))
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            notice = app.screen.query_one("#tree-notice", _Static)
+            assert notice.display is True
+            assert "failed to load" in str(notice.render())
+            await app.action_quit()
+
+    asyncio.run(go())
+
+
+# ---------------------------------------------------------------------------
 # simplified mode (registries absent)
 
 
