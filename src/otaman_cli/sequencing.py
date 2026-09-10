@@ -14,11 +14,30 @@ bus_target.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
 #: Frontmatter fields of the contract, in emission order.
 SEQ_FIELDS = ("sequence-id", "step", "depends-on", "stop-at")
+
+#: A YAML plain scalar we can emit verbatim: a leading alnum then word chars,
+#: dots, slashes, hyphens — no spaces, colons, or flow indicators. Anything else
+#: (notably a ``stop-at`` containing ``": "``) MUST be quoted, or the emitted
+#: frontmatter fails to parse and the message is silently dropped by the bus
+#: (bus-writer self-validation invariant — approved 20260910T210846).
+_PLAIN_SCALAR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+
+
+def _yaml_scalar(value: Any) -> str:
+    """A YAML-safe rendering of *value*: a plain token verbatim, anything else as
+    a JSON string (which is valid YAML 1.2 double-quoted form). Guarantees the
+    emitted scalar round-trips through the loader."""
+    s = str(value)
+    if _PLAIN_SCALAR.match(s):
+        return s
+    return json.dumps(s, ensure_ascii=False)
+
 
 #: Coordination section headers. The first three are unconditional for a
 #: sequenced assignment; Context/Artifacts detect the "sections present"
@@ -140,9 +159,9 @@ def render_frontmatter_lines(fields: dict[str, Any]) -> str:
             continue
         if key == "depends-on":
             deps = [value] if isinstance(value, str) else list(value)
-            lines.append(f"depends-on: [{', '.join(str(d) for d in deps)}]")
+            lines.append(f"depends-on: [{', '.join(_yaml_scalar(d) for d in deps)}]")
         else:
-            lines.append(f"{key}: {value}")
+            lines.append(f"{key}: {_yaml_scalar(value)}")
     return "\n".join(lines) + "\n" if lines else ""
 
 

@@ -18,6 +18,7 @@ import pytest
 
 from otaman_cli.sequencing import (
     parse_step,
+    render_frontmatter_lines,
     validate_sequencing,
     waiting_annotation,
 )
@@ -169,6 +170,41 @@ _SEQ_FLAGS = (
 )  # fmt: skip
 
 
+def _roundtrip(fields: dict) -> dict:
+    """Render frontmatter and load it back — the emitted YAML must parse."""
+    import yaml
+
+    return yaml.safe_load(render_frontmatter_lines(fields)) or {}
+
+
+def test_frontmatter_stop_at_with_colon_stays_parseable():
+    # B1: a stop-at containing ': ' used to emit an unparseable message that the
+    # bus silently dropped. It must now round-trip intact.
+    fields = {
+        "sequence-id": "jtbd-67-rollout",
+        "step": "2/3",
+        "depends-on": ["step 1"],
+        "stop-at": "PR is open: do NOT merge",
+    }
+    fm = _roundtrip(fields)
+    assert fm["stop-at"] == "PR is open: do NOT merge"
+    assert fm["step"] == "2/3"
+    assert fm["depends-on"] == ["step 1"]
+
+
+def test_frontmatter_hostile_values_roundtrip():
+    # colons, hashes, quotes, brackets, commas — all must survive.
+    for hostile in ("a: b", "has # hash", 'quote " here', "[bracket]", "trailing colon:"):
+        fm = _roundtrip({"sequence-id": "s", "step": "1/1", "stop-at": hostile})
+        assert fm["stop-at"] == hostile, hostile
+
+
+def test_frontmatter_plain_scalars_stay_unquoted():
+    out = render_frontmatter_lines({"sequence-id": "jtbd-67-rollout", "step": "2/3"})
+    assert "sequence-id: jtbd-67-rollout" in out  # no quotes on plain tokens
+    assert "step: 2/3" in out
+
+
 def test_send_emits_sequencing_frontmatter(project: Path):
     r = _send_sequenced(project, *_SEQ_FLAGS)
     assert r.returncode == 0, r.stdout + r.stderr
@@ -176,8 +212,9 @@ def test_send_emits_sequencing_frontmatter(project: Path):
     content = msg.read_text(encoding="utf-8")
     assert "sequence-id: jtbd-67-rollout" in content
     assert "step: 2/3" in content
-    assert "depends-on: [step 1 (DONE)]" in content
-    assert "stop-at: PR open, do not merge" in content
+    # non-plain scalars are YAML-quoted so the message always parses (B1)
+    assert 'depends-on: ["step 1 (DONE)"]' in content
+    assert 'stop-at: "PR open, do not merge"' in content
 
 
 def test_send_refuses_malformed_step(project: Path):
