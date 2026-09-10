@@ -11,7 +11,8 @@ The command:
   3. Maps each annotation to the repo's owner via `platform.yaml repos[]`
   4. Writes a `spec-change` bus message addressed to those owners
      (fallback: `spec-agent, human` when no tasks.md or no annotations)
-  5. Optionally invokes `map-tasks.py` if found (graceful degradation otherwise)
+  5. Dispatches map-tasks via `run_script` (otaman_plugin.map_tasks) when a
+     tasks.md is present (graceful degradation if the dispatch fails)
 
 Format mirrors `otaman-plugin/scripts/spec-change-hook.sh` so consumers
 treat the message identically regardless of trigger source.
@@ -20,7 +21,6 @@ treat the message identically regardless of trigger source.
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -236,26 +236,6 @@ def _git_metadata(specs_root: Path) -> tuple[str, str, str]:
     )
 
 
-def _find_map_tasks_py() -> Path | None:
-    """Locate map-tasks.py — same candidate search as spec-change-hook.sh:202-212.
-
-    Returns None when not found; caller logs a warning and continues
-    (graceful degradation per task 1.4).
-    """
-    candidates: list[Path] = []
-    # 1. Co-located with this module's repo (otaman-cli/scripts)
-    pkg_root = Path(__file__).resolve().parent.parent.parent  # src/otaman_cli → repo root
-    candidates.append(pkg_root / "scripts" / "map-tasks.py")
-    # 2. Plugin's scripts (the canonical home)
-    candidates.append(pkg_root.parent / "otaman-plugin" / "scripts" / "map-tasks.py")
-    # 3. Conventional sibling under workspace
-    candidates.append(pkg_root.parent / "scripts" / "map-tasks.py")
-    for c in candidates:
-        if c.is_file():
-            return c
-    return None
-
-
 def _resolve_bus_active(project_root: Path) -> Path:
     """Match cmd_send's path resolution: `.agents/bus/active/`."""
     return project_root / ".agents" / "bus" / "active"
@@ -334,29 +314,26 @@ def notify_change(project_root: Path, change_name: str) -> tuple[int, dict[str, 
     summary["message_path"] = message_paths[0] if message_paths else None
     summary["message_paths"] = message_paths
 
-    # map-tasks.py invocation (task 1.4) — graceful degradation when absent
-    map_tasks = _find_map_tasks_py()
-    if map_tasks is None:
-        summary["map_tasks_called"] = False
-    else:
-        summary["map_tasks_path"] = str(map_tasks)
-        # Find python interpreter — match spec-change-hook.sh's preference order
-        py: str | None = None
-        for c in ("python3", "py", "python"):
-            if shutil.which(c):
-                py = c
-                break
-        if py is not None and tasks_md.is_file():
-            try:
-                subprocess.run(
-                    [py, str(map_tasks), str(tasks_md)],
-                    capture_output=True,
-                    timeout=30,
-                    check=False,
+    # map-tasks dispatch (task 1.4). B3: the old _find_map_tasks_py() searched
+    # dev-checkout paths (scripts/map-tasks.py) that don't exist under
+    # site-packages, so installed deployments ALWAYS took the degradation branch
+    # — automation silently dead, assignments hand-written. run_script dispatches
+    # via SCRIPT_MAP → `otaman_plugin.map_tasks` (an in-process import), which
+    # works from both a dev checkout and an installed wheel.
+    if tasks_md.is_file():
+        summary["map_tasks_path"] = "otaman_plugin.map_tasks"
+        try:
+            from otaman_cli.main import run_script
+
+            result = run_script("map-tasks.py", str(tasks_md), capture=True)
+            summary["map_tasks_called"] = result.returncode == 0
+            if result.returncode != 0:
+                summary["map_tasks_error"] = (result.stdout or "").strip()[:200] or (
+                    f"map-tasks exited {result.returncode}"
                 )
-                summary["map_tasks_called"] = True
-            except (OSError, subprocess.TimeoutExpired):
-                summary["map_tasks_called"] = False
+        except Exception as exc:  # noqa: BLE001 - dispatch failure degrades, loudly
+            summary["map_tasks_called"] = False
+            summary["map_tasks_error"] = str(exc)[:200]
 
     return 0, summary
 
@@ -397,11 +374,14 @@ def cmd_notify_change(args: list[str]) -> int:
     else:
         UI.muted("  tasks.md: (absent — fallback recipients used)")
     if summary["map_tasks_called"]:
-        UI.ok(f"map-tasks.py invoked: {summary['map_tasks_path']}")
-    elif summary["map_tasks_path"]:
-        UI.warn("map-tasks.py found but invocation skipped (no python interpreter or no tasks.md)")
+        UI.ok("map-tasks dispatch invoked (otaman_plugin.map_tasks)")
+    elif summary.get("map_tasks_path"):
+        UI.warn(
+            "map-tasks dispatch failed: "
+            + summary.get("map_tasks_error", "unknown error (task-assignment dispatch deferred)")
+        )
     else:
-        UI.warn("map-tasks.py not found — task-assignment dispatch deferred (graceful degradation)")
+        UI.muted("  map-tasks: skipped (no tasks.md)")
 
     return rc
 
