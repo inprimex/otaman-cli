@@ -30,6 +30,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "project: testprog\n"
         "repos:\n"
         "  - name: biz\n    path: ../biz\n    owner: cpo-agent\n"
+        "program:\n  registries:\n    strategy_repo: biz\n"
         "role-assignments:\n"
         "  cpo: human\n  ceo: human\n  cto: human\n",
         encoding="utf-8",

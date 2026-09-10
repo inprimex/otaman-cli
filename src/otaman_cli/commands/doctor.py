@@ -779,6 +779,51 @@ def _print_tenant_consistency_report(result: dict) -> None:
     )
 
 
+def _check_strategy_repo(root: Path) -> dict:
+    """team-mode Phase A 1.1 — a program actually using the registries (spec
+    policy process.level >= solutions) MUST configure
+    ``program.registries.strategy_repo``; a missing/unresolvable key is a loud
+    ERROR, never a silently-guessed repo (find_business_repo is retired).
+    Detection only. Lower levels (spec-first) don't use registries → skipped."""
+    out: dict = {"applicable": False, "ok": False, "detail": ""}
+    try:
+        import yaml
+        from otaman_core.spec_lifecycle import resolve_spec_policy
+
+        from otaman_cli.registries.loader import strategy_repo
+
+        cfg = yaml.safe_load((root / "platform.yaml").read_text(encoding="utf-8")) or {}
+        if not isinstance(cfg, dict):
+            return out
+        level = resolve_spec_policy(None, cfg.get("spec_policy")).process_level
+        if level not in ("solutions", "outcomes", "verified"):
+            return out  # registries not in use at this level
+        out["applicable"] = True
+        home = strategy_repo(root)
+        if home is None:
+            out["detail"] = "program.registries.strategy_repo is not set (or names an unknown repo)"
+            return out
+        out["ok"] = True
+        out["detail"] = str(home)
+    except Exception:  # noqa: BLE001 - absent/broken core or config → not applicable
+        return out
+    return out
+
+
+def _print_strategy_repo_report(result: dict) -> None:
+    """Registry-home row: OK naming the resolved repo, else a loud ERROR + fix."""
+    if not result.get("applicable"):
+        return
+    print()
+    UI.header("Registry Home (program.registries.strategy_repo)")
+    if result.get("ok"):
+        print(f"  {UI.badge('OK', C.GREEN)}  {result['detail']}")
+    else:
+        print(f"  {UI.badge('ERROR', C.RED)}  {result['detail']}")
+        print("  Set `program.registries.strategy_repo: <repo-name>` in platform.yaml —")
+        print("  the repo holding outcomes.yaml/solutions.yaml. No repo is guessed.")
+
+
 def cmd_doctor(args: list[str]) -> int:
     """Check environment readiness — git, runtimes, CLI tools, MCP.
 
@@ -1048,6 +1093,14 @@ def cmd_doctor(args: list[str]) -> int:
     # naming the alphabetical-first primary the runner applies tenant-wide.
     # WARN-only; never folds into the exit code (detection surface).
     _print_tenant_consistency_report(_check_tenant_consistency())
+
+    # team-mode Phase A 1.1 — registry home must be configured when registries
+    # are in use (policy level >= solutions); missing key is a loud ERROR that
+    # folds into the exit code (no silent find_business_repo fallback).
+    strat = _check_strategy_repo(root)
+    _print_strategy_repo_report(strat)
+    if strat.get("applicable") and not strat.get("ok"):
+        base_rc = 1
 
     # ce-bootstrap-harness-deps task 3.1 — additive `--org` harness check
     if org:

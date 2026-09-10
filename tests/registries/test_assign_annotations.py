@@ -128,7 +128,8 @@ def project_with_solutions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> P
     biz = parent / "biz"
     biz.mkdir()
     (meta / "platform.yaml").write_text(
-        "project: testprog\nrepos:\n  - name: biz\n    path: ../biz\n    owner: cpo-agent\n",
+        "project: testprog\nrepos:\n  - name: biz\n    path: ../biz\n    owner: cpo-agent\n"
+        "program:\n  registries:\n    strategy_repo: biz\n",
         encoding="utf-8",
     )
     yaml_dump(

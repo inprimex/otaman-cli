@@ -25,12 +25,9 @@ OPERATION_ROLES: dict[str, tuple[str, ...]] = {
     "outcome.reject-cost": ("ceo",),
     "outcome.retire": ("cpo", "ceo"),
     "outcome.update-field": ("cpo",),
-    # Solution lifecycle
-    "solution.add": ("cto",),
-    "solution.propose": ("cto",),
-    "solution.promote-to-complete": ("cto",),
-    "solution.discard": ("cto",),
-    "solution.update-field": ("cto",),
+    # Solution lifecycle authz moved to the acting human's roster HAT
+    # (team-mode Phase A 1.2 — hat_advisory); the per-verb solution.* role rows
+    # were removed. "roles are hats, repos are homes."
     # Persona lifecycle
     "persona.add": ("cpo",),
     "persona.retire": ("cpo",),
@@ -129,6 +126,43 @@ def authz_advisory(
     return True  # Mode 1: proceed anyway
 
 
+def hat_advisory(
+    operation: str,
+    required_hats: Iterable[str],
+    root: Path,
+    *,
+    stderr=sys.stderr,
+) -> bool:
+    """Advisory authorization by the acting human's roster HAT (team-mode 1.2).
+
+    Replaces the per-verb role table for solution verbs: authorization derives
+    from the acting human's ``human-roster`` role (resolved from ``OTAMAN_HUMAN``)
+    — "roles are hats". Advisory in Mode 1 (WARN on a missing hat and proceed,
+    like :func:`authz_advisory`); Mode 2+ flips to fail-closed. Always True.
+    """
+    required = tuple(required_hats)
+    if not required:
+        return True
+    hats: set[str] = set()
+    who = os.environ.get("OTAMAN_HUMAN", "").strip() or "unresolved"
+    try:
+        from otaman_core.human_roster import load_human_roster, resolve_roster_human
+
+        roster = load_human_roster(root / "platform.yaml")
+        entry = resolve_roster_human(roster, os.environ.get("OTAMAN_HUMAN"))
+        hats = set(entry.roles) if entry else set()
+    except Exception:  # noqa: BLE001 - advisory: an absent/broken roster just WARNs
+        hats = set()
+    if hats & set(required):
+        return True
+    print(
+        f"WARN: operation '{operation}' expects hat {list(required)}; "
+        f"acting human '{who}' has {sorted(hats) or 'no roster hat'}",
+        file=stderr,
+    )
+    return True  # Mode 1: proceed anyway
+
+
 def is_transition_only_field(field: str) -> bool:
     """Return True if *field* must be mutated via a named transition command,
     not via a generic ``update-field`` command (Appendix E.5).
@@ -143,5 +177,6 @@ __all__ = [
     "resolve_roles",
     "required_roles_for",
     "authz_advisory",
+    "hat_advisory",
     "is_transition_only_field",
 ]

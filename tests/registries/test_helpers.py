@@ -8,8 +8,8 @@ import pytest
 
 from otaman_cli.registries import bus_messages, transitions
 from otaman_cli.registries.loader import (
-    find_business_repo,
     resolve_registry_path,
+    strategy_repo,
     yaml_dump,
     yaml_load,
 )
@@ -139,53 +139,61 @@ def test_yaml_round_trip(tmp_path):
     assert data["outcomes"][0]["id"] == "JTBD-1-a"
 
 
-def test_find_business_repo_via_env(monkeypatch, tmp_path):
-    target = tmp_path / "biz"
+def test_strategy_repo_via_env(monkeypatch, tmp_path):
+    target = tmp_path / "strat"
     target.mkdir()
-    monkeypatch.setenv("OTAMAN_BUSINESS_DIR", str(target))
-    assert find_business_repo(tmp_path / "ignored") == target.resolve()
+    monkeypatch.setenv("OTAMAN_STRATEGY_DIR", str(target))
+    assert strategy_repo(tmp_path / "ignored") == target.resolve()
 
 
-def test_find_business_repo_from_platform_yaml(tmp_path, monkeypatch):
-    monkeypatch.delenv("OTAMAN_BUSINESS_DIR", raising=False)
+def test_strategy_repo_from_key(tmp_path, monkeypatch):
+    # team-mode 1.1: registry home is program.registries.strategy_repo (a repo
+    # slug resolved against repos[]) — no owner-scan fallback.
+    monkeypatch.delenv("OTAMAN_STRATEGY_DIR", raising=False)
     parent = tmp_path / "p"
     parent.mkdir()
     meta = parent / "meta"
     meta.mkdir()
-    biz = parent / "biz"
-    biz.mkdir()
+    strat = parent / "strat"
+    strat.mkdir()
+    (meta / "platform.yaml").write_text(
+        "repos:\n  - name: strat\n    path: ../strat\n    owner: cofounder-agent\n"
+        "program:\n  registries:\n    strategy_repo: strat\n",
+        encoding="utf-8",
+    )
+    assert strategy_repo(meta) == strat.resolve()
+
+
+def test_strategy_repo_none_without_key(tmp_path, monkeypatch):
+    # no key → None (no silent fallback; doctor reports it). find_business_repo's
+    # owner-scan (cpo-agent/main-agent) is retired.
+    monkeypatch.delenv("OTAMAN_STRATEGY_DIR", raising=False)
+    meta = tmp_path / "meta"
+    meta.mkdir()
     (meta / "platform.yaml").write_text(
         "repos:\n  - name: biz\n    path: ../biz\n    owner: cpo-agent\n",
         encoding="utf-8",
     )
-    assert find_business_repo(meta) == biz.resolve()
+    assert strategy_repo(meta) is None
 
 
-def test_find_business_repo_falls_back_to_main_agent(tmp_path, monkeypatch):
-    monkeypatch.delenv("OTAMAN_BUSINESS_DIR", raising=False)
+def test_strategy_repo_unknown_slug_is_none(tmp_path, monkeypatch):
+    monkeypatch.delenv("OTAMAN_STRATEGY_DIR", raising=False)
     meta = tmp_path / "meta"
     meta.mkdir()
     (meta / "platform.yaml").write_text(
-        "repos:\n  - name: myproj\n    path: .\n    owner: main-agent\n",
+        "repos: []\nprogram:\n  registries:\n    strategy_repo: nope\n",
         encoding="utf-8",
     )
-    assert find_business_repo(meta) == meta.resolve()
-
-
-def test_find_business_repo_returns_none_when_no_match(tmp_path, monkeypatch):
-    monkeypatch.delenv("OTAMAN_BUSINESS_DIR", raising=False)
-    meta = tmp_path / "meta"
-    meta.mkdir()
-    (meta / "platform.yaml").write_text("repos: []\n", encoding="utf-8")
-    assert find_business_repo(meta) is None
+    assert strategy_repo(meta) is None
 
 
 def test_resolve_registry_path_outcomes(monkeypatch, tmp_path):
-    monkeypatch.setenv("OTAMAN_BUSINESS_DIR", str(tmp_path / "biz"))
-    (tmp_path / "biz").mkdir()
+    monkeypatch.setenv("OTAMAN_STRATEGY_DIR", str(tmp_path / "strat"))
+    (tmp_path / "strat").mkdir()
     (tmp_path / "platform.yaml").write_text("repos: []\n", encoding="utf-8")
     p = resolve_registry_path(tmp_path, "outcomes")
-    assert p == (tmp_path / "biz" / "outcomes.yaml").resolve()
+    assert p == (tmp_path / "strat" / "outcomes.yaml").resolve()
 
 
 def test_resolve_registry_path_unknown_kind_raises(tmp_path):

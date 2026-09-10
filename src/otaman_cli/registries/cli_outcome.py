@@ -52,7 +52,7 @@ def _load(root: Path) -> tuple[Path, Any] | None:
     if path is None:
         _bail(
             "Cannot locate outcomes.yaml — no business repo found.\n"
-            "  Set OTAMAN_BUSINESS_DIR, or add a repo with owner: cpo-agent in platform.yaml."
+            "  Set program.registries.strategy_repo in platform.yaml (or OTAMAN_STRATEGY_DIR)."
         )
         return None
     raw = yaml_load(path)
