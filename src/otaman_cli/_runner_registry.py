@@ -105,10 +105,17 @@ def _read_program_name(path: Path) -> str:
     if not isinstance(data, dict):
         raise PlatformsError(f"{path} does not contain a YAML mapping")
     name = data.get("name")
+    if not (isinstance(name, str) and name.strip()):
+        # Fall back to `project:` — the canonical program identity that scan/init
+        # actually write (a scanned platform.yaml has `project:` but no `name:`).
+        # Without this, a fully-valid scanned program is silently invisible to the
+        # runner until someone hand-adds `name:` (deploy onboarding finding
+        # 2026-09-09, pmeets/sunflowers).
+        name = data.get("project")
     if not isinstance(name, str) or not name.strip():
         raise PlatformsError(
-            f"{path} has no non-empty top-level 'name:' field — "
-            "set 'name:' in the platform.yaml so a program name can be derived"
+            f"{path} has no non-empty top-level 'name:' or 'project:' field — "
+            "set one so a program name can be derived"
         )
     return _validate_name(name.strip(), path)
 
