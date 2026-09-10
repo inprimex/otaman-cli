@@ -294,7 +294,12 @@ def test_outcome_add_succeeds_after_scaffold(meta: Path) -> None:
         meta_dir=meta,
     )
 
+    # team-mode 1.1: the registry home is now program.registries.strategy_repo
+    # (find_business_repo owner-scan retired). scaffold_ce doesn't set the key
+    # (that's config/step-2 territory), so point the resolver at the scaffolded
+    # business repo via the explicit override for this end-to-end check.
     env = {**os.environ, "OTAMAN_AGENT": "human"}
+    env["OTAMAN_STRATEGY_DIR"] = str(meta.parent / "epicbridge-business")
     for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
         env.pop(_var, None)
     rc = subprocess.run(
