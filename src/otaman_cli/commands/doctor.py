@@ -824,6 +824,64 @@ def _print_strategy_repo_report(result: dict) -> None:
         print("  the repo holding outcomes.yaml/solutions.yaml. No repo is guessed.")
 
 
+def _check_registry_loadability(root: Path) -> dict:
+    """The resolved outcomes registry must actually LOAD, not just exist. When the
+    outcomes process is enabled and the file resolves but fails schema validation,
+    the console tree silently degrades to changes-only — so doctor must FAIL loudly
+    here (cofounder-agent's Roman requirement; kin to the silent-approval-loss
+    lesson). A missing/unresolved file is the Registry-Home check's job, not this
+    one; this check is only about a present-but-unloadable file. Detection only."""
+    out: dict = {"applicable": False, "ok": False, "detail": ""}
+    try:
+        from otaman_cli.registries.loader import resolve_registry_path
+        from otaman_cli.registries.platform_ext import load_program_extensions
+
+        ext = load_program_extensions(root / "platform.yaml")
+        if not getattr(ext.processes.outcomes, "enabled", False):
+            return out
+        op = resolve_registry_path(root, "outcomes")
+        if not (op and op.is_file()):
+            return out  # absent/unresolved → Registry Home check owns that
+        out["applicable"] = True
+
+        from otaman_cli.registries.outcomes import load_outcomes
+
+        try:
+            reg = load_outcomes(op)
+        except Exception as exc:  # noqa: BLE001 - any load/validation failure
+            n = None
+            try:
+                n = len(exc.errors())  # pydantic ValidationError → error count
+            except Exception:  # noqa: BLE001
+                pass
+            if n is not None:
+                reason = f"{n} schema error(s)"
+            else:
+                first = str(exc).strip().splitlines()[0] if str(exc).strip() else ""
+                reason = first[:160] or exc.__class__.__name__
+            out["detail"] = f"{op.name} exists but fails validation ({reason})"
+            return out
+        out["ok"] = True
+        out["detail"] = f"{op} ({len(reg.outcomes)} outcomes)"
+    except Exception:  # noqa: BLE001 - absent/broken registries stack → not applicable
+        return out
+    return out
+
+
+def _print_registry_loadability_report(result: dict) -> None:
+    """Outcomes-loadability row: OK with the count, else a loud ERROR + the fix."""
+    if not result.get("applicable"):
+        return
+    print()
+    UI.header("Outcomes Registry (loadability)")
+    if result.get("ok"):
+        print(f"  {UI.badge('OK', C.GREEN)}  {result['detail']}")
+    else:
+        print(f"  {UI.badge('ERROR', C.RED)}  {result['detail']}")
+        print("  The file resolves but does not validate — the console tree silently")
+        print("  falls back to changes-only. Run `otaman outcome list` for the error.")
+
+
 def cmd_doctor(args: list[str]) -> int:
     """Check environment readiness — git, runtimes, CLI tools, MCP.
 
@@ -1100,6 +1158,11 @@ def cmd_doctor(args: list[str]) -> int:
     strat = _check_strategy_repo(root)
     _print_strategy_repo_report(strat)
     if strat.get("applicable") and not strat.get("ok"):
+        base_rc = 1
+
+    regload = _check_registry_loadability(root)
+    _print_registry_loadability_report(regload)
+    if regload.get("applicable") and not regload.get("ok"):
         base_rc = 1
 
     # ce-bootstrap-harness-deps task 3.1 — additive `--org` harness check

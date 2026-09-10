@@ -93,6 +93,24 @@ def registries_enabled(program: Program) -> bool:
         return False
 
 
+FALLBACK_NOTICE = (
+    "outcomes registry failed to load — showing changes only; "
+    "run `otaman outcome list` for the error"
+)
+
+
+def tree_fallback_notice(program: Program) -> str | None:
+    """The loud one-liner for the tree header when the program ENABLES the outcomes
+    registry but the file won't load/validate, so the flat changes-only fallback is
+    never silent (cofounder-agent's Roman requirement; kin to the silent-approval-
+    loss lesson, JTBD-125). None when registries are off/absent or loaded fine —
+    a missing file is a genuine absence, not a failure."""
+    if not registries_enabled(program):
+        return None
+    outcomes, _ = _load_registries(program)
+    return None if outcomes is not None else FALLBACK_NOTICE
+
+
 def _load_registries(program: Program):
     """(outcomes, solutions) validated registries, or (None, None) when absent."""
     try:
@@ -251,4 +269,10 @@ def build_artifact_tree(program: Program, *, show_closed: bool = False) -> list[
     return roots
 
 
-__all__ = ["TreeNode", "build_artifact_tree", "registries_enabled"]
+__all__ = [
+    "TreeNode",
+    "build_artifact_tree",
+    "registries_enabled",
+    "tree_fallback_notice",
+    "FALLBACK_NOTICE",
+]

@@ -664,6 +664,9 @@ class TreeScreen(Screen):
             "↑↓ move · → expand · ← collapse · enter open · "
             "f closed · r refresh · esc back · q quit",
         )
+        notice = Static("", id="tree-notice", markup=False)
+        notice.display = False
+        yield notice
         yield Tree("artifacts", id="artifact-tree")
         yield Footer()
 
@@ -681,12 +684,22 @@ class TreeScreen(Screen):
         self.run_worker(self._load, thread=True, exclusive=True, group="tree")
 
     def _load(self) -> None:
-        from otaman_cli.console.tree import build_artifact_tree
+        from otaman_cli.console.tree import build_artifact_tree, tree_fallback_notice
 
         roots = build_artifact_tree(self.program, show_closed=self._show_closed)
-        self.app.call_from_thread(self._populate, roots)
+        notice = tree_fallback_notice(self.program)
+        self.app.call_from_thread(self._populate, roots, notice)
 
-    def _populate(self, roots) -> None:
+    def _populate(self, roots, notice=None) -> None:
+        notice_w = self.query_one("#tree-notice", Static)
+        if notice:
+            from rich.text import Text
+
+            notice_w.update(Text(f"⚠ {notice}", style="bold red"))
+            notice_w.display = True
+        else:
+            notice_w.update("")
+            notice_w.display = False
         tree = self.query_one("#artifact-tree", Tree)
         tree.clear()
         closed_hint = "showing closed" if self._show_closed else "closed hidden"
