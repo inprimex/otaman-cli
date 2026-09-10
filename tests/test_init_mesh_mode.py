@@ -102,6 +102,13 @@ def test_mesh_template_posts_spawn_without_embedding_secret(template):
     # no tmux/ssh in the mesh spawn path (D4)
     assert "tmux new-session" not in out
     assert "ssh -q" not in out
+    # bounded request timeout — a black-holed endpoint must fail finite+loud,
+    # never hang forever (gate 2.1 finding)
+    if template.endswith(".sh.j2"):
+        assert "--max-time" in out and "--connect-timeout" in out
+        assert "|| echo 000" not in out  # the double-000 cosmetic bug is gone
+    else:
+        assert "-TimeoutSec" in out
 
 
 def test_ssh_mode_still_renders_tmux():

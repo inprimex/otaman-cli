@@ -28,10 +28,16 @@ failed=0
 spawn_agent() {
   local agent="$1" repo="$2" tmp code
   tmp="$(mktemp)"
-  code="$(curl -sS -o "$tmp" -w '%{http_code}' -X POST "$RUNNER_BASE/spawn" \
+  # Bounded timeouts: a black-holed endpoint (SYN dropped — down VPN, wrong mesh
+  # route) would otherwise hang the launcher forever. --max-time makes it a loud,
+  # finite failure. curl -w prints the code (000 on connect/timeout failure); a
+  # redundant echo-fallback would double-print it to 000000, so we rely on -w.
+  code="$(curl -sS --connect-timeout 5 --max-time 30 -o "$tmp" -w '%{http_code}' \
+    -X POST "$RUNNER_BASE/spawn" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $RUNNER_TOKEN" \
-    --data "{\"agent\":\"$agent\",\"repo\":\"$repo\",\"mode\":\"interactive\"}" 2>/dev/null || echo 000)"
+    --data "{\"agent\":\"$agent\",\"repo\":\"$repo\",\"mode\":\"interactive\"}" 2>/dev/null)"
+  code="${code:-000}"
   if [ "$code" = "200" ] || [ "$code" = "201" ]; then
     echo "  [ok]   $agent — spawned via runner ($RUNNER_BASE)"
     started=$((started+1))

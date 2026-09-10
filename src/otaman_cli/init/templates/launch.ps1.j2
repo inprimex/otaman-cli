@@ -31,7 +31,9 @@ $Failed = 0
 function Spawn-Agent($agent, $repo) {
     $body = @{ agent = $agent; repo = $repo; mode = "interactive" } | ConvertTo-Json -Compress
     try {
-        Invoke-RestMethod -Method Post -Uri "$RunnerBase/spawn" -Headers @{ Authorization = "Bearer $RunnerToken" } -ContentType "application/json" -Body $body | Out-Null
+        # -TimeoutSec bounds a black-holed endpoint (down VPN / wrong mesh route)
+        # so the launcher fails loudly instead of hanging forever.
+        Invoke-RestMethod -Method Post -Uri "$RunnerBase/spawn" -Headers @{ Authorization = "Bearer $RunnerToken" } -ContentType "application/json" -Body $body -TimeoutSec 30 | Out-Null
         Write-Host "  [ok]   $agent — spawned via runner ($RunnerBase)"
         $script:Started++
     } catch {
