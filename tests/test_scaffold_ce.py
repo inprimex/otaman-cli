@@ -113,6 +113,54 @@ def test_scaffold_updates_platform_yaml_repos(meta: Path) -> None:
     assert entry["path"] == "../epicbridge-business"
 
 
+def test_scaffold_sets_registry_home_key_to_business(meta: Path) -> None:
+    """team-mode 1.5: for a level>=solutions program the scaffolder sets
+    program.registries.strategy_repo to the business repo (the registry home),
+    so the program isn't born doctor-erroring."""
+    scaffold_companion_repos_ce(
+        program_slug="epicbridge",
+        processes=["outcomes", "solutions", "personas"],
+        meta_dir=meta,
+    )
+    import yaml
+
+    doc = yaml.safe_load((meta / "platform.yaml").read_text(encoding="utf-8"))
+    assert doc["program"]["registries"]["strategy_repo"] == "epicbridge-business"
+
+
+def test_scaffold_sets_registry_home_key_to_strategy(meta: Path) -> None:
+    """When a strategy repo is scaffolded it wins the registry-home key over the
+    business repo."""
+    scaffold_companion_repos_ce(
+        program_slug="epicbridge",
+        processes=[],
+        meta_dir=meta,
+        repo_kinds=["business", "strategy"],
+    )
+    import yaml
+
+    doc = yaml.safe_load((meta / "platform.yaml").read_text(encoding="utf-8"))
+    assert doc["program"]["registries"]["strategy_repo"] == "epicbridge-strategy"
+
+
+def test_scaffold_respects_existing_registry_home_key(meta: Path) -> None:
+    """An existing program.registries.strategy_repo is never overwritten."""
+    (meta / "platform.yaml").write_text(
+        (meta / "platform.yaml").read_text(encoding="utf-8")
+        + "program:\n  registries:\n    strategy_repo: preset\n",
+        encoding="utf-8",
+    )
+    scaffold_companion_repos_ce(
+        program_slug="epicbridge",
+        processes=["outcomes"],
+        meta_dir=meta,
+    )
+    import yaml
+
+    doc = yaml.safe_load((meta / "platform.yaml").read_text(encoding="utf-8"))
+    assert doc["program"]["registries"]["strategy_repo"] == "preset"
+
+
 def test_scaffold_strategy_repo_owned_by_cofounder(meta: Path) -> None:
     result = scaffold_companion_repos_ce(
         program_slug="epicbridge",
@@ -294,12 +342,11 @@ def test_outcome_add_succeeds_after_scaffold(meta: Path) -> None:
         meta_dir=meta,
     )
 
-    # team-mode 1.1: the registry home is now program.registries.strategy_repo
-    # (find_business_repo owner-scan retired). scaffold_ce doesn't set the key
-    # (that's config/step-2 territory), so point the resolver at the scaffolded
-    # business repo via the explicit override for this end-to-end check.
+    # team-mode 1.5: scaffold_ce sets program.registries.strategy_repo to the
+    # registry-home companion repo (here the business repo), so the resolver
+    # finds the home out of the box — no OTAMAN_STRATEGY_DIR override needed.
     env = {**os.environ, "OTAMAN_AGENT": "human"}
-    env["OTAMAN_STRATEGY_DIR"] = str(meta.parent / "epicbridge-business")
+    env.pop("OTAMAN_STRATEGY_DIR", None)
     for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
         env.pop(_var, None)
     rc = subprocess.run(
