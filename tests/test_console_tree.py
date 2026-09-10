@@ -71,6 +71,30 @@ def test_extract_outcome_id_from_free_text():
 
 
 # ---------------------------------------------------------------------------
+# row-title clipping (Roman feedback): long titles must not overflow the viewport
+
+
+def test_display_label_clips_long_title():
+    node = tree.TreeNode(kind="outcome", id="JTBD-1", title="x" * 200, status="Approved")
+    dl = node.display_label(max_title=48)
+    assert "JTBD-1" in dl  # id kept intact
+    assert "[Approved]" in dl  # status tail kept
+    assert "…" in dl  # clipped
+    assert len(dl) < len(node.label)
+
+
+def test_display_label_short_title_unchanged():
+    node = tree.TreeNode(kind="outcome", id="JTBD-2", title="short", status="Done")
+    assert node.display_label(max_title=48) == node.label
+    assert "…" not in node.display_label()
+
+
+def test_display_label_no_title_is_label():
+    node = tree.TreeNode(kind="change", id="my-change", title="")
+    assert node.display_label() == node.label
+
+
+# ---------------------------------------------------------------------------
 # loud fallback notice — registries enabled but the file won't load (Roman req)
 
 
@@ -115,6 +139,30 @@ def test_tree_shows_loud_banner_on_load_failure(program, monkeypatch):
             notice = app.screen.query_one("#tree-notice", _Static)
             assert notice.display is True
             assert "failed to load" in str(notice.render())
+            await app.action_quit()
+
+    asyncio.run(go())
+
+
+@_textual
+def test_enter_on_outcome_opens_registry_detail(program, monkeypatch):
+    monkeypatch.setattr(tree, "registries_enabled", lambda program: False)
+    monkeypatch.setattr(tree, "_change_rows", lambda program: [])
+    monkeypatch.setattr(tree, "_blocked_map", lambda program: {})
+    from otaman_cli.console.app import OtamanConsole, RegistryDetailScreen, TreeScreen
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(TreeScreen(program))
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            node = tree.TreeNode(kind="outcome", id="JTBD-9", title="a long title" * 10)
+            ev = SimpleNamespace(node=SimpleNamespace(data=node))
+            app.screen.on_tree_node_selected(ev)
+            await pilot.pause()
+            assert isinstance(app.screen, RegistryDetailScreen)
             await app.action_quit()
 
     asyncio.run(go())

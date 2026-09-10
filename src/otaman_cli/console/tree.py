@@ -65,6 +65,30 @@ class TreeNode:
             tail.append(f"BLOCKED by {self.blocked_by}")
         return f"{line}   {' '.join(tail)}".rstrip()
 
+    def display_label(self, max_title: int = 48) -> str:
+        """The row label with the free-text TITLE clipped to *max_title* chars
+        (ellipsis) so long outcome/solution labels never overflow the viewport —
+        which is what hijacks ←/→ into horizontal scroll instead of collapse/
+        expand (Roman feedback). The id and status/blocked tail stay intact (ids
+        are stable identifiers, not display strings); the full title is one
+        keypress away via the detail view."""
+        if not (self.id and self.title and self.title != self.id):
+            return self.label
+        title = self.title
+        if len(title) > max_title:
+            title = title[: max_title - 1].rstrip() + "…"
+        clipped = TreeNode(
+            kind=self.kind,
+            id=self.id,
+            title=title,
+            status=self.status,
+            priority=self.priority,
+            blocked_by=self.blocked_by,
+            marker=self.marker,
+            pm_sync_id=self.pm_sync_id,
+        )
+        return clipped.label
+
 
 def _extract_outcome_id(raw: object) -> str | None:
     if not isinstance(raw, str):
