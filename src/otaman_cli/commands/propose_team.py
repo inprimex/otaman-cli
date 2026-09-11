@@ -140,6 +140,24 @@ TODO: Concrete suggestions for what the spec should say.
     with open(blocked_file, "a", encoding="utf-8") as f:
         f.write(blocked_entry)
 
+    # spec-gate-hardening 1.4 — enqueue a spec-approval-pending item for the human
+    # so this SCR sits in their triage queue, and the proposing agent can surface
+    # it in `otaman check` (its id == the filename stem; core validates the type).
+    sap_stem = f"{now_ts}-{agent}-to-human-spec-approval-pending"
+    sap_content = (
+        f"---\nid: {sap_stem}\nfrom: {agent}\nto: human\npriority: normal\n"
+        f"type: spec-approval-pending\ntimestamp: {now_iso}\nstatus: pending\n---\n\n"
+        f"## Subject: Approval pending: {title}\n\n"
+        f"Awaiting human approval/ratification of SCR `{msg_stem}` (from {agent}).\n"
+    )
+    try:
+        write_message_exclusive(active_dir / f"{sap_stem}.md", sap_content, validate=True)
+    except BusMessageValidationError as exc:
+        UI.warn(
+            "spec-approval-pending item not enqueued (failed self-validation): "
+            + "; ".join(exc.errors)
+        )
+
     UI.ok(f"Created: {filepath.relative_to(root)}")
     UI.kv("From", UI.agent(agent))
     UI.kv("Type", "spec-change-request (pending human approval)", C.YELLOW)
