@@ -1410,6 +1410,70 @@ def check_launch_commands_resume(repos: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _load_known_agents_safe(project_root: Path) -> set[str]:
+    """agents.yaml agent names, or empty set on any failure (never raises into
+    the doctor run)."""
+    try:
+        from otaman_core.validate_message import load_known_agents
+
+        return load_known_agents(project_root)
+    except Exception:  # noqa: BLE001 - absent core/agents.yaml → nothing to check
+        return set()
+
+
+def check_launch_command_agent_names(
+    repos: list[dict[str, Any]], known_agents: set[str]
+) -> dict[str, Any]:
+    """Flag a launch command whose ``OTAMAN_AGENT=<value>`` is NOT an agent name
+    in agents.yaml (identity-divergence D3).
+
+    The generator writes ``OTAMAN_AGENT=<owner>`` from the repo's owner (an agent
+    name). Hand-editing can drift it to a repo name or a stale identity — exactly
+    what spawned a phantom agent in the pmeets tenant. The convention is: the
+    value is always an agent name sourced from agents.yaml. No agents.yaml (or an
+    empty one) → nothing to validate against, so the check is a no-op."""
+    import re as _re
+
+    result: dict[str, Any] = {"check": "launch_command_agent_names", "status": "ok", "details": {}}
+    if not known_agents:
+        return result
+    pat = _re.compile(r"OTAMAN_AGENT=(\S+)")
+    issues = []
+    for repo in repos:
+        name = repo.get("name", "?")
+        cmds = repo.get("launch_commands")
+        if not cmds and isinstance(repo.get("launch"), dict):
+            cmds = repo["launch"].get("commands")
+        if not cmds:
+            continue
+        if isinstance(cmds, str):
+            cmds = [cmds]
+        for cmd in cmds:
+            for m in pat.finditer(str(cmd)):
+                value = m.group(1).strip("\"'")
+                if value and value not in known_agents:
+                    issues.append(
+                        {
+                            "issue": (
+                                f"repo `{name}`: launch command sets "
+                                f"OTAMAN_AGENT={value!r}, which is not an agent in "
+                                "agents.yaml (likely a repo name or stale identity — "
+                                "a phantom-agent source)"
+                            ),
+                            "fix": (
+                                "Run `otaman init --update` to regenerate launch "
+                                "commands with the repo owner's agent name, or set "
+                                f"OTAMAN_AGENT to a name listed in agents.yaml for '{name}'."
+                            ),
+                            "severity": "medium",
+                        }
+                    )
+    if issues:
+        result["status"] = "warn"
+        result["issues"] = issues
+    return result
+
+
 def check_edition_consistency() -> dict[str, Any]:
     """ce-ee-release-channels 3.2 — probe-vs-file edition diagnostic.
 
@@ -1677,6 +1741,7 @@ def run_doctor(project_root: Path) -> dict[str, Any]:
         check_privileged_provenance(project_root),
         check_git_host(project_root),
         check_launch_commands_resume(repos),
+        check_launch_command_agent_names(repos, _load_known_agents_safe(project_root)),
         check_plugin_doctor(project_root),
         check_human_roster(config),
         check_edition_consistency(),
