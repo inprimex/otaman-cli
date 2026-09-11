@@ -64,15 +64,36 @@ def test_append_transition_appends_to_existing_list():
 # roles
 
 
-def test_resolve_operating_actor_env_wins(monkeypatch):
+def test_resolve_operating_actor_env_wins(monkeypatch, tmp_path):
+    # With no project (no cwd-owner to cross-check against), OTAMAN_AGENT applies.
     monkeypatch.setenv("OTAMAN_AGENT", "scripted-agent")
-    assert resolve_operating_actor() == "scripted-agent"
+    assert resolve_operating_actor(cwd=tmp_path) == "scripted-agent"
 
 
 def test_resolve_operating_actor_falls_back_to_human(monkeypatch, tmp_path):
     monkeypatch.delenv("OTAMAN_AGENT", raising=False)
     # An empty cwd with no .otaman walk match → "human"
     assert resolve_operating_actor(cwd=tmp_path) == "human"
+
+
+def test_resolve_operating_actor_delegates_to_resolver(monkeypatch, tmp_path):
+    # identity-divergence D1: it routes through the ONE resolver, not a raw env
+    # read — so the resolver's cwd-owner-overrides-leaked-env cross-check applies.
+    import otaman_cli.identity as identity
+
+    monkeypatch.setenv("OTAMAN_AGENT", "leaked-agent")
+    monkeypatch.setattr(identity, "resolve_agent_identity", lambda *a, **k: "cwd-owner-agent")
+    assert resolve_operating_actor(cwd=tmp_path) == "cwd-owner-agent"
+
+
+def test_resolve_agent_identity_tolerates_no_root(monkeypatch, tmp_path):
+    # the single entry point must handle a bare (project-less) call
+    from otaman_cli.identity import resolve_agent_identity
+
+    monkeypatch.setenv("OTAMAN_AGENT", "scripted-agent")
+    assert resolve_agent_identity(None, cwd=tmp_path) == "scripted-agent"
+    monkeypatch.delenv("OTAMAN_AGENT", raising=False)
+    assert resolve_agent_identity(None, cwd=tmp_path) is None
 
 
 def test_resolve_roles_returns_multiple():

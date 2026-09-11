@@ -69,7 +69,13 @@ def _acting_human(program_root: Path) -> tuple[str | None, str | None]:
     from otaman_cli.approver_eligibility import refusal_message, resolve_eligibility
 
     if not os.environ.get("OTAMAN_HUMAN", "").strip():
-        if os.environ.get("OTAMAN_AGENT", "").strip():
+        # Route the "is an agent acting?" check through the ONE resolver
+        # (identity-divergence D1) instead of trusting raw OTAMAN_AGENT — a
+        # leaked/stale env is cross-checked against the cwd-resolved owner.
+        from otaman_cli.identity import resolve_agent_identity
+
+        actor = resolve_agent_identity(program_root)
+        if actor and actor != "human":
             return None, (
                 "agents cannot perform lifecycle transitions — file an "
                 "outcome-proposal or ask your human to run this."
