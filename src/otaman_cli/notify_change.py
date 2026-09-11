@@ -20,6 +20,7 @@ treat the message identically regardless of trigger source.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from datetime import datetime, timezone
@@ -328,7 +329,28 @@ def notify_change(project_root: Path, change_name: str) -> tuple[int, dict[str, 
     # via SCRIPT_MAP → `otaman_plugin.map_tasks` (an in-process import), which
     # works from both a dev checkout and an installed wheel.
     if tasks_md.is_file():
+        # F2 (spec-gate-hardening): route dispatch through the SAME gate as
+        # `otaman assign` — an unapproved change is refused/waived here too, with
+        # the violation surfaced, an audit entry written, and x-gate-waived
+        # stamped. Without this the pmeets incident shape (a silent unapproved
+        # dispatch) survived on the notify-change path — the flow used after a
+        # GitHub merge, so it matters most.
+        from otaman_cli.commands.spec import dispatch_gate_check, dispatch_waiver_slug
+        from otaman_cli.identity import resolve_agent_identity
+
+        actor = resolve_agent_identity(project_root) or "unknown-agent"
+        allowed, gate_lines = dispatch_gate_check(project_root, change_name, audit_actor=actor)
+        summary["gate_lines"] = gate_lines
+        if not allowed:
+            summary["map_tasks_called"] = False
+            summary["gate_blocked"] = True
+            return 0, summary  # dispatch refused by spec policy; no assignments emitted
+
         summary["map_tasks_path"] = "otaman_plugin.map_tasks"
+        waiver_slug = dispatch_waiver_slug(project_root, change_name)
+        _prev_waived = os.environ.get("OTAMAN_GATE_WAIVED")
+        if waiver_slug:
+            os.environ["OTAMAN_GATE_WAIVED"] = waiver_slug
         try:
             from otaman_cli.main import run_script
 
@@ -341,6 +363,12 @@ def notify_change(project_root: Path, change_name: str) -> tuple[int, dict[str, 
         except Exception as exc:  # noqa: BLE001 - dispatch failure degrades, loudly
             summary["map_tasks_called"] = False
             summary["map_tasks_error"] = str(exc)[:200]
+        finally:
+            if waiver_slug:
+                if _prev_waived is None:
+                    os.environ.pop("OTAMAN_GATE_WAIVED", None)
+                else:
+                    os.environ["OTAMAN_GATE_WAIVED"] = _prev_waived
 
     return 0, summary
 
@@ -380,6 +408,14 @@ def cmd_notify_change(args: list[str]) -> int:
         UI.muted(f"  tasks.md: {summary['tasks_md_path']}")
     else:
         UI.muted("  tasks.md: (absent — fallback recipients used)")
+    # F2 — surface the dispatch gate result VIOLATION-first, like `otaman assign`.
+    for ln in summary.get("gate_lines") or []:
+        UI.warn(ln)
+    if summary.get("gate_blocked"):
+        UI.error(f"Dispatch blocked by spec policy: '{change_name}' is not spec-approved.")
+        UI.muted("Advance it to spec-approved (or `otaman ratify`), or relax enforcement.")
+        return rc
+
     if summary["map_tasks_called"]:
         UI.ok("map-tasks dispatch invoked (otaman_plugin.map_tasks)")
     elif summary.get("map_tasks_path"):
