@@ -312,6 +312,29 @@ def _check_roster_sync(root: Path) -> tuple[int, list[dict]]:
         return 0, [{"status": "error", "error": f"roster-sync check failed: {exc}"}]
 
 
+def _check_identity_chain(root: Path) -> list[str]:
+    """identity-chain-preflight 1.1 — proactive check of the human-identity chain
+    prerequisites, independent of enrollment-store contents (the reactive Roster
+    Sync above says nothing on an empty store). Returns warning strings."""
+    try:
+        from otaman_cli.identity_preflight import identity_chain_preflight
+
+        return identity_chain_preflight()
+    except Exception:  # noqa: BLE001 - never crash the doctor run
+        return []
+
+
+def _print_identity_chain_report(warnings: list[str]) -> None:
+    """Pretty-print identity-chain preflight warnings; nothing when the chain
+    looks wired."""
+    if not warnings:
+        return
+    print()
+    UI.header("Identity Chain (preflight)")
+    for w in warnings:
+        print(f"  {UI.badge('WARN', C.YELLOW)}  {w}")
+
+
 def _print_roster_sync_report(drift: list[dict]) -> None:
     """Pretty-print roster drift (1.2); nothing when in sync."""
     if not drift:
@@ -1168,6 +1191,10 @@ def cmd_doctor(args: list[str]) -> int:
     # unverifiable). WARN-only, so it doesn't change the exit code.
     _rs_rc, rs_drift = _check_roster_sync(root)
     _print_roster_sync_report(rs_drift)
+
+    # identity-chain-preflight 1.1 — proactive chain-unwired / inert-annotation
+    # warnings (independent of the enrollment store). WARN-only.
+    _print_identity_chain_report(_check_identity_chain(root))
 
     # hitl-default-approver conformance — the missing-approver ERROR. Runs
     # UNCONDITIONALLY (an absent human-roster + a live approval path is the
