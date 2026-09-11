@@ -19,6 +19,40 @@ from otaman_cli.main import UI
 _ACTIONS = ("status", "gate")
 _GATES = ("dispatch", "archive", "merge")
 
+#: Valid keys for a per-action ``spec_policy.enforcement`` map (spec-gate-hardening
+#: 1.1). ``author`` has no CLI gate today but is a valid, doctor-accepted key.
+ENFORCEMENT_ACTIONS = ("author", "merge", "dispatch", "archive")
+
+
+def _raw_enforcement(root: Path):
+    """The raw ``spec_policy.enforcement`` value from platform.yaml — a scalar
+    string, a per-action map, or None. Unparsed, so 1.1 can resolve per action and
+    doctor can validate the map's keys."""
+    import yaml
+
+    try:
+        cfg = yaml.safe_load((root / "platform.yaml").read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    sp = cfg.get("spec_policy") if isinstance(cfg, dict) else None
+    return sp.get("enforcement") if isinstance(sp, dict) else None
+
+
+def resolve_action_enforcement(root: Path, action: str) -> str:
+    """The effective enforcement mode for *action* (spec-gate-hardening 1.1).
+
+    ``spec_policy.enforcement`` is either a single mode for every action or a map
+    keyed ``author|merge|dispatch|archive``. A map with no entry for *action*, or
+    any unrecognized value, falls back to ``DEFAULT_ENFORCEMENT`` (doctor flags a
+    malformed map separately)."""
+    from otaman_core.spec_lifecycle import DEFAULT_ENFORCEMENT, ENFORCEMENT_MODES
+
+    raw = _raw_enforcement(root)
+    if isinstance(raw, dict):
+        mode = raw.get(action)
+        return mode if mode in ENFORCEMENT_MODES else DEFAULT_ENFORCEMENT
+    return raw if raw in ENFORCEMENT_MODES else DEFAULT_ENFORCEMENT
+
 
 def cmd_spec(args: list[str]) -> int:
     if not args or args[0] in ("-h", "--help"):
@@ -55,8 +89,13 @@ def _specs_changes_dir(root: Path) -> Path | None:
     return changes if changes.is_dir() else None
 
 
-def _load_policy(root: Path):
-    """Effective SpecPolicy from platform.yaml's ``spec_policy`` (program) block."""
+def _load_policy(root: Path, action: str | None = None):
+    """Effective SpecPolicy from platform.yaml's ``spec_policy`` (program) block.
+
+    When *action* is given, the policy's ``enforcement`` is resolved for that gate
+    action (spec-gate-hardening 1.1) — so a map like ``{author: warn, dispatch:
+    block}`` blocks dispatch while authoring warns. Without *action* the scalar
+    (or the map's fallback) is returned for display."""
     import yaml
     from otaman_core.spec_lifecycle import resolve_spec_policy
 
@@ -65,7 +104,12 @@ def _load_policy(root: Path):
     except (OSError, yaml.YAMLError):
         cfg = {}
     program_block = cfg.get("spec_policy") if isinstance(cfg, dict) else None
-    return resolve_spec_policy(None, program_block)
+    policy = resolve_spec_policy(None, program_block)
+    if action:
+        from dataclasses import replace
+
+        return replace(policy, enforcement=resolve_action_enforcement(root, action))
+    return policy
 
 
 def _collect_ratifications(changes_dir: Path | None):
@@ -229,7 +273,7 @@ def dispatch_gate_check(root: Path, change_name: str) -> tuple[bool, list[str]]:
     data = read_openspec(d / ".openspec.yaml")
     if not data:
         return True, []  # legacy/unbackfilled change → not gated until it has a stage
-    decision = _run_gate(data, _load_policy(root), "dispatch")
+    decision = _run_gate(data, _load_policy(root, "dispatch"), "dispatch")
     return decision.allowed, _gate_notice_lines(decision)
 
 
@@ -255,7 +299,7 @@ def _cmd_gate(root: Path, rest: list[str]) -> int:
         return 1
     data = read_openspec(d / ".openspec.yaml")
     decision = _run_gate(
-        data, _load_policy(root), at, has_capability_delta="--no-delta" not in rest
+        data, _load_policy(root, at), at, has_capability_delta="--no-delta" not in rest
     )
 
     if "--json" in rest:
