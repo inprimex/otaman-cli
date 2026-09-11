@@ -38,56 +38,79 @@ class TreeNode:
     title: str
     status: str = ""
     priority: str | None = None
+    created: str = ""  # outcome created stamp (date column, tree-view-polish 1.1)
     blocked_by: str | None = None
     next_actor: str | None = None
     closed: bool = False
     dormant: bool = False
+    grayed: bool = False  # decided-out sibling solution (tree-view-polish 1.3)
     marker: str = ""  # e.g. ★ for the chosen solution
     pm_sync_id: str | None = None  # linked issue/ticket id (S10)
     children: list[TreeNode] = field(default_factory=list)
 
+    _HUGE = 1 << 30  # "no clip" sentinel for the full label
+
+    def row_segments(self, max_title: int = 48) -> list[tuple[str, str]]:
+        """The row as ``(text, rich-style)`` segments (tree-view-polish 1.1/1.2).
+
+        Row shape is ``id   created | p<N> | <status> | title`` for outcomes and
+        ``id   p<N> | <status> | title`` for solutions — identity columns first,
+        the free-text title last and clipped to *max_title* so long titles never
+        overflow (Roman feedback; overflow hijacks ←/→ into horizontal scroll).
+        Enum values render as short lowercase words each in its palette color;
+        a grayed (decided-out) row renders wholly in the gray style. Styles come
+        from the one shared palette — no per-screen colors."""
+        from otaman_cli.console.palette import (
+            GRAY_STYLE,
+            priority_style,
+            short_priority,
+            short_status,
+            status_style,
+        )
+
+        def st(style: str) -> str:
+            return GRAY_STYLE if self.grayed else style
+
+        segs: list[tuple[str, str]] = [(self.id or self.title, st("bold"))]
+        cols: list[tuple[str, str]] = []
+        if self.kind == "outcome" and self.created:
+            cols.append((str(self.created)[:10], st("")))
+        if self.priority:
+            cols.append((short_priority(self.priority), st(priority_style(self.priority))))
+        if self.status:
+            cols.append((short_status(self.status), st(status_style(self.status))))
+        title = self.title if (self.title and self.title != self.id) else ""
+        if title and len(title) > max_title:
+            title = title[: max_title - 1].rstrip() + "…"
+        if title:
+            cols.append((title, st("")))
+        if cols:
+            segs.append(("   ", ""))
+            for i, seg in enumerate(cols):
+                if i:
+                    segs.append((" | ", st("")))
+                segs.append(seg)
+        tail: list[tuple[str, str]] = []
+        if self.marker:
+            tail.append((self.marker, st("")))
+        if self.pm_sync_id:
+            tail.append((f"#{self.pm_sync_id}", st("")))
+        if self.blocked_by:
+            tail.append(
+                (f"BLOCKED by {self.blocked_by}", st("red") if not self.grayed else GRAY_STYLE)
+            )
+        for seg in tail:
+            segs.extend([("   ", ""), seg])
+        return segs
+
     @property
     def label(self) -> str:
-        bits = [self.id or self.title]
-        if self.id and self.title and self.title != self.id:
-            bits.append(self.title)
-        line = " ".join(bits)
-        tail = []
-        if self.priority:
-            tail.append(self.priority)
-        if self.status:
-            tail.append(f"[{self.status}]")
-        if self.marker:
-            tail.append(self.marker)
-        if self.pm_sync_id:
-            tail.append(f"#{self.pm_sync_id}")
-        if self.blocked_by:
-            tail.append(f"BLOCKED by {self.blocked_by}")
-        return f"{line}   {' '.join(tail)}".rstrip()
+        return "".join(t for t, _ in self.row_segments(max_title=self._HUGE)).rstrip()
 
     def display_label(self, max_title: int = 48) -> str:
-        """The row label with the free-text TITLE clipped to *max_title* chars
-        (ellipsis) so long outcome/solution labels never overflow the viewport —
-        which is what hijacks ←/→ into horizontal scroll instead of collapse/
-        expand (Roman feedback). The id and status/blocked tail stay intact (ids
-        are stable identifiers, not display strings); the full title is one
-        keypress away via the detail view."""
-        if not (self.id and self.title and self.title != self.id):
-            return self.label
-        title = self.title
-        if len(title) > max_title:
-            title = title[: max_title - 1].rstrip() + "…"
-        clipped = TreeNode(
-            kind=self.kind,
-            id=self.id,
-            title=title,
-            status=self.status,
-            priority=self.priority,
-            blocked_by=self.blocked_by,
-            marker=self.marker,
-            pm_sync_id=self.pm_sync_id,
-        )
-        return clipped.label
+        """The plain-text row with the title clipped to *max_title* (see
+        :meth:`row_segments`)."""
+        return "".join(t for t, _ in self.row_segments(max_title=max_title)).rstrip()
 
 
 def _extract_outcome_id(raw: object) -> str | None:
@@ -99,6 +122,12 @@ def _extract_outcome_id(raw: object) -> str | None:
 
 def _priority_rank(priority: str | None) -> int:
     return _PRIORITY_RANK.get(priority or "", 99)
+
+
+def _enum_value(x: object) -> str:
+    """The canonical value string for a status/priority — the enum ``.value``, so
+    a row never leaks a raw ``OutcomeStatus.APPROVED`` repr (tree-view-polish)."""
+    return "" if x is None else str(getattr(x, "value", x))
 
 
 def registries_enabled(program: Program) -> bool:
@@ -248,32 +277,45 @@ def build_artifact_tree(program: Program, *, show_closed: bool = False) -> list[
     roots: list[TreeNode] = []
     linked_changes: set[str] = set()
     for outcome in outcomes.outcomes:
-        closed = outcome.status in _CLOSED_OUTCOME
+        o_status = _enum_value(outcome.status)
+        o_priority = _enum_value(outcome.priority)
+        closed = o_status in _CLOSED_OUTCOME
         node = TreeNode(
             kind="outcome",
             id=outcome.id,
             title=getattr(getattr(outcome, "statement", None), "incremental_outcome", "") or "",
-            status=str(outcome.status),
-            priority=str(outcome.priority),
+            status=o_status,
+            priority=o_priority,
+            created=str(getattr(outcome, "created", "") or ""),
             closed=closed,
         )
         chosen = getattr(outcome, "chosen_solution", None)
         if solutions is not None:
-            for sol in solutions.for_outcome(outcome.id):
+            sols = list(solutions.for_outcome(outcome.id))
+            # the "decided" solution — the chosen one, else a Complete one — grays
+            # and closes its still-in-play siblings (tree-view-polish 1.3).
+            decided = chosen or next(
+                (s.id for s in sols if _enum_value(s.status) == "Complete"), None
+            )
+            for sol in sols:
+                s_status = _enum_value(sol.status)
+                is_discarded = s_status in _CLOSED_SOLUTION
+                grayed = bool(decided) and sol.id != decided and not is_discarded
                 node.children.append(
                     TreeNode(
                         kind="solution",
                         id=sol.id,
                         title=getattr(sol, "description", "") or "",
-                        status=str(sol.status),
-                        priority=str(outcome.priority),
-                        closed=(str(sol.status) in _CLOSED_SOLUTION),
+                        status=s_status,
+                        priority=o_priority,
+                        closed=(is_discarded or grayed),
+                        grayed=grayed,
                         marker="★" if chosen and sol.id == chosen else "",
                     )
                 )
         for name, oid in change_outcome.items():
             if oid == outcome.id:
-                change_nodes[name].priority = str(outcome.priority)  # inherited (S9)
+                change_nodes[name].priority = o_priority  # inherited (S9)
                 node.children.append(change_nodes[name])
                 linked_changes.add(name)
         node.children = [c for c in node.children if _visible(c)]
