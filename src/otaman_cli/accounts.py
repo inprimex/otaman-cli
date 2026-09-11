@@ -67,6 +67,27 @@ def load_settings(path: Path) -> dict[str, Any]:
     return data or {}
 
 
+def validate_human_ref(value: str) -> str:
+    """Validate + normalize an ``accounts.<name>.human`` reference (team-mode 2.3a).
+
+    The field maps a launch-settings account to a rostered human — a name,
+    name-slug, email, or email local-part, whichever the roster resolves by
+    (``otaman_core.human_roster.resolve_roster_human``). Validation here is
+    SHAPE-only — a non-empty single-line scalar — because the authoritative
+    "does this human exist in the roster" check belongs to core's resolver, which
+    holds the roster; a writer that duplicated it would be the second parser the
+    B1 ruling avoided. Returns the stripped value; raises ``ValueError`` on a bad
+    shape."""
+    if not isinstance(value, str):
+        raise ValueError("human must be a string (a roster name, slug, or email)")
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError("human must be a non-empty roster name, slug, or email")
+    if "\n" in value or "\r" in value:
+        raise ValueError("human must be a single line (a roster name, slug, or email)")
+    return stripped
+
+
 def _find_block_span(lines: list[str], key: str) -> tuple[int, int] | None:
     """Locate ``key:`` block in a list of file lines.
 
@@ -152,15 +173,20 @@ def add_account(
     name: str,
     config_dir: str,
     label: str | None = None,
+    human: str | None = None,
 ) -> list[str]:
     """Add a new account entry to launch-settings.yaml. Idempotent by name.
 
-    Raises ValueError on name conflict. Returns a list of status messages.
+    *human* (team-mode 2.3a) maps the account to a rostered human (name / slug /
+    email) so core's ``resolve_human_config_dir`` can route a human-facing
+    session to this account's ``config_dir``. Raises ValueError on name conflict
+    or a bad ``human`` shape. Returns a list of status messages.
     """
     if not name or not name.replace("-", "").replace("_", "").isalnum():
         raise ValueError(f"Account name must be alphanumeric / dashes / underscores; got {name!r}")
     if not config_dir:
         raise ValueError("config_dir is required")
+    human_ref = validate_human_ref(human) if human else None
 
     existing = load_settings(settings_path)
     accounts = existing.get("accounts") if isinstance(existing, dict) else None
@@ -175,6 +201,8 @@ def add_account(
     lines_out.append(f"    config_dir: {_yaml_scalar(config_dir)}")
     if label:
         lines_out.append(f"    label: {_yaml_scalar(label)}")
+    if human_ref:
+        lines_out.append(f"    human: {_yaml_scalar(human_ref)}")
     new_block = "\n".join(lines_out) + "\n"
 
     results: list[str] = []
@@ -217,6 +245,8 @@ def add_account(
     results.append(f"Added: account '{name}' -> config_dir={config_dir}")
     if label:
         results.append(f"  label: {label}")
+    if human_ref:
+        results.append(f"  human: {human_ref}")
     return results
 
 
@@ -258,6 +288,7 @@ def list_accounts(settings_path: Path) -> list[dict[str, Any]]:
                     "name": name,
                     "config_dir": spec.get("config_dir", ""),
                     "label": spec.get("label", ""),
+                    "human": spec.get("human", ""),
                     "used_by": sorted(usage.get(name, [])),
                 }
             )
@@ -270,12 +301,13 @@ def render_accounts_table(records: list[dict[str, Any]]) -> str:
     if not records:
         return "(no accounts configured)"
 
-    headers = ("NAME", "CONFIG_DIR", "LABEL", "USED BY")
+    headers = ("NAME", "CONFIG_DIR", "LABEL", "HUMAN", "USED BY")
     rows = [
         (
             r["name"],
             r["config_dir"],
             r["label"] or "-",
+            r.get("human") or "-",
             ", ".join(r["used_by"]) if r["used_by"] else "-",
         )
         for r in records
@@ -361,6 +393,68 @@ def remove_account(
     if referencing:
         results.append(f"  Warning: removed despite references from: {', '.join(referencing)}")
     return results
+
+
+# ---------------------------------------------------------------------------
+# set-human
+
+
+def set_account_human(settings_path: Path, name: str, human: str) -> list[str]:
+    """Set (or replace) the ``human:`` mapping on an EXISTING account, in place.
+
+    The account↔human field (team-mode 2.3a) maps a launch-settings account to a
+    rostered human so core's ``resolve_human_config_dir`` can route a human-facing
+    session to this account's ``config_dir``. Existing accounts predate the field,
+    so this mirrors ``configure_telegram``'s in-place edit — comments and ordering
+    elsewhere in the file survive. Raises on a missing account or a bad shape.
+    """
+    human_ref = validate_human_ref(human)
+
+    if not settings_path.exists():
+        raise FileNotFoundError(
+            f"{settings_path} does not exist — run `otaman accounts add {name}` first"
+        )
+    data = load_settings(settings_path)
+    accounts = data.get("accounts") if isinstance(data, dict) else None
+    if not isinstance(accounts, dict) or name not in accounts:
+        raise KeyError(f"Account {name!r} is not defined. Run `otaman accounts add {name}` first.")
+
+    content = settings_path.read_text(encoding="utf-8")
+    lines = content.splitlines(keepends=True)
+    accounts_span = _find_block_span(lines, "accounts")
+    if accounts_span is None:
+        raise RuntimeError(
+            "accounts: block not found after a successful load (parser out of sync?)"
+        )
+    entry_span = _find_account_span(lines, accounts_span, name)
+    if entry_span is None:
+        raise RuntimeError(f"Could not locate account {name!r} (parser out of sync with schema?)")
+
+    e_start, e_end = entry_span
+    entry_lines = lines[e_start:e_end]
+
+    # Child indent from the first indented child line (default 4 under a 2-space header).
+    child_indent = "    "
+    for ln in entry_lines[1:]:
+        if ln.strip() and not ln.lstrip().startswith("#"):
+            leading = ln[: len(ln) - len(ln.lstrip(" \t"))]
+            if leading:
+                child_indent = leading
+            break
+
+    # Drop any existing `human:` child scalar; keep everything else in place.
+    kept: list[str] = [entry_lines[0]]
+    for ln in entry_lines[1:]:
+        if ln.strip().startswith("human:"):
+            continue
+        kept.append(ln)
+    if kept and not kept[-1].endswith("\n"):
+        kept[-1] = kept[-1] + "\n"
+
+    kept.append(f"{child_indent}human: {_yaml_scalar(human_ref)}\n")
+    new_lines = lines[:e_start] + kept + lines[e_end:]
+    settings_path.write_text("".join(new_lines), encoding="utf-8")
+    return [f"Set: account '{name}' human -> {human_ref}"]
 
 
 # ---------------------------------------------------------------------------
@@ -731,8 +825,24 @@ def main(argv: list[str] | None = None) -> int:
         help="CLAUDE_CONFIG_DIR path (e.g. ~/.claude-personal)",
     )
     p_add.add_argument("--label", help="Human-readable label (optional)")
+    p_add.add_argument(
+        "--human",
+        help="Rostered human this account belongs to (name, slug, or email) — "
+        "maps the account to a human for per-human config-dir routing (optional)",
+    )
 
     subs.add_parser("list", help="List configured accounts")
+
+    p_human = subs.add_parser(
+        "set-human",
+        help="Set/replace the rostered human an existing account belongs to",
+    )
+    p_human.add_argument("name", help="Account name (must already exist)")
+    p_human.add_argument(
+        "--human",
+        required=True,
+        help="Rostered human (name, slug, or email) to map this account to",
+    )
 
     p_rm = subs.add_parser("remove", help="Remove an account entry")
     p_rm.add_argument("name", help="Account name to remove")
@@ -800,6 +910,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.name,
                 args.config_dir,
                 label=args.label,
+                human=args.human,
             ):
                 print(msg)
             return 0
@@ -811,6 +922,15 @@ def main(argv: list[str] | None = None) -> int:
         records = list_accounts(settings_path)
         print(render_accounts_table(records))
         return 0
+
+    if args.subcommand == "set-human":
+        try:
+            for msg in set_account_human(settings_path, args.name, args.human):
+                print(msg)
+            return 0
+        except (ValueError, KeyError, FileNotFoundError, RuntimeError) as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 2
 
     if args.subcommand == "remove":
         try:
