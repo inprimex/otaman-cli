@@ -306,6 +306,13 @@ def notify_change(project_root: Path, change_name: str) -> tuple[int, dict[str, 
         )
         msg_filename = f"{msg_ts}-{specs_root.name}-to-{recipient}-spec-change.md"
         msg_path = bus_active / msg_filename
+        from otaman_cli.bus_write import BusMessageValidationError, assert_message_valid
+
+        try:
+            assert_message_valid(body, msg_path)  # bus-writer-self-validation 1.2
+        except BusMessageValidationError as exc:
+            joined = "; ".join(exc.errors)
+            return 2, {**summary, "error": f"message failed self-validation: {joined}"}
         try:
             msg_path.write_text(body, encoding="utf-8")
         except OSError as exc:
