@@ -198,10 +198,14 @@ def _cmd_status(root: Path, rest: list[str]) -> int:
         UI.muted("No changes in flight, awaiting authoring, or awaiting archive — all clear.")
         return 0
 
+    from otaman_cli.gate_audit import annotate as _waiver_annotation
+
     for r in rows:
         stage = f"stage={r.stage} " if r.stage else ""
         badge = "  [auto-delivery]" if getattr(r, "delivery", None) == "auto" else ""
-        UI.bullet(f"{r.change}{_SEV_MARK.get(r.severity, '')}{badge}")
+        # spec-gate-hardening 1.3 — surface waived gate events on the change
+        waived = _waiver_annotation(root, r.change)
+        UI.bullet(f"{r.change}{_SEV_MARK.get(r.severity, '')}{badge}{waived}")
         UI.kv("  state", f"{stage}{r.state} ({r.age} in state)")
         UI.kv("  next", r.next_actor)
     n_err = sum(1 for r in rows if r.severity == "error")
@@ -277,12 +281,17 @@ def _gate_notice_lines(decision) -> list[str]:
     return render_gate_result(decision)
 
 
-def dispatch_gate_check(root: Path, change_name: str) -> tuple[bool, list[str]]:
+def dispatch_gate_check(
+    root: Path, change_name: str, *, audit_actor: str | None = None
+) -> tuple[bool, list[str]]:
     """The dispatch-time gate for `otaman assign` (2.2). Returns (allowed, lines).
 
     A missing change / missing .openspec.yaml / unavailable core → (True, []) so
     dispatch is never blocked by absence — only an explicit block-mode policy on a
     tracked change refuses. The self-waive / warn notices are returned for display.
+
+    When *audit_actor* is given (an actual dispatch, not a pure check), a waived
+    result appends to the gate-waiver audit trail (spec-gate-hardening 1.3).
     """
     try:
         from otaman_core.spec_lifecycle import read_openspec
@@ -295,6 +304,21 @@ def dispatch_gate_check(root: Path, change_name: str) -> tuple[bool, list[str]]:
     if not data:
         return True, []  # legacy/unbackfilled change → not gated until it has a stage
     decision = _run_gate(data, _load_policy(root, "dispatch"), "dispatch")
+    if audit_actor and decision.waived:
+        # A real dispatch proceeding under a waiver leaves a durable trail
+        # (spec-gate-hardening 1.3). Pure checks (no actor) never log.
+        from datetime import datetime, timezone
+
+        from otaman_cli.gate_audit import append_waivers
+
+        append_waivers(
+            root,
+            change=change_name,
+            action="dispatch",
+            violations=decision.violations,
+            actor=audit_actor,
+            at=datetime.now(timezone.utc).isoformat(),
+        )
     return decision.allowed, _gate_notice_lines(decision)
 
 
