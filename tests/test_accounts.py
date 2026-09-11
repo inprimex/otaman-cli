@@ -23,6 +23,8 @@ from otaman_cli.accounts import (
     render_aliases_block,
     resolve_rc_path,
     resolve_settings_path,
+    set_account_human,
+    validate_human_ref,
 )
 
 
@@ -183,8 +185,97 @@ class TestRenderTable:
         assert "NAME" in out
         assert "CONFIG_DIR" in out
         assert "LABEL" in out
+        assert "HUMAN" in out
         assert "USED BY" in out
         assert "personal" in out
+
+    def test_human_column_shows_value_and_dash(self, settings_file):
+        add_account(settings_file, "roman", "~/.claude-roman", human="roman@inprimex.com")
+        add_account(settings_file, "shared", "~/.claude-shared")  # no human
+        out = render_accounts_table(list_accounts(settings_file))
+        assert "roman@inprimex.com" in out
+        # the human-less account renders a dash in the HUMAN column
+        shared_row = next(ln for ln in out.splitlines() if ln.startswith("shared"))
+        assert " - " in shared_row or shared_row.rstrip().endswith("-")
+
+
+class TestAccountHumanField:
+    def test_add_writes_human(self, settings_file):
+        add_account(settings_file, "roman", "~/.claude-roman", human="roman")
+        data = load_settings(settings_file)
+        assert data["accounts"]["roman"]["human"] == "roman"
+
+    def test_add_without_human_omits_field(self, settings_file):
+        add_account(settings_file, "shared", "~/.claude-shared")
+        data = load_settings(settings_file)
+        assert "human" not in data["accounts"]["shared"]
+
+    def test_add_email_and_name_forms(self, settings_file):
+        add_account(settings_file, "a", "~/.claude-a", human="dev@otaman.ai")
+        add_account(settings_file, "b", "~/.claude-b", human="Jane Doe")
+        data = load_settings(settings_file)
+        assert data["accounts"]["a"]["human"] == "dev@otaman.ai"
+        assert data["accounts"]["b"]["human"] == "Jane Doe"  # name with a space is valid
+
+    def test_add_rejects_bad_human_shape(self, settings_file):
+        with pytest.raises(ValueError):
+            add_account(settings_file, "x", "~/.claude-x", human="   ")
+        with pytest.raises(ValueError):
+            add_account(settings_file, "y", "~/.claude-y", human="line1\nline2")
+
+    def test_list_includes_human(self, settings_file):
+        add_account(settings_file, "roman", "~/.claude-roman", human="roman")
+        add_account(settings_file, "shared", "~/.claude-shared")
+        by_name = {r["name"]: r for r in list_accounts(settings_file)}
+        assert by_name["roman"]["human"] == "roman"
+        assert by_name["shared"]["human"] == ""
+
+    def test_validate_human_ref_strips_and_returns(self):
+        assert validate_human_ref("  roman  ") == "roman"
+
+    def test_validate_human_ref_rejects_empty_and_multiline(self):
+        with pytest.raises(ValueError):
+            validate_human_ref("")
+        with pytest.raises(ValueError):
+            validate_human_ref("a\nb")
+
+
+class TestSetAccountHuman:
+    def test_sets_on_existing_account(self, settings_file):
+        add_account(settings_file, "roman", "~/.claude-roman", label="Roman")
+        set_account_human(settings_file, "roman", "roman@inprimex.com")
+        data = load_settings(settings_file)
+        assert data["accounts"]["roman"]["human"] == "roman@inprimex.com"
+        assert data["accounts"]["roman"]["config_dir"] == "~/.claude-roman"  # untouched
+        assert data["accounts"]["roman"]["label"] == "Roman"  # untouched
+
+    def test_replaces_existing_human(self, settings_file):
+        add_account(settings_file, "roman", "~/.claude-roman", human="old")
+        set_account_human(settings_file, "roman", "new")
+        data = load_settings(settings_file)
+        assert data["accounts"]["roman"]["human"] == "new"
+        # exactly one human: line survives
+        content = settings_file.read_text(encoding="utf-8")
+        assert content.count("human:") == 1
+
+    def test_missing_account_raises(self, settings_file):
+        add_account(settings_file, "roman", "~/.claude-roman")
+        with pytest.raises(KeyError):
+            set_account_human(settings_file, "ghost", "x")
+
+    def test_bad_shape_raises(self, settings_file):
+        add_account(settings_file, "roman", "~/.claude-roman")
+        with pytest.raises(ValueError):
+            set_account_human(settings_file, "roman", "  ")
+
+    def test_preserves_other_accounts(self, settings_file):
+        add_account(settings_file, "a", "~/.claude-a")
+        add_account(settings_file, "b", "~/.claude-b")
+        set_account_human(settings_file, "a", "roman")
+        data = load_settings(settings_file)
+        assert data["accounts"]["a"]["human"] == "roman"
+        assert data["accounts"]["b"]["config_dir"] == "~/.claude-b"
+        assert "human" not in data["accounts"]["b"]
 
 
 class TestRemoveAccount:
