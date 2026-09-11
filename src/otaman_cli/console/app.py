@@ -765,7 +765,8 @@ class RegistryDetailScreen(Screen):
         self.program = program
         self.kind = kind
         self.node_id = node_id
-        self._accept_solution: str | None = None
+        # (outcome_id, solution_id) for the accept-cost verb, or None when not offerable
+        self._accept_args: tuple[str, str] | None = None
 
     def compose(self) -> ComposeResult:
         yield _header()
@@ -785,20 +786,30 @@ class RegistryDetailScreen(Screen):
         from otaman_cli.console.registry_detail import node_detail_text
 
         text = node_detail_text(self.program, self.kind, self.node_id) or "(no detail)"
-        # team-mode 2.4a — surface the one-key accept-cost affordance when the
-        # outcome is awaiting cost-acceptance (CEO/founder is the next actor).
-        self._accept_solution = None
+        # team-mode 2.4a (+ follow-up) — surface the one-key accept-cost affordance.
+        # Outcome node: auto-derive the single clear solution. Solution node: accept
+        # THIS solution's cost (dissolves the multi-candidate gap, no choose step).
+        self._accept_args = None
         if self.kind == "outcome":
             from otaman_cli.console.accept_cost import accept_cost_candidate
 
             sol, note = accept_cost_candidate(self.program, self.node_id)
-            self._accept_solution = sol
             if sol:
+                self._accept_args = (self.node_id, sol)
+                text += f"\n\n▶ ACCEPT-COST available (press a) — {note}"
+            elif "solution node" in note:  # multi-candidate → point at the solutions
+                text += f"\n\n▷ {note}"
+        elif self.kind == "solution":
+            from otaman_cli.console.accept_cost import solution_accept_candidate
+
+            outcome_id, note = solution_accept_candidate(self.program, self.node_id)
+            if outcome_id:
+                self._accept_args = (outcome_id, self.node_id)
                 text += f"\n\n▶ ACCEPT-COST available (press a) — {note}"
         self.query_one("#registry-detail", Static).update(text)
 
     def action_accept_cost(self) -> None:
-        if self.kind != "outcome" or not self._accept_solution:
+        if not self._accept_args:
             self.app.notify("accept-cost not available for this node", timeout=4)
             return
         from otaman_cli.console.accept_cost import acting_hat_holds, run_accept_cost
@@ -811,7 +822,8 @@ class RegistryDetailScreen(Screen):
                 severity="warning",
                 timeout=5,
             )
-        result = run_accept_cost(self.program, self.node_id, self._accept_solution)
+        outcome_id, solution_id = self._accept_args
+        result = run_accept_cost(self.program, outcome_id, solution_id)
         self.app.notify(
             ("accepted cost: " if result.ok else "accept-cost failed: ") + result.output,
             severity="information" if result.ok else "error",

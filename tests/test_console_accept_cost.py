@@ -68,7 +68,7 @@ def test_candidate_none_when_multiple_estimated(program):
         "  - {id: SOL-2, outcome-id: JTBD-1, effort-days: 5}\n",
     )
     sol, note = accept_cost.accept_cost_candidate(prog, "JTBD-1")
-    assert sol is None and "choose one" in note
+    assert sol is None and "solution node" in note  # points at solution nodes (follow-up)
 
 
 def test_candidate_none_when_no_estimate(program):
@@ -138,6 +138,92 @@ def test_registry_detail_offers_and_runs_accept_cost(program, monkeypatch):
             assert "ACCEPT-COST available" in str(body.render())
             app.screen.action_accept_cost()
             await pilot.pause()
+            await app.action_quit()
+
+    asyncio.run(go())
+
+
+# ---------------------------------------------------------------------------
+# 2.4a follow-up — accept-cost on SOLUTION nodes (multi-candidate, no choose step)
+
+
+def test_solution_candidate_offerable(program):
+    prog, strat = program
+    _outcomes(strat, "outcomes:\n  - {id: JTBD-107}\n")
+    _solutions(
+        strat,
+        "solutions:\n"
+        "  - {id: SOL-1, outcome-id: JTBD-107, effort-days: 3}\n"
+        "  - {id: SOL-2, outcome-id: JTBD-107, effort-days: 5}\n"
+        "  - {id: SOL-3, outcome-id: JTBD-107, effort-days: 8}\n",
+    )
+    # the outcome itself is multi-candidate → not offerable at the outcome node
+    assert accept_cost.accept_cost_candidate(prog, "JTBD-107")[0] is None
+    # but each solution node IS offerable → accept THAT solution's cost
+    oid, note = accept_cost.solution_accept_candidate(prog, "SOL-2")
+    assert oid == "JTBD-107" and "JTBD-107" in note
+
+
+def test_solution_candidate_none_when_discarded(program):
+    prog, strat = program
+    _outcomes(strat, "outcomes:\n  - {id: JTBD-1}\n")
+    _solutions(
+        strat,
+        "solutions:\n  - {id: SOL-1, outcome-id: JTBD-1, effort-days: 3, status: Discarded}\n",
+    )
+    assert accept_cost.solution_accept_candidate(prog, "SOL-1")[0] is None
+
+
+def test_solution_candidate_none_without_estimate(program):
+    prog, strat = program
+    _outcomes(strat, "outcomes:\n  - {id: JTBD-1}\n")
+    _solutions(strat, "solutions:\n  - {id: SOL-1, outcome-id: JTBD-1}\n")
+    assert accept_cost.solution_accept_candidate(prog, "SOL-1")[0] is None
+
+
+def test_solution_candidate_none_when_outcome_accepted(program):
+    prog, strat = program
+    _outcomes(strat, "outcomes:\n  - {id: JTBD-1, cost-accepted: true}\n")
+    _solutions(strat, "solutions:\n  - {id: SOL-1, outcome-id: JTBD-1, effort-days: 3}\n")
+    assert accept_cost.solution_accept_candidate(prog, "SOL-1")[0] is None
+
+
+@_textual
+def test_registry_detail_offers_accept_cost_on_solution_node(program, monkeypatch):
+    prog, strat = program
+    _outcomes(strat, "outcomes:\n  - {id: JTBD-107}\n")
+    _solutions(
+        strat,
+        "solutions:\n"
+        "  - {id: SOL-1, outcome-id: JTBD-107, effort-days: 3}\n"
+        "  - {id: SOL-2, outcome-id: JTBD-107, effort-days: 5}\n",
+    )
+    from otaman_cli.console import accept_cost as ac
+    from otaman_cli.console.app import OtamanConsole, RegistryDetailScreen
+
+    seen = {}
+    monkeypatch.setattr(ac, "acting_hat_holds", lambda *a, **k: (True, "roman"))
+    monkeypatch.setattr(
+        ac,
+        "run_accept_cost",
+        lambda program, oid, sid, **k: (
+            seen.update(oid=oid, sid=sid) or type("R", (), {"ok": True, "output": "done"})()
+        ),
+    )
+
+    async def go():
+        app = OtamanConsole([prog], search_root=prog.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(RegistryDetailScreen(prog, "solution", "SOL-2"))
+            await pilot.pause()
+            from textual.widgets import Static as _Static
+
+            body = app.screen.query_one("#registry-detail", _Static)
+            assert "ACCEPT-COST available" in str(body.render())
+            app.screen.action_accept_cost()
+            await pilot.pause()
+            assert seen == {"oid": "JTBD-107", "sid": "SOL-2"}
             await app.action_quit()
 
     asyncio.run(go())

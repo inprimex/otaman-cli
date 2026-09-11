@@ -48,13 +48,41 @@ def accept_cost_candidate(program: Program, outcome_id: str) -> tuple[str | None
         return estimated[0].get("id"), f"accept cost for {estimated[0].get('id')}"
     if not estimated:
         return None, "no estimated solution to accept-cost yet"
-    return None, f"{len(estimated)} estimated solutions — choose one at the CLI first"
+    return None, (
+        f"{len(estimated)} estimated solutions — open a solution node and press a to "
+        "accept its cost"
+    )
 
 
 def is_accept_cost_offerable(program: Program, outcome_id: str) -> bool:
     """True when this outcome is awaiting cost-acceptance with one clear
     candidate — i.e. the CEO/founder is the derived next actor."""
     return accept_cost_candidate(program, outcome_id)[0] is not None
+
+
+def solution_accept_candidate(program: Program, solution_id: str) -> tuple[str | None, str]:
+    """(outcome_id, note) — the outcome whose cost this SOLUTION node would accept,
+    or (None, reason). team-mode 2.4a follow-up (Roman live-blocked): pressing `a`
+    on a solution node means "accept the cost OF THIS SOLUTION" — which is exactly
+    the verb's `--solution` model, so a multi-candidate outcome needs no choose
+    step. Offerable when the solution is estimated, not Discarded, and its outcome
+    is not already cost-accepted."""
+    sols = _load_raw(program, "solutions") or {}
+    s = _find(sols.get("solutions") or [], solution_id)
+    if not s:
+        return None, "solution not found"
+    if str(s.get("status", "")).lower() == "discarded":
+        return None, "solution is discarded"
+    if s.get("effort-days") is None:
+        return None, "solution has no estimate yet"
+    outcome_id = s.get("outcome-id")
+    if not outcome_id:
+        return None, "solution has no linked outcome"
+    data = _load_raw(program, "outcomes")
+    o = _find((data or {}).get("outcomes") or [], outcome_id) if data else None
+    if o is not None and o.get("cost-accepted") is True:
+        return None, "outcome cost already accepted"
+    return outcome_id, f"accept cost of this solution for {outcome_id}"
 
 
 def acting_hat_holds(program: Program, hats=ACCEPT_COST_HATS) -> tuple[bool, str | None]:
