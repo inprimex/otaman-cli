@@ -322,6 +322,39 @@ def dispatch_gate_check(
     return decision.allowed, _gate_notice_lines(decision)
 
 
+def _violation_slug(violation: str) -> str:
+    """A kebab-case slug for a gate violation (the leading phrase before any
+    parenthetical), for the ``x-gate-waived`` stamp."""
+    import re as _re
+
+    head = violation.split("(", 1)[0]
+    slug = _re.sub(r"[^a-z0-9]+", "-", head.lower()).strip("-")
+    return slug[:64] or "gate-waived"
+
+
+def dispatch_waiver_slug(root: Path, change_name: str) -> str | None:
+    """The slug of the dispatch gate's first WAIVED violation, or None when the
+    dispatch is clean / blocked / ungated (spec-gate-hardening 1.3c).
+
+    `otaman assign` sets this as ``OTAMAN_GATE_WAIVED`` before invoking map-tasks,
+    which stamps ``x-gate-waived: <slug>`` onto every assignment emitted under the
+    waiver so recipients can refuse or flag."""
+    try:
+        from otaman_core.spec_lifecycle import read_openspec
+    except Exception:  # noqa: BLE001 - core unavailable → no stamp
+        return None
+    d = _change_dir(root, change_name)
+    if d is None:
+        return None
+    data = read_openspec(d / ".openspec.yaml")
+    if not data:
+        return None
+    decision = _run_gate(data, _load_policy(root, "dispatch"), "dispatch")
+    if not (decision.waived and decision.violations):
+        return None
+    return _violation_slug(decision.violations[0])
+
+
 def _cmd_gate(root: Path, rest: list[str]) -> int:
     from otaman_core.spec_lifecycle import read_openspec
 

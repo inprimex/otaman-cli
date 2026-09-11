@@ -969,7 +969,28 @@ def cmd_assign(args: list[str]) -> int:
             UI.muted("Advance it to spec-approved (or `otaman ratify`), or relax enforcement.")
             return 2
 
-    result = run_script("map-tasks.py", target, capture=True)
+    # spec-gate-hardening 1.3c — when the dispatch proceeded under a WAIVER, hand
+    # map-tasks the violation slug via OTAMAN_GATE_WAIVED so it stamps
+    # x-gate-waived onto every emitted assignment (plugin PR #43 reads it). Scoped
+    # to this call and restored after, so the waiver context never leaks onward.
+    import os as _os
+
+    waiver_slug = None
+    if change_name:
+        from otaman_cli.commands.spec import dispatch_waiver_slug
+
+        waiver_slug = dispatch_waiver_slug(root, change_name)
+    _prev_waived = _os.environ.get("OTAMAN_GATE_WAIVED")
+    if waiver_slug:
+        _os.environ["OTAMAN_GATE_WAIVED"] = waiver_slug
+    try:
+        result = run_script("map-tasks.py", target, capture=True)
+    finally:
+        if waiver_slug:
+            if _prev_waived is None:
+                _os.environ.pop("OTAMAN_GATE_WAIVED", None)
+            else:
+                _os.environ["OTAMAN_GATE_WAIVED"] = _prev_waived
     if result.returncode != 0:
         UI.error(result.stderr or result.stdout)
         return result.returncode
