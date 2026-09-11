@@ -937,7 +937,11 @@ def cmd_assign(args: list[str]) -> int:
     if change_name:
         from otaman_cli.commands.spec import dispatch_gate_check
 
-        allowed, lines = dispatch_gate_check(root, change_name)
+        # Real dispatch → pass the actor so a waived gate lands in the audit trail
+        # (spec-gate-hardening 1.3).
+        allowed, lines = dispatch_gate_check(
+            root, change_name, audit_actor=resolve_agent_identity(root) or "unknown-agent"
+        )
         # VIOLATION-first (spec-gate-hardening 1.2): dispatch_gate_check yields
         # lines only for a waived or blocked result — both loud; a clean pass is
         # silent here.
