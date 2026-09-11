@@ -85,3 +85,44 @@ def test_check_awaiting_only_for_own_items(tmp_path):
     r = _run(root, "check", "cli-agent")
     out = r.stdout + r.stderr
     assert "someone elses thing" not in out
+
+
+def test_check_surfaces_authored_awaiting_ratification(tmp_path):
+    # F3: an AUTHORED change this agent owns (spec_owner) awaiting ratification —
+    # no spec-approval-pending item exists for it, but it must still appear.
+    root = tmp_path / "prog"
+    (root / ".agents" / "bus" / "active" / "acks").mkdir(parents=True)
+    (root / ".agents" / "current-agent").write_text("cli-agent", encoding="utf-8")
+    specs = tmp_path / "prog-specs"
+    chg = specs / "openspec" / "changes" / "my-change"
+    chg.mkdir(parents=True)
+    (chg / ".openspec.yaml").write_text(
+        "stage: authored\nspec_owner: cli-agent\n", encoding="utf-8"
+    )
+    (root / "platform.yaml").write_text(
+        "project: t\nversion: '1.0'\nspecs:\n  path: ../prog-specs\n"
+        "repos:\n  - {name: t, path: ., owner: cli-agent}\n",
+        encoding="utf-8",
+    )
+    out = _run(root, "check", "cli-agent").stdout
+    assert "awaiting ratification" in out and "my-change" in out
+
+
+def test_check_does_not_surface_others_authored(tmp_path):
+    # a change owned by ANOTHER agent must not appear in cli-agent's section
+    root = tmp_path / "prog"
+    (root / ".agents" / "bus" / "active" / "acks").mkdir(parents=True)
+    (root / ".agents" / "current-agent").write_text("cli-agent", encoding="utf-8")
+    specs = tmp_path / "prog-specs"
+    chg = specs / "openspec" / "changes" / "theirs"
+    chg.mkdir(parents=True)
+    (chg / ".openspec.yaml").write_text(
+        "stage: authored\nspec_owner: core-agent\n", encoding="utf-8"
+    )
+    (root / "platform.yaml").write_text(
+        "project: t\nversion: '1.0'\nspecs:\n  path: ../prog-specs\n"
+        "repos:\n  - {name: t, path: ., owner: cli-agent}\n",
+        encoding="utf-8",
+    )
+    out = _run(root, "check", "cli-agent").stdout
+    assert "theirs" not in out
