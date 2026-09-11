@@ -756,6 +756,8 @@ class RegistryDetailScreen(Screen):
 
     BINDINGS = [
         Binding("a", "accept_cost", "Accept cost", priority=True),
+        Binding("c", "choose", "Choose", priority=True),
+        Binding("d", "discard", "Discard", priority=True),
         Binding("escape", "back", "Back", priority=True),
         Binding("q", "app.quit", "Quit", priority=True),
     ]
@@ -767,13 +769,16 @@ class RegistryDetailScreen(Screen):
         self.node_id = node_id
         # (outcome_id, solution_id) for the accept-cost verb, or None when not offerable
         self._accept_args: tuple[str, str] | None = None
+        # team-mode 2.4b — solution-node decision affordances
+        self._choose_args: tuple[str, str] | None = None  # (outcome_id, solution_id)
+        self._discard_ok: bool = False
 
     def compose(self) -> ComposeResult:
         yield _header()
         yield _identity_badge_widget(self.program.root)
         yield _mode_banner(
             f"{self.kind.capitalize()} detail — {self.node_id}",
-            "↑↓ scroll · a accept-cost · esc back · q quit",
+            "↑↓ scroll · a accept-cost · c choose · d discard · esc back · q quit",
         )
         with VerticalScroll(id="registry-detail-scroll"):
             yield Static("Loading…", id="registry-detail", markup=False)
@@ -801,12 +806,66 @@ class RegistryDetailScreen(Screen):
                 text += f"\n\n▷ {note}"
         elif self.kind == "solution":
             from otaman_cli.console.accept_cost import solution_accept_candidate
+            from otaman_cli.console.decisions import choose_candidate, discard_candidate
 
             outcome_id, note = solution_accept_candidate(self.program, self.node_id)
             if outcome_id:
                 self._accept_args = (outcome_id, self.node_id)
                 text += f"\n\n▶ ACCEPT-COST available (press a) — {note}"
+            # team-mode 2.4b — CHOOSE / DISCARD on the solution node (CTO hat)
+            self._choose_args = None
+            c_outcome, c_note = choose_candidate(self.program, self.node_id)
+            if c_outcome:
+                self._choose_args = (c_outcome, self.node_id)
+                text += f"\n\n▶ CHOOSE available (press c) — {c_note}"
+            self._discard_ok, d_note = discard_candidate(self.program, self.node_id)
+            if self._discard_ok:
+                text += f"\n\n▶ DISCARD available (press d) — {d_note}"
         self.query_one("#registry-detail", Static).update(text)
+
+    def _hat_advisory_notify(self) -> None:
+        from otaman_cli.console.decisions import acting_decision_hat
+
+        holds, operator = acting_decision_hat(self.program)
+        if not holds:  # advisory at Mode 1 — warn, then proceed
+            self.app.notify(
+                f"advisory: {operator or 'you'} does not hold the CTO/founder hat",
+                severity="warning",
+                timeout=5,
+            )
+
+    def _notify_result(self, verb: str, result) -> None:
+        self.app.notify(
+            (f"{verb}: " if result.ok else f"{verb} failed: ") + result.output,
+            severity="information" if result.ok else "error",
+            timeout=6,
+        )
+        self._reload()
+
+    def action_choose(self) -> None:
+        if self.kind != "solution" or not self._choose_args:
+            self.app.notify("choose not available for this node", timeout=4)
+            return
+        from otaman_cli.console.decisions import run_choose
+
+        self._hat_advisory_notify()
+        outcome_id, solution_id = self._choose_args
+        self._notify_result("chose solution", run_choose(self.program, outcome_id, solution_id))
+
+    def action_discard(self) -> None:
+        if self.kind != "solution" or not self._discard_ok:
+            self.app.notify("discard not available for this node", timeout=4)
+            return
+        from otaman_cli.console.decisions import run_discard
+
+        def _after(reason: str | None) -> None:
+            if not reason:  # cancelled or empty → discard requires a reason
+                return
+            self._hat_advisory_notify()
+            result = run_discard(self.program, self.node_id, reason)
+            self._notify_result("discarded solution", result)
+
+        self.app.push_screen(ReasonModal("discard"), _after)
 
     def action_accept_cost(self) -> None:
         if not self._accept_args:
