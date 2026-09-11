@@ -566,6 +566,10 @@ def _cmd_init_update(dry_run: bool = False) -> int:
         return 2
 
     UI.header("Otaman Init --update" + (" (dry-run)" if dry_run else ""))
+    # identity-chain-preflight 1.2 — surface at the reconcile/upgrade flow too.
+    from otaman_cli.identity_preflight import surface_preflight_warnings
+
+    surface_preflight_warnings(UI.warn)
     updated = 0
     skipped = 0
     launch_updated = 0

@@ -92,6 +92,12 @@ def cmd_scan(args: list[str]) -> int:
         UI.header("Otaman Scan")
         print(f"Scanning {C.BOLD}{resolved}{C.RESET} ...\n")
 
+    # identity-chain-preflight 1.2 — surface the unwired/inert-annotation warning
+    # at setup time, before any console session hits "unverified-identity".
+    from otaman_cli.identity_preflight import surface_preflight_warnings
+
+    surface_preflight_warnings(UI.warn)
+
     # Detect already-scanned project (skip when --update opted in)
     if not update:
         existing = _find_existing_otaman_project(resolved)
