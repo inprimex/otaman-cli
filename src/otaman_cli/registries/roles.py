@@ -11,7 +11,6 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
-from otaman_cli.identity import _read_otaman_agent_field
 from otaman_cli.registries.platform_ext import ProgramExtensions
 
 # Operation → required role(s) table (Appendix E.4).
@@ -61,20 +60,17 @@ TRANSITION_ONLY_FIELDS: frozenset[str] = frozenset(
 def resolve_operating_actor(cwd: Path | None = None) -> str:
     """Resolve the "who is acting now" identity (Appendix E.2).
 
-    Chain:
-        1. ``OTAMAN_AGENT`` env var
-        2. ``.otaman`` ``agent:`` field via CWD ancestry walk
-        3. ``"human"`` fallback (Mode 1 dev-mode assumption)
+    Delegates to the ONE canonical resolver, ``identity.resolve_agent_identity``
+    (identity-divergence D1) — so ``OTAMAN_AGENT`` is cross-checked against the
+    cwd-resolved repo owner (a leaked/stale env can't impersonate another agent)
+    rather than trusted raw here. ``"human"`` remains the Mode-1 fallback when no
+    agent identity resolves.
     """
-    env_actor = os.environ.get("OTAMAN_AGENT", "").strip()
-    if env_actor:
-        return env_actor
+    from otaman_cli.identity import find_project_root, resolve_agent_identity
 
-    walk_actor = _read_otaman_agent_field(cwd or Path.cwd())
-    if walk_actor:
-        return walk_actor
-
-    return "human"
+    cwd = cwd or Path.cwd()
+    root = find_project_root(cwd)
+    return resolve_agent_identity(root, cwd=cwd) or "human"
 
 
 def resolve_roles(actor: str, platform: ProgramExtensions) -> list[str]:

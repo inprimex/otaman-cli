@@ -213,7 +213,7 @@ def _declared_agents(root: Path) -> set[str]:
 
 
 def resolve_agent_identity(
-    root: Path,
+    root: Path | None,
     cwd: Path | None = None,
     explicit: str | None = None,
 ) -> str | None:
@@ -240,8 +240,11 @@ def resolve_agent_identity(
     cwd = cwd.resolve()
 
     # Resolved once, up front, so step 2 can cross-check against it and
-    # step 4 can reuse it without a second lookup.
-    cwd_owner = _resolve_cwd_owner(root, cwd)
+    # step 4 can reuse it without a second lookup. With no project root (a
+    # bare call outside any program) there is no ownership map to resolve or
+    # cross-check against — env/walk still apply (identity-divergence D1: the
+    # resolver is the single entry point, so it must handle root=None).
+    cwd_owner = _resolve_cwd_owner(root, cwd) if root is not None else None
 
     # 2. OTAMAN_AGENT environment variable
     env_agent = os.environ.get("OTAMAN_AGENT", "").strip()
@@ -269,6 +272,8 @@ def resolve_agent_identity(
 
     # 5. .agents/current-agent — deprecated fallback, validated (R3) against
     #    platform.yaml's declared agents before being trusted.
+    if root is None:
+        return None
     agent_file = root / ".agents" / "current-agent"
     if agent_file.is_file():
         try:
