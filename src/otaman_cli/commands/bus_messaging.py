@@ -394,7 +394,11 @@ def cmd_send(args: list[str]) -> int:
     # so each agent's `otaman check` glob picks up its copy.
     cc_copy_paths: list[Path] = []
     if effective_cc:
-        cc_content = inject_x_cc(content)
+        # inject_x_cc carries the PRIMARY's id; each CC copy is its own file, so
+        # its id must equal ITS OWN stem, not the primary's (F1 — ids unique per
+        # written file, EQUAL to the file's stem, including under CC fan-out).
+        cc_base = inject_x_cc(content)
+        primary_id = msg_path.stem  # the id currently embedded in `content`
         for recipient in effective_cc:
             cc_fname = cc_copy_filename(
                 timestamp=ts,
@@ -402,9 +406,14 @@ def cmd_send(args: list[str]) -> int:
                 cc_recipient=recipient,
                 slug=slug,
             )
+            cc_stem = cc_fname[:-3]  # drop .md
+            cc_content = cc_base.replace(f"id: {primary_id}\n", f"id: {cc_stem}\n", 1)
             cc_path = write_message_exclusive(
                 active_dir / cc_fname, cc_content, validate=True, known_agents=known_agents
             )
+            if cc_path.stem != cc_stem:  # same-second collision suffix → keep id == stem
+                cc_content = cc_content.replace(f"id: {cc_stem}\n", f"id: {cc_path.stem}\n", 1)
+                cc_path.write_text(cc_content, encoding="utf-8")
             cc_copy_paths.append(cc_path)
 
     UI.ok(f"Sent: {filename}")
