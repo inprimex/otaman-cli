@@ -245,15 +245,36 @@ def _run_gate(data: dict, policy, at: str, *, has_capability_delta: bool = True)
     return check_merge_gate(data, policy, has_capability_delta=has_capability_delta)
 
 
-def _gate_notice_lines(decision) -> list[str]:
-    """Human lines for a GateDecision — self-waive/warn notices + violations."""
+def render_gate_result(decision) -> list[str]:
+    """Human lines for a GateDecision, VIOLATION-first for waived results
+    (spec-gate-hardening 1.2).
+
+    A waived result (proceeds DESPITE violations) headlines with the violation —
+    ``VIOLATION (waived by enforcement=<mode>)`` — never ``ALLOWED``; the
+    proceed-rationale and how-to-block are subordinate. ``ALLOWED`` is reserved
+    for genuinely-clean results; ``BLOCKED`` heads a refusal.
+    """
     lines: list[str] = []
-    for n in decision.notices:  # self-waive: ... / proceeding despite: ...
-        lines.append(n)
-    if not decision.allowed:
+    if decision.waived:
+        lines.append(f"VIOLATION (waived by enforcement={decision.mode})")
         for v in decision.violations:
-            lines.append(f"blocked: {v}")
+            lines.append(f"  proceeding despite: {v}")
+        lines.append(f"  to block, set spec_policy.enforcement (or .{decision.gate}) to 'block'")
+    elif not decision.allowed:
+        lines.append("BLOCKED")
+        for v in decision.violations:
+            lines.append(f"  blocked: {v}")
+    else:
+        lines.append("ALLOWED")
     return lines
+
+
+def _gate_notice_lines(decision) -> list[str]:
+    """Backward-compatible notice lines — now VIOLATION-first (1.2). Clean results
+    yield no lines (the ALLOWED headline is only shown by the explicit gate cmd)."""
+    if decision.allowed and not decision.waived:
+        return []
+    return render_gate_result(decision)
 
 
 def dispatch_gate_check(root: Path, change_name: str) -> tuple[bool, list[str]]:
@@ -321,13 +342,15 @@ def _cmd_gate(root: Path, rest: list[str]) -> int:
         )
         return 0 if decision.allowed else 1
 
-    verdict = "ALLOWED" if decision.allowed else "BLOCKED"
+    result_lines = render_gate_result(decision)
     UI.header(f"spec gate: {at} — {name}")
     UI.kv("stage", str(data.get("stage") or "—"))
-    UI.kv("mode", decision.mode + ("  (waived)" if decision.waived else ""))
-    UI.kv("result", verdict)
-    for line in _gate_notice_lines(decision):
-        UI.muted(f"  {line}")
+    UI.kv("mode", decision.mode)
+    # VIOLATION-first (1.2): a waived/blocked headline is loud; clean is quiet.
+    headline, *subordinate = result_lines
+    (UI.muted if (decision.allowed and not decision.waived) else UI.warn)(headline)
+    for line in subordinate:
+        UI.muted(line)
     return 0 if decision.allowed else 1
 
 

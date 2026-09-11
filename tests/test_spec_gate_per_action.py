@@ -89,3 +89,56 @@ def test_doctor_ok_valid_map(tmp_path):
 def test_doctor_not_applicable_for_scalar(tmp_path):
     root = _platform(tmp_path, "spec_policy:\n  enforcement: block\n")
     assert _check_enforcement_map(root)["applicable"] is False
+
+
+# ---------------------------------------------------------------------------
+# spec-gate-hardening 1.2 — VIOLATION-first rendering
+
+
+def test_render_gate_result_waived_is_violation_first():
+    from types import SimpleNamespace
+
+    from otaman_cli.commands.spec import render_gate_result
+
+    waived = SimpleNamespace(
+        gate="dispatch",
+        allowed=True,
+        waived=True,
+        mode="warn",
+        violations=("not spec-approved",),
+        notices=(),
+    )
+    lines = render_gate_result(waived)
+    assert lines[0] == "VIOLATION (waived by enforcement=warn)"
+    assert any("proceeding despite: not spec-approved" in ln for ln in lines)
+    assert any("to block" in ln for ln in lines)
+    assert "ALLOWED" not in "\n".join(lines)
+
+
+def test_render_gate_result_clean_is_allowed():
+    from types import SimpleNamespace
+
+    from otaman_cli.commands.spec import render_gate_result
+
+    clean = SimpleNamespace(
+        gate="dispatch", allowed=True, waived=False, mode="block", violations=(), notices=()
+    )
+    assert render_gate_result(clean) == ["ALLOWED"]
+
+
+def test_render_gate_result_blocked():
+    from types import SimpleNamespace
+
+    from otaman_cli.commands.spec import render_gate_result
+
+    blocked = SimpleNamespace(
+        gate="dispatch",
+        allowed=False,
+        waived=False,
+        mode="block",
+        violations=("not spec-approved",),
+        notices=(),
+    )
+    lines = render_gate_result(blocked)
+    assert lines[0] == "BLOCKED"
+    assert any("blocked: not spec-approved" in ln for ln in lines)
