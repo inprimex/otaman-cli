@@ -755,6 +755,7 @@ class RegistryDetailScreen(Screen):
     old status-only popup so a clipped row's full content is one keypress away."""
 
     BINDINGS = [
+        Binding("a", "accept_cost", "Accept cost", priority=True),
         Binding("escape", "back", "Back", priority=True),
         Binding("q", "app.quit", "Quit", priority=True),
     ]
@@ -764,23 +765,59 @@ class RegistryDetailScreen(Screen):
         self.program = program
         self.kind = kind
         self.node_id = node_id
+        self._accept_solution: str | None = None
 
     def compose(self) -> ComposeResult:
         yield _header()
         yield _identity_badge_widget(self.program.root)
         yield _mode_banner(
             f"{self.kind.capitalize()} detail — {self.node_id}",
-            "↑↓ scroll · esc back · q quit",
+            "↑↓ scroll · a accept-cost · esc back · q quit",
         )
         with VerticalScroll(id="registry-detail-scroll"):
             yield Static("Loading…", id="registry-detail", markup=False)
         yield Footer()
 
     def on_mount(self) -> None:
+        self._reload()
+
+    def _reload(self) -> None:
         from otaman_cli.console.registry_detail import node_detail_text
 
         text = node_detail_text(self.program, self.kind, self.node_id) or "(no detail)"
+        # team-mode 2.4a — surface the one-key accept-cost affordance when the
+        # outcome is awaiting cost-acceptance (CEO/founder is the next actor).
+        self._accept_solution = None
+        if self.kind == "outcome":
+            from otaman_cli.console.accept_cost import accept_cost_candidate
+
+            sol, note = accept_cost_candidate(self.program, self.node_id)
+            self._accept_solution = sol
+            if sol:
+                text += f"\n\n▶ ACCEPT-COST available (press a) — {note}"
         self.query_one("#registry-detail", Static).update(text)
+
+    def action_accept_cost(self) -> None:
+        if self.kind != "outcome" or not self._accept_solution:
+            self.app.notify("accept-cost not available for this node", timeout=4)
+            return
+        from otaman_cli.console.accept_cost import acting_hat_holds, run_accept_cost
+
+        holds, operator = acting_hat_holds(self.program)
+        if not holds:  # advisory at Mode 1 — warn, then proceed
+            who = operator or "you"
+            self.app.notify(
+                f"advisory: {who} does not hold the CEO/founder hat for accept-cost",
+                severity="warning",
+                timeout=5,
+            )
+        result = run_accept_cost(self.program, self.node_id, self._accept_solution)
+        self.app.notify(
+            ("accepted cost: " if result.ok else "accept-cost failed: ") + result.output,
+            severity="information" if result.ok else "error",
+            timeout=6,
+        )
+        self._reload()
 
     def action_back(self) -> None:
         self.app.pop_screen()
