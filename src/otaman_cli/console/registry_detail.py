@@ -54,29 +54,38 @@ def _transitions_tail(entry: dict, limit: int = 6) -> list[str]:
     return out
 
 
-def outcome_detail_text(program: Program, oid: str) -> str:
-    """Full outcome detail — the console equivalent of ``otaman outcome show``."""
+def outcome_detail_text(program: Program, oid: str, *, scope: str | None = None) -> str:
+    """Full outcome detail — the console equivalent of ``otaman outcome show``.
+
+    *scope* role-scopes the surface (team-mode 2.4b): ``"value"`` hides the
+    costing fields, ``"costing"`` hides the pure-value narrative, ``None`` shows
+    all. Core (id/status/priority/impact/release + the JTBD statement) is always
+    shown."""
     data = _load_raw(program, "outcomes")
     if data is None:
         return "(outcomes registry unavailable — run `otaman outcome list` for the error)"
     o: dict[str, Any] | None = _find(data.get("outcomes") or [], oid)
     if not o:
         return f"Outcome not found: {oid}"
-    lines = [
-        f"Outcome: {o['id']}",
-        "",
-        f"  Status:           {o.get('status')}",
-        f"  Priority:         {o.get('priority')}",
-        f"  Impact:           {o.get('impact') or '-'}",
-        f"  Category:         {o.get('category') or '-'}",
-        f"  Persona:          {o.get('persona') or '-'}",
-        f"  Release:          {o.get('release') or '-'}",
-        f"  Estimate-req'd:   {o.get('estimate-requested')}",
-        f"  Chosen-solution:  {o.get('chosen-solution') or '-'}",
-        f"  Cost-accepted:    {o.get('cost-accepted')}",
-        "",
-        "  JTBD statement",
-    ]
+    show_value = scope != "costing"
+    show_costing = scope != "value"
+    lines = [f"Outcome: {o['id']}", ""]
+    if scope:
+        lines.append(f"  [role view: {scope}]")
+        lines.append("")
+    lines.append(f"  Status:           {o.get('status')}")
+    lines.append(f"  Priority:         {o.get('priority')}")
+    lines.append(f"  Impact:           {o.get('impact') or '-'}")
+    lines.append(f"  Release:          {o.get('release') or '-'}")
+    if show_value:
+        lines.append(f"  Category:         {o.get('category') or '-'}")
+        lines.append(f"  Persona:          {o.get('persona') or '-'}")
+    if show_costing:
+        lines.append(f"  Estimate-req'd:   {o.get('estimate-requested')}")
+        lines.append(f"  Chosen-solution:  {o.get('chosen-solution') or '-'}")
+        lines.append(f"  Cost-accepted:    {o.get('cost-accepted')}")
+    lines.append("")
+    lines.append("  JTBD statement")
     stmt = o.get("statement") or {}
     lines.append(f"    As a       {stmt.get('as-a')}")
     lines.append(f"    I want to  {stmt.get('i-want-to')}")
@@ -84,7 +93,7 @@ def outcome_detail_text(program: Program, oid: str) -> str:
     lines.append(f"    So I can   {stmt.get('so-i-can')}")
     if stmt.get("ultimate-outcome"):
         lines.append(f"    Ultimate   {stmt.get('ultimate-outcome')}")
-    if o.get("product-notes"):
+    if show_value and o.get("product-notes"):
         lines.append("")
         lines.append("  Product notes")
         for line in str(o["product-notes"]).splitlines() or [o["product-notes"]]:
@@ -95,32 +104,39 @@ def outcome_detail_text(program: Program, oid: str) -> str:
     return "\n".join(lines)
 
 
-def solution_detail_text(program: Program, sid: str) -> str:
-    """Full solution detail — the console equivalent of ``otaman solution show``."""
+def solution_detail_text(program: Program, sid: str, *, scope: str | None = None) -> str:
+    """Full solution detail — the console equivalent of ``otaman solution show``.
+
+    *scope* role-scopes the surface (team-mode 2.4b): ``"costing"`` shows the
+    t-shirt/effort/cto-notes and hides pros/cons; ``"value"`` shows pros/cons and
+    hides the costing; ``None`` shows all."""
     data = _load_raw(program, "solutions")
     if data is None:
         return "(solutions registry unavailable — run `otaman solution list` for the error)"
     s: dict[str, Any] | None = _find(data.get("solutions") or [], sid)
     if not s:
         return f"Solution not found: {sid}"
-    lines = [
-        f"Solution: {s['id']}",
-        "",
-        f"  Outcome:        {s.get('outcome-id')}",
-        f"  Status:         {s.get('status')}",
-        f"  T-shirt:        {s.get('t-shirt') or '-'}",
-        f"  Effort-days:    {s.get('effort-days') or '-'}",
-        f"  Release:        {s.get('release') or '-'}",
-        "",
-        "  Description",
-    ]
+    show_value = scope != "costing"
+    show_costing = scope != "value"
+    lines = [f"Solution: {s['id']}", ""]
+    if scope:
+        lines.append(f"  [role view: {scope}]")
+        lines.append("")
+    lines.append(f"  Outcome:        {s.get('outcome-id')}")
+    lines.append(f"  Status:         {s.get('status')}")
+    if show_costing:
+        lines.append(f"  T-shirt:        {s.get('t-shirt') or '-'}")
+        lines.append(f"  Effort-days:    {s.get('effort-days') or '-'}")
+    lines.append(f"  Release:        {s.get('release') or '-'}")
+    lines.append("")
+    lines.append("  Description")
     for line in str(s.get("description") or "").splitlines() or [s.get("description", "")]:
         lines.append(f"    {line}")
-    if s.get("pros"):
+    if show_value and s.get("pros"):
         lines.append("")
         lines.append("  Pros")
         lines.extend(f"    • {p}" for p in s["pros"])
-    if s.get("cons"):
+    if show_value and s.get("cons"):
         lines.append("")
         lines.append("  Cons")
         lines.extend(f"    • {c}" for c in s["cons"])
@@ -131,7 +147,7 @@ def solution_detail_text(program: Program, sid: str) -> str:
             if isinstance(d, dict):
                 ref = d.get("ref") or d.get("name") or "?"
                 lines.append(f"    [{d.get('kind')}] {ref}")
-    if s.get("cto-notes"):
+    if show_costing and s.get("cto-notes"):
         lines.append("")
         lines.append("  CTO notes")
         for line in str(s["cto-notes"]).splitlines() or [s["cto-notes"]]:
@@ -142,13 +158,43 @@ def solution_detail_text(program: Program, sid: str) -> str:
     return "\n".join(lines)
 
 
-def node_detail_text(program: Program, kind: str, node_id: str) -> str | None:
-    """Detail text for an outcome/solution tree node, or None for other kinds."""
+def node_detail_text(
+    program: Program, kind: str, node_id: str, *, scope: str | None = None
+) -> str | None:
+    """Detail text for an outcome/solution tree node, or None for other kinds.
+    *scope* role-scopes the surface (team-mode 2.4b)."""
     if kind == "outcome":
-        return outcome_detail_text(program, node_id)
+        return outcome_detail_text(program, node_id, scope=scope)
     if kind == "solution":
-        return solution_detail_text(program, node_id)
+        return solution_detail_text(program, node_id, scope=scope)
     return None
 
 
-__all__ = ["outcome_detail_text", "solution_detail_text", "node_detail_text"]
+def role_scope(program: Program) -> str | None:
+    """The role-scoped detail view for the acting human (team-mode 2.4b):
+    founder → ``None`` (founder-mode, all keys visible per canon); a cto without
+    the founder hat → ``"costing"``; anyone else / unverified → ``None`` (never
+    hide the surface from an operator we can't scope)."""
+    try:
+        import os
+
+        from otaman_core.human_roster import load_human_roster, resolve_roster_human
+
+        roster = load_human_roster(program.root / "platform.yaml")
+        entry = resolve_roster_human(roster, os.environ.get("OTAMAN_HUMAN"))
+        hats = {r.lower() for r in (getattr(entry, "roles", None) or [])} if entry else set()
+    except Exception:  # noqa: BLE001 - roster unavailable → no scoping (show all)
+        return None
+    if "founder" in hats:
+        return None  # founder-mode: all keys visible
+    if "cto" in hats:
+        return "costing"
+    return None
+
+
+__all__ = [
+    "outcome_detail_text",
+    "solution_detail_text",
+    "node_detail_text",
+    "role_scope",
+]

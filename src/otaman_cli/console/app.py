@@ -788,9 +788,12 @@ class RegistryDetailScreen(Screen):
         self._reload()
 
     def _reload(self) -> None:
-        from otaman_cli.console.registry_detail import node_detail_text
+        from otaman_cli.console.registry_detail import node_detail_text, role_scope
 
-        text = node_detail_text(self.program, self.kind, self.node_id) or "(no detail)"
+        # team-mode 2.4b — role-scoped surface: founder sees all (founder-mode),
+        # a CTO sees the costing view; anyone else sees the full surface.
+        scope = role_scope(self.program)
+        text = node_detail_text(self.program, self.kind, self.node_id, scope=scope) or "(no detail)"
         # team-mode 2.4a (+ follow-up) — surface the one-key accept-cost affordance.
         # Outcome node: auto-derive the single clear solution. Solution node: accept
         # THIS solution's cost (dissolves the multi-candidate gap, no choose step).
