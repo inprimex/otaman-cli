@@ -388,3 +388,59 @@ class TestCmdNotifyChange:
         # never the old filesystem "not found" path-search wording.
         assert "map-tasks dispatch invoked" in r.stdout or "map-tasks dispatch failed" in r.stdout
         assert "not found" not in r.stdout
+
+
+# ---------------------------------------------------------------- F2 — notify-change dispatch gate
+class TestNotifyChangeDispatchGate:
+    """F2: notify-change routes its map-tasks dispatch through the SAME dispatch
+    gate as `otaman assign` — refuse under block, waive+audit+stamp under warn."""
+
+    def _staged(self, tmp_path, enforcement, stage):
+        import yaml
+
+        project, specs = _stage_workspace(tmp_path)
+        # spec_policy on the project platform.yaml
+        pf = (project / "platform.yaml").read_text(encoding="utf-8")
+        pf += f"spec_policy:\n  enforcement: {enforcement}\n"
+        (project / "platform.yaml").write_text(pf, encoding="utf-8")
+        d = _stage_change(specs, "ch1", "- [ ] 1.1 @otaman-cli\n")
+        (d / ".openspec.yaml").write_text(yaml.safe_dump({"stage": stage}), encoding="utf-8")
+        return project
+
+    def test_block_mode_refuses_dispatch(self, tmp_path, monkeypatch):
+
+        project = self._staged(tmp_path, "block", "authored")  # unapproved
+
+        def _must_not_dispatch(*a, **k):
+            raise AssertionError("map-tasks must not run when the gate blocks")
+
+        monkeypatch.setattr("otaman_cli.main.run_script", _must_not_dispatch)
+        rc, summary = notify_change(project, "ch1")
+        assert rc == 0
+        assert summary.get("gate_blocked") is True
+        assert summary["map_tasks_called"] is False
+
+    def test_warn_mode_waives_and_audits_and_stamps(self, tmp_path, monkeypatch):
+        import os
+        from types import SimpleNamespace
+
+        from otaman_cli import gate_audit
+
+        project = self._staged(tmp_path, "warn", "authored")  # unapproved → waived
+        captured = {}
+
+        def fake_run_script(name, *a, **k):
+            captured["env"] = os.environ.get("OTAMAN_GATE_WAIVED")
+            return SimpleNamespace(returncode=0, stdout="{}", stderr=None)
+
+        monkeypatch.setattr("otaman_cli.main.run_script", fake_run_script)
+        monkeypatch.delenv("OTAMAN_GATE_WAIVED", raising=False)
+        rc, summary = notify_change(project, "ch1")
+        assert rc == 0 and summary["map_tasks_called"] is True
+        # stamped: map-tasks saw the waiver slug; env restored after
+        assert captured["env"] == "not-spec-approved"
+        assert os.environ.get("OTAMAN_GATE_WAIVED") is None
+        # audited: a gate-waiver entry landed
+        assert any(e["change"] == "ch1" for e in gate_audit.read_waivers(project))
+        # surfaced: VIOLATION-first gate lines in the summary
+        assert any("VIOLATION" in ln for ln in summary.get("gate_lines", []))
