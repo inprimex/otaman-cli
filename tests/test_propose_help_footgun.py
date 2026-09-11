@@ -81,10 +81,13 @@ def test_team_help_no_side_effect(tmp_path, monkeypatch, capsys):
 
 
 def test_propose_real_title_still_files_request(tmp_path, monkeypatch):
-    # regression: the normal path must still write exactly one request
+    # regression: the normal path writes the SCR (plus, since spec-gate-hardening
+    # 1.4, a spec-approval-pending item for the human's triage queue).
     root = _project(tmp_path, monkeypatch)
     rc = cmd_propose(["Add", "user", "pagination"])
     assert rc == 0
     files = _bus_files(root)
-    assert len(files) == 1 and files[0].name.endswith("spec-change-request.md")
-    assert "--help" not in files[0].read_text(encoding="utf-8")
+    scr = [f for f in files if f.name.endswith("spec-change-request.md")]
+    sap = [f for f in files if f.name.endswith("spec-approval-pending.md")]
+    assert len(scr) == 1 and len(sap) == 1 and len(files) == 2
+    assert "--help" not in scr[0].read_text(encoding="utf-8")

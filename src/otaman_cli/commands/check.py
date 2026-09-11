@@ -251,6 +251,39 @@ def cmd_check(args: list[str]) -> int:
             UI.muted(f"  ... and {len(unparseable) - 5} more")
         UI.muted("  One of them may be a message addressed to you. Inspect the file directly.")
 
+    # spec-gate-hardening 1.4 — the current agent's OWN changes awaiting human
+    # approval/ratification: the spec-approval-pending items it enqueued at
+    # propose time (they're addressed `to: human`, so they never appear in the
+    # agent's normal pending list — surface them here by `from == agent`).
+    awaiting: list[tuple[str, str]] = []
+    if active_dir.is_dir():
+        for f in sorted(active_dir.glob("*spec-approval-pending*.md")):
+            try:
+                content = f.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            fm_match = re.match(r"^---\n(.+?)\n---", content, re.DOTALL)
+            if not fm_match:
+                continue
+            try:
+                fm = yaml.safe_load(fm_match.group(1))
+            except yaml.YAMLError:
+                continue
+            if not isinstance(fm, dict) or fm.get("from") != agent:
+                continue
+            subject = ""
+            body_start = content.split("---", 2)[-1] if content.count("---") >= 2 else ""
+            for line in body_start.splitlines():
+                if line.strip().startswith("## Subject:"):
+                    subject = line.strip().replace("## Subject:", "").strip()
+                    break
+            awaiting.append((subject or f.stem, f.stem))
+    if awaiting:
+        print()
+        UI.header("Your changes awaiting approval/ratification")
+        for subject, stem in awaiting:
+            UI.bullet(f"{subject}  ({stem})")
+
     # Show blocked tasks
     blocked_file = root / ".agents" / "blocked" / f"{agent}.md"
     if blocked_file.exists():
