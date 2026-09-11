@@ -55,7 +55,9 @@ def test_gate_dispatch_warn_allows_with_notice(root, capsys):
     _change(root, "wip", stage="authored")
     rc = spec_cmd.cmd_spec(["gate", "wip", "--at", "dispatch"])
     out = capsys.readouterr().out
-    assert rc == 0 and "ALLOWED" in out and "proceeding despite" in out
+    # VIOLATION-first (1.2): a waived result headlines VIOLATION, never ALLOWED
+    assert rc == 0 and "VIOLATION (waived" in out and "proceeding despite" in out
+    assert "ALLOWED" not in out
 
 
 def test_gate_dispatch_block_refuses(root, capsys):
@@ -70,7 +72,9 @@ def test_gate_dispatch_block_allows_spec_approved(root, capsys):
     _platform(root, enforcement="block")
     _change(root, "ready", stage="spec-approved")
     rc = spec_cmd.cmd_spec(["gate", "ready", "--at", "dispatch"])
-    assert rc == 0
+    out = capsys.readouterr().out
+    # ALLOWED is reserved for a genuinely-clean result (1.2)
+    assert rc == 0 and "ALLOWED" in out and "VIOLATION" not in out
 
 
 def test_gate_self_waive_prints_visible_notice(root, capsys):
@@ -78,7 +82,8 @@ def test_gate_self_waive_prints_visible_notice(root, capsys):
     _change(root, "poc", stage="authored")
     rc = spec_cmd.cmd_spec(["gate", "poc", "--at", "dispatch"])
     out = capsys.readouterr().out
-    assert rc == 0 and "self-waive:" in out  # D2: self-waive MUST be visible
+    # D2: self-waive MUST be visible — now surfaced in the VIOLATION headline
+    assert rc == 0 and "VIOLATION (waived by enforcement=self-waive)" in out
 
 
 def test_gate_archive_block_with_delta_refuses(root, capsys):

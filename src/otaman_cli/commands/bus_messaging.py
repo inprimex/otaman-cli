@@ -938,8 +938,11 @@ def cmd_assign(args: list[str]) -> int:
         from otaman_cli.commands.spec import dispatch_gate_check
 
         allowed, lines = dispatch_gate_check(root, change_name)
+        # VIOLATION-first (spec-gate-hardening 1.2): dispatch_gate_check yields
+        # lines only for a waived or blocked result — both loud; a clean pass is
+        # silent here.
         for ln in lines:
-            (UI.muted if allowed else UI.warn)(ln)
+            UI.warn(ln)
         if not allowed:
             UI.error(f"Dispatch blocked by spec policy: '{change_name}' is not spec-approved.")
             UI.muted("Advance it to spec-approved (or `otaman ratify`), or relax enforcement.")
