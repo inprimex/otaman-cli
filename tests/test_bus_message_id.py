@@ -91,3 +91,20 @@ def test_ack_matches_by_displayed_id(tmp_path: Path):
     r = _run(root, "cli-agent", "ack", mid)
     assert r.returncode == 0, r.stderr + r.stdout
     assert "ambiguous" not in (r.stdout + r.stderr).lower()
+
+
+def test_cc_copy_id_equals_its_own_stem(tmp_path: Path):
+    # F1: under CC fan-out, EVERY file's id equals its OWN stem (the CC copy no
+    # longer carries the primary's route stem).
+    root = _setup_root(tmp_path)
+    r = _run(root, "cli-agent", "send", "spec-agent",
+             "--subject", "hi", "--body", "b", "--cc", "core-agent")  # fmt: skip
+    assert r.returncode == 0, r.stderr + r.stdout
+    msgs = list((root / ".agents" / "bus" / "active").glob("*.md"))
+    assert len(msgs) == 2  # primary + one CC copy
+    for m in msgs:
+        assert _id_of(m) == m.stem, f"{m.name}: id {_id_of(m)!r} != stem"
+    assert len({_id_of(m) for m in msgs}) == 2  # distinct ids
+    # the CC copy names the CC recipient in its own id
+    cc = next(m for m in msgs if "x-cc: true" in m.read_text(encoding="utf-8"))
+    assert "core-agent" in _id_of(cc)
