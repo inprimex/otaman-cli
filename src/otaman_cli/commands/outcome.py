@@ -17,7 +17,7 @@ def cmd_outcome(args: list[str]) -> int:
         UI.error("Usage: otaman outcome <action> [options]")
         UI.muted(
             "Actions: add | list | show | history | promote | demote | "
-            "retire | request-estimate | accept-cost | reject-cost"
+            "retire | request-estimate | choose | accept-cost | reject-cost"
         )
         return 1
 

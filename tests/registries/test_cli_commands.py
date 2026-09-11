@@ -773,3 +773,115 @@ def test_unauthorized_actor_emits_warning_but_proceeds(project: Path, monkeypatc
     assert "outcome.add" in rc.stderr
     # and the file was still written
     assert _outcomes_path(project).is_file()
+
+
+# team-mode 2.4b — `otaman outcome choose` (CTO): sets chosen-solution, NOT cost
+
+
+def test_choose_sets_chosen_solution_without_cost(project: Path) -> None:
+    _run(
+        project,
+        "outcome",
+        "add",
+        "JTBD-2-x",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
+        "--priority",
+        "P1",
+        "--impact",
+        "M",
+    )
+    _run(project, "outcome", "promote", "JTBD-2-x")  # → Backlog
+    _run(
+        project,
+        "solution",
+        "add",
+        "SOL-2-a",
+        "--outcome",
+        "JTBD-2-x",
+        "--description",
+        "one way",
+        "--t-shirt",
+        "Small",
+    )
+    _run(
+        project,
+        "solution",
+        "add",
+        "SOL-2-b",
+        "--outcome",
+        "JTBD-2-x",
+        "--description",
+        "other way",
+        "--t-shirt",
+        "Medium",
+    )
+
+    rc = _run(project, "outcome", "choose", "JTBD-2-x", "--solution", "SOL-2-a")
+    assert rc.returncode == 0, rc.stderr or rc.stdout
+
+    o = next(o for o in yaml_load(_outcomes_path(project))["outcomes"] if o["id"] == "JTBD-2-x")
+    assert o["chosen-solution"] == "SOL-2-a"
+    assert o.get("cost-accepted") in (None, False)  # choose does NOT accept cost
+    assert o["status"] == "Backlog"  # status unchanged (that's accept-cost's job)
+    assert o["transitions"][-1]["action"] == "choose"
+
+
+def test_choose_rejects_solution_of_another_outcome(project: Path) -> None:
+    _run(
+        project,
+        "outcome",
+        "add",
+        "JTBD-3-a",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
+        "--priority",
+        "P1",
+        "--impact",
+        "M",
+    )
+    _run(
+        project,
+        "outcome",
+        "add",
+        "JTBD-3-b",
+        "--as-a",
+        "u",
+        "--i-want-to",
+        "t",
+        "--incremental-outcome",
+        "x",
+        "--so-i-can",
+        "y",
+        "--priority",
+        "P1",
+        "--impact",
+        "M",
+    )
+    _run(
+        project,
+        "solution",
+        "add",
+        "SOL-3-a",
+        "--outcome",
+        "JTBD-3-a",
+        "--description",
+        "d",
+        "--t-shirt",
+        "Small",
+    )
+    rc = _run(project, "outcome", "choose", "JTBD-3-b", "--solution", "SOL-3-a")
+    assert rc.returncode != 0
+    assert "belongs to outcome" in (rc.stdout + rc.stderr)

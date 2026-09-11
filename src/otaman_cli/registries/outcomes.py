@@ -77,6 +77,7 @@ OutcomeTransitionAction = Literal[
     "promote",
     "demote",
     "request-estimate",
+    "choose",  # team-mode 2.4b — CTO picks the chosen solution (pre-cost)
     "accept-cost",
     "reject-cost",
     "retire",

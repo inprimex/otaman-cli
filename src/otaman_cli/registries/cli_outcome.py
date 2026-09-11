@@ -36,6 +36,7 @@ from otaman_cli.registries.outcomes import (
 from otaman_cli.registries.platform_ext import load_program_extensions
 from otaman_cli.registries.roles import (
     authz_advisory,
+    hat_advisory,
     resolve_operating_actor,
     resolve_roles,
 )
@@ -456,6 +457,64 @@ def cmd_accept_cost(args: dict[str, Any]) -> int:
     return 0
 
 
+def cmd_choose(args: dict[str, Any]) -> int:
+    """`otaman outcome choose <id> --solution <SOL-id>` — mark the outcome's
+    chosen solution (team-mode 2.4b, CTO hat). Sets ``chosen-solution`` + a
+    ``choose`` transition; does NOT accept the cost (that's accept-cost) or touch
+    the siblings (they stay Considering). Canon: cofounder's solutions-draft
+    team-mode. Hat check advisory at Mode 1."""
+    root = find_project_root()
+    if not root:
+        return _bail(not_in_project_message())
+    if not args.get("solution"):
+        return _bail("--solution <SOL-id> is required")
+    actor, _roles, _ = _ctx(root)
+    hat_advisory("outcome.choose", ("cto",), root)
+
+    loaded = _load(root)
+    if loaded is None:
+        return 1
+    path, raw = loaded
+    outcome = _find_outcome(raw, args["id"])
+    if not outcome:
+        return _bail(f"Outcome not found: {args['id']}")
+
+    sol_path = resolve_registry_path(root, "solutions")
+    solution = None
+    if sol_path and sol_path.is_file():
+        for s in (yaml_load(sol_path) or {}).get("solutions", []):
+            if s.get("id") == args["solution"]:
+                solution = s
+                break
+    if solution is None:
+        return _bail(f"Solution not found in solutions.yaml: {args['solution']}")
+    if solution.get("outcome-id") != outcome["id"]:
+        return _bail(
+            f"Solution {args['solution']} belongs to outcome "
+            f"{solution.get('outcome-id')!r}, not {outcome['id']!r}"
+        )
+    if solution.get("status") == "Discarded":
+        return _bail(f"Cannot choose a discarded solution: {args['solution']}")
+
+    status = outcome.get("status", "Backlog")
+    outcome["chosen-solution"] = args["solution"]
+    outcome["updated"] = bus_messages.utc_now_iso()[:10]
+    append_transition(
+        outcome,
+        make_transition(actor=actor, action="choose", note=f"chose {args['solution']}"),
+    )
+    rc = _save(path, raw)
+    if rc != 0:
+        return rc
+
+    _emit_bus(
+        root,
+        bus_messages.build_outcome_status_changed(outcome, status, status, actor, "choose"),
+    )
+    UI.ok(f"Chose solution: {outcome['id']} → chosen-solution: {args['solution']}")
+    return 0
+
+
 def cmd_reject_cost(args: dict[str, Any]) -> int:
     root = find_project_root()
     if not root:
@@ -513,6 +572,7 @@ _ACTIONS = {
     "request-estimate": cmd_request_estimate,
     "accept-cost": cmd_accept_cost,
     "reject-cost": cmd_reject_cost,
+    "choose": cmd_choose,
 }
 
 
