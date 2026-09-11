@@ -278,6 +278,29 @@ def cmd_check(args: list[str]) -> int:
                     subject = line.strip().replace("## Subject:", "").strip()
                     break
             awaiting.append((subject or f.stem, f.stem))
+    # F3: a spec-approval-pending item exists only for propose-flow SCRs — an
+    # AUTHORED change awaiting the human's ratification (the original pmeets ask,
+    # and every spec-agent change) has no such item. Also derive those from the
+    # specs repo: not-research, not-yet-approved changes this agent owns
+    # (spec_owner == agent, or requested_by names it).
+    try:
+        from otaman_cli.commands.spec import _specs_changes_dir
+
+        changes_dir = _specs_changes_dir(root)
+    except Exception:  # noqa: BLE001 - specs stack unavailable → skip this source
+        changes_dir = None
+    if changes_dir is not None:
+        from otaman_core.spec_lifecycle import has_approval, is_research, read_openspec
+
+        for d in sorted(p for p in changes_dir.iterdir() if p.is_dir() and p.name != "archive"):
+            data = read_openspec(d / ".openspec.yaml")
+            if not data or is_research(data) or has_approval(data):
+                continue  # research / already-approved → not awaiting ratification
+            owner = data.get("spec_owner")
+            requested_by = str(data.get("requested_by") or "")
+            if owner == agent or (agent and agent in requested_by):
+                stage = data.get("stage") or "—"
+                awaiting.append((f"{d.name} — awaiting ratification (stage={stage})", d.name))
     if awaiting:
         print()
         UI.header("Your changes awaiting approval/ratification")
