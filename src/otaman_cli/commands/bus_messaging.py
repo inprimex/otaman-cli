@@ -17,7 +17,7 @@ from pathlib import Path
 
 from otaman_core.validate_message import PRIVILEGED_TYPES
 
-from otaman_cli.bus_write import write_message_exclusive
+from otaman_cli.bus_write import BusMessageValidationError, write_message_exclusive
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message, resolve_agent_identity
 from otaman_cli.main import UI, C, _read_platform_specs_path, _resolve_bus_paths, run_script
@@ -50,6 +50,10 @@ MESSAGE_TYPES: frozenset[str] = frozenset(
         # in `otaman program`; this message only records it. Registered in
         # otaman-core VALID_TYPES + _BROADCAST_TYPES (PR #31).
         "lifecycle-change",
+        # bwsv ruling: the non-privileged fleet-broadcast type for a legit
+        # `to: all` notification (`info` stays targeted; warn+allow retired).
+        # Registered in otaman-core VALID_TYPES + _BROADCAST_TYPES.
+        "announce",
     }
 )
 
@@ -360,14 +364,25 @@ def cmd_send(args: list[str]) -> int:
     active_dir, _acks_dir = _resolve_bus_paths(target_root)
     active_dir.mkdir(parents=True, exist_ok=True)
     # Never overwrite: same-second sends on the same route share a stem; the
-    # returned path carries any collision suffix (propose-hardening).
-    # NOTE (bus-writer-self-validation 1.2): the write-time gate is NOT enabled on
-    # cmd_send yet. Enabling it refuses `send all --type info|task-complete`, which
-    # the broadcast-whitelist-warning feature (conformance-2026-09 D5) deliberately
-    # warns-but-ALLOWS — a direct conflict with the validator's broadcast-type
-    # table. Reconciling the two is a spec decision (flagged to spec-agent); until
-    # then cmd_send stays ungated so it doesn't silently break that contract.
-    msg_path = write_message_exclusive(active_dir / filename, content)
+    # returned path carries any collision suffix (propose-hardening). The write is
+    # validated first (bus-writer-self-validation 1.2) — nothing is written if the
+    # message would fail the validator. known_agents enables the recipient-in-
+    # registry check (identity-divergence D2): a send to an agent absent from
+    # agents.yaml is refused here rather than sitting undelivered. Per the bwsv
+    # ruling, a non-broadcast type sent `to: all` is now hard-refused (warn+allow
+    # retired; use `announce` for a legit fleet notification).
+    from otaman_core.validate_message import load_known_agents
+
+    known_agents = load_known_agents(target_root)
+    try:
+        msg_path = write_message_exclusive(
+            active_dir / filename, content, validate=True, known_agents=known_agents
+        )
+    except BusMessageValidationError as exc:
+        UI.error("Refusing to send — message failed self-validation:")
+        for e in exc.errors:
+            UI.muted(f"  - {e}")
+        return 1
     # Keep id == the actual unique stem even when a same-second same-route
     # collision forced a `-N` suffix on the written file (B2 collision-proofing).
     if msg_path.stem != filename_stem:
@@ -387,7 +402,9 @@ def cmd_send(args: list[str]) -> int:
                 cc_recipient=recipient,
                 slug=slug,
             )
-            cc_path = write_message_exclusive(active_dir / cc_fname, cc_content)
+            cc_path = write_message_exclusive(
+                active_dir / cc_fname, cc_content, validate=True, known_agents=known_agents
+            )
             cc_copy_paths.append(cc_path)
 
     UI.ok(f"Sent: {filename}")

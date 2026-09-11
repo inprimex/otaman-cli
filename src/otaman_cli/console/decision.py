@@ -76,7 +76,10 @@ def _write_audit(
     stem = f"{now_ts}-human-to-all-console-{verb}-{_slug(proposal.subject)}"
     reason_section = f"\n### Reason\n{reason}\n" if reason else ""
     content = (
-        f"---\nid: {stem}\nfrom: human\nto: all\npriority: normal\ntype: info\n"
+        # `announce`: the non-privileged fleet-broadcast type (bwsv ruling) — a
+        # to:all notification uses it, not `info` (which the validator refuses to
+        # broadcast).
+        f"---\nid: {stem}\nfrom: human\nto: all\npriority: normal\ntype: announce\n"
         f"timestamp: {now_iso}\nstatus: pending\n---\n\n"
         f"## Subject: {verb.capitalize()}: {proposal.subject}\n\n"
         f"The {proposal.msg_type} **{proposal.stem}** from **{proposal.from_agent}** "

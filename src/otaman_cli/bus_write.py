@@ -41,24 +41,34 @@ class BusMessageValidationError(Exception):
         )
 
 
-def assert_message_valid(content: str, path: Path | None = None) -> None:
+def assert_message_valid(
+    content: str, path: Path | None = None, *, known_agents: set[str] | None = None
+) -> None:
     """Raise :class:`BusMessageValidationError` if *content* would fail the
     bus-message validator (the write-time gate, bus-writer-self-validation 1.2).
 
     Uses otaman-core's ``validate_message_before_write`` (errors only; warnings
-    never block). A no-op when the validator can't be imported, so the gate
-    never turns a missing dependency into a write failure."""
+    never block). When *known_agents* is given, the recipient-in-registry check
+    runs too — an ``otaman send`` to an agent absent from agents.yaml is refused
+    at write time rather than silently sitting undelivered (identity-divergence
+    D2). A no-op when the validator can't be imported, so the gate never turns a
+    missing dependency into a write failure."""
     try:
         from otaman_core.validate_message import validate_message_before_write
     except Exception:  # noqa: BLE001 - validator unavailable → don't block writes
         return
-    errors = validate_message_before_write(content)
+    errors = validate_message_before_write(content, known_agents)
     if errors:
         raise BusMessageValidationError(errors, path)
 
 
 def write_message_exclusive(
-    path: Path, content: str, *, encoding: str = "utf-8", validate: bool = False
+    path: Path,
+    content: str,
+    *,
+    encoding: str = "utf-8",
+    validate: bool = False,
+    known_agents: set[str] | None = None,
 ) -> Path:
     """Write *content* to *path* without ever overwriting an existing file.
 
@@ -78,7 +88,7 @@ def write_message_exclusive(
     are aligned, rather than silently breaking them here.
     """
     if validate:
-        assert_message_valid(content, path)
+        assert_message_valid(content, path, known_agents=known_agents)
     path.parent.mkdir(parents=True, exist_ok=True)
     candidate = path
     n = 2
