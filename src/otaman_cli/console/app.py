@@ -14,7 +14,7 @@ from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import VerticalScroll
+from textual.containers import Horizontal, VerticalScroll
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     DataTable,
@@ -622,21 +622,6 @@ class InboxScreen(Screen):
         self.app.pop_screen()
 
 
-_STATUS_STYLE = {
-    "Done": "green",
-    "Complete": "green",
-    "Approved": "green",
-    "complete-unarchived": "green",
-    "Discarded": "red",
-    "Retired": "dim",
-    "In-Progress": "yellow",
-    "in-flight": "yellow",
-    "Drafting": "yellow",
-    "Considering": "yellow",
-    "Backlog": "cyan",
-}
-
-
 class TreeScreen(Screen):
     """The linked artifact tree (console-ux-redesign 1.3 / D2): outcomes →
     solutions → changes as one navigable tree, priority-sorted, status-colored,
@@ -646,6 +631,7 @@ class TreeScreen(Screen):
 
     BINDINGS = [
         Binding("f", "toggle_closed", "Show/hide closed", priority=True),
+        Binding("p", "toggle_panel", "Read panel", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
         Binding("escape", "back", "Back", priority=True),
         Binding("q", "app.quit", "Quit", priority=True),
@@ -655,6 +641,7 @@ class TreeScreen(Screen):
         super().__init__()
         self.program = program
         self._show_closed = False
+        self._panel_open = False
 
     def compose(self) -> ComposeResult:
         yield _header()
@@ -662,15 +649,22 @@ class TreeScreen(Screen):
         yield _mode_banner(
             f"Artifact tree · {self.program.name}",
             "↑↓ move · → expand · ← collapse · enter open · "
-            "f closed · r refresh · esc back · q quit",
+            "f closed · p read · r refresh · esc back · q quit",
         )
         notice = Static("", id="tree-notice", markup=False)
         notice.display = False
         yield notice
-        yield Tree("artifacts", id="artifact-tree")
+        with Horizontal(id="tree-row"):
+            yield Tree("artifacts", id="artifact-tree")
+            with VerticalScroll(id="tree-side"):
+                yield Static("", id="tree-side-body", markup=False)
         yield Footer()
 
     def on_mount(self) -> None:
+        # the `p` side panel starts hidden; a right-side read-in-place pane (1.4)
+        side = self.query_one("#tree-side")
+        side.styles.width = "45%"
+        side.display = False
         self._reload()
 
     def action_refresh(self) -> None:
@@ -679,6 +673,34 @@ class TreeScreen(Screen):
     def action_toggle_closed(self) -> None:
         self._show_closed = not self._show_closed
         self._reload()
+
+    def action_toggle_panel(self) -> None:
+        """`p` toggles the right-side read-in-place panel (tree-view-polish 1.4)."""
+        self._panel_open = not self._panel_open
+        self.query_one("#tree-side").display = self._panel_open
+        if self._panel_open:
+            tree = self.query_one("#artifact-tree", Tree)
+            self._update_panel(getattr(tree.cursor_node, "data", None))
+
+    def on_tree_node_highlighted(self, event) -> None:
+        if self._panel_open:
+            self._update_panel(getattr(event.node, "data", None))
+
+    def _update_panel(self, node) -> None:
+        body = self.query_one("#tree-side-body", Static)
+        if node is None:
+            body.update("(nothing selected)")
+            return
+        if node.kind in ("outcome", "solution"):
+            from otaman_cli.console.registry_detail import node_detail_text, role_scope
+
+            text = node_detail_text(
+                self.program, node.kind, node.id, scope=role_scope(self.program)
+            )
+            body.update(text or f"{node.id}")
+        else:
+            extra = f"\n  blocked by {node.blocked_by}" if node.blocked_by else ""
+            body.update(f"{node.id}\n  status: {node.status or node.kind}{extra}")
 
     def _reload(self) -> None:
         self.run_worker(self._load, thread=True, exclusive=True, group="tree")
@@ -717,10 +739,11 @@ class TreeScreen(Screen):
     def _add(self, parent, node, width=0) -> None:
         from rich.text import Text
 
-        label = Text(
-            node.display_label(),
-            style="red" if node.blocked_by else _STATUS_STYLE.get(node.status, ""),
-        )
+        # per-column colors from the one shared palette (tree-view-polish 1.2);
+        # short lowercase value words, no enum reprs (1.1).
+        label = Text()
+        for text, style in node.row_segments():
+            label.append(text, style=style or None)
         if width and label.cell_len > width:
             label.truncate(width, overflow="ellipsis")
         if node.children:
