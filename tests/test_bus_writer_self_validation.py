@@ -138,3 +138,31 @@ def test_send_hostile_subjects_stay_valid(tmp_path: Path, subject: str):
     r = _run(project, "send", "spec-agent", "--subject", subject, "--body", "b")
     assert r.returncode == 0, r.stderr
     assert _all_bus_errors(project) == {}, subject
+
+
+# ---------------------------------------------------------------------------
+# identity-divergence D2 — recipient-in-registry check at write time
+
+
+def _stage_with_agents(tmp_path, names):
+    project, specs = _stage(tmp_path)
+    agents = "\n".join(f"  - name: {n}" for n in names)
+    (project / ".agents" / "agents.yaml").write_text(f"agents:\n{agents}\n", encoding="utf-8")
+    return project
+
+
+def test_send_to_unknown_recipient_is_refused(tmp_path):
+    # agents.yaml lists cli-agent + spec-agent; a send to an agent NOT in it is
+    # refused at write time (the message no longer sits undelivered).
+    project = _stage_with_agents(tmp_path, ["cli-agent", "spec-agent"])
+    r = _run(project, "send", "deploy-agent", "--subject", "s", "--body", "b")
+    assert r.returncode != 0, r.stdout + r.stderr
+    assert "recipient" in (r.stdout + r.stderr).lower()
+    assert _all_bus_errors(project) == {}  # and nothing invalid was written
+
+
+def test_send_to_known_recipient_succeeds(tmp_path):
+    project = _stage_with_agents(tmp_path, ["cli-agent", "spec-agent"])
+    r = _run(project, "send", "spec-agent", "--subject", "s", "--body", "b")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _all_bus_errors(project) == {}

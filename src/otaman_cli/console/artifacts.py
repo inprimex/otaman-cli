@@ -219,7 +219,9 @@ def _broadcast(
     else:
         commit_note = ""
     content = (
-        f"---\nid: {stem}\nfrom: human\nto: all\npriority: normal\ntype: info\n"
+        # `announce`: the non-privileged fleet-broadcast type (bwsv ruling) for a
+        # legit to:all notification — `info` is refused as a broadcast.
+        f"---\nid: {stem}\nfrom: human\nto: all\npriority: normal\ntype: announce\n"
         f"timestamp: {iso}\nstatus: pending\n---\n\n"
         f"## Subject: spec-approved: {change_name}\n\n"
         f"Change **{change_name}** reached **spec-approved** (advanced in otaman -i by {by}). "

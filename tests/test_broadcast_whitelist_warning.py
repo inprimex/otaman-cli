@@ -55,26 +55,36 @@ def _send(root: Path, to: str, *extra: str) -> subprocess.CompletedProcess:
     )
 
 
-def test_task_complete_broadcast_warns_but_sends(tmp_path: Path):
+def test_task_complete_broadcast_is_refused(tmp_path: Path):
+    # bwsv ruling: warn+allow (D5) is retired — a non-broadcast type sent `to: all`
+    # is hard-refused at write time, nothing written.
     root = _project_root(tmp_path)
     r = _send(root, "all", "--type", "task-complete")
     out = r.stdout + r.stderr
-    assert r.returncode == 0, out  # warn-and-allow, never blocks
-    assert "should not broadcast" in out
+    assert r.returncode != 0, out
+    assert "failed self-validation" in out or "must not use 'to: all'" in out
+    assert list((root / ".agents" / "bus" / "active").glob("*.md")) == []
 
 
-def test_targeted_task_complete_does_not_warn(tmp_path: Path):
+def test_targeted_task_complete_still_sends(tmp_path: Path):
     root = _project_root(tmp_path)
     r = _send(root, "plugin-agent", "--type", "task-complete")
-    out = r.stdout + r.stderr
-    assert r.returncode == 0, out
-    assert "should not broadcast" not in out
+    assert r.returncode == 0, r.stdout + r.stderr
 
 
-def test_info_broadcast_does_not_warn(tmp_path: Path):
-    # the whitelist warning is task-complete-specific; a plain info broadcast is fine
+def test_info_broadcast_is_refused(tmp_path: Path):
+    # `info` is not a broadcast type — `to: all` is refused (use `announce`).
     root = _project_root(tmp_path)
     r = _send(root, "all", "--type", "info")
     out = r.stdout + r.stderr
-    assert r.returncode == 0, out
-    assert "should not broadcast" not in out
+    assert r.returncode != 0, out
+    assert list((root / ".agents" / "bus" / "active").glob("*.md")) == []
+
+
+def test_announce_broadcast_is_allowed(tmp_path: Path):
+    # `announce` IS the non-privileged fleet-broadcast type — `to: all` is fine.
+    root = _project_root(tmp_path)
+    r = _send(root, "all", "--type", "announce")
+    assert r.returncode == 0, r.stdout + r.stderr
+    msgs = list((root / ".agents" / "bus" / "active").glob("*.md"))
+    assert len(msgs) == 1 and "type: announce" in msgs[0].read_text(encoding="utf-8")
