@@ -882,6 +882,60 @@ def _print_registry_loadability_report(result: dict) -> None:
         print("  falls back to changes-only. Run `otaman outcome list` for the error.")
 
 
+def _check_enforcement_map(root: Path) -> dict:
+    """spec-gate-hardening 1.1 — when ``spec_policy.enforcement`` is a per-action
+    map, its keys must be a subset of {author, merge, dispatch, archive} and its
+    values valid modes. An unknown key or bad value is a loud config ERROR (a
+    typo'd key would silently fall back to the default and never gate). A scalar
+    or absent enforcement is not applicable. Detection only."""
+    out: dict = {"applicable": False, "ok": False, "detail": ""}
+    try:
+        import yaml
+        from otaman_core.spec_lifecycle import ENFORCEMENT_MODES
+
+        from otaman_cli.commands.spec import ENFORCEMENT_ACTIONS
+
+        cfg = yaml.safe_load((root / "platform.yaml").read_text(encoding="utf-8")) or {}
+        if not isinstance(cfg, dict):
+            return out
+        sp = cfg.get("spec_policy")
+        raw = sp.get("enforcement") if isinstance(sp, dict) else None
+        if not isinstance(raw, dict):
+            return out  # scalar / absent → nothing to validate here
+        out["applicable"] = True
+        bad_keys = sorted(k for k in raw if k not in ENFORCEMENT_ACTIONS)
+        bad_vals = sorted(f"{k}={v}" for k, v in raw.items() if v not in ENFORCEMENT_MODES)
+        problems = []
+        if bad_keys:
+            problems.append(f"unknown action key(s): {', '.join(bad_keys)}")
+        if bad_vals:
+            problems.append(f"invalid mode(s): {', '.join(bad_vals)}")
+        if problems:
+            out["detail"] = "; ".join(problems)
+            return out
+        out["ok"] = True
+        out["detail"] = "per-action enforcement map is valid: " + ", ".join(
+            f"{k}={raw[k]}" for k in raw
+        )
+    except Exception:  # noqa: BLE001 - absent/broken config or core → not applicable
+        return out
+    return out
+
+
+def _print_enforcement_map_report(result: dict) -> None:
+    """Enforcement-map row: OK naming the resolved modes, else a loud ERROR + fix."""
+    if not result.get("applicable"):
+        return
+    print()
+    UI.header("Gate Enforcement (spec_policy.enforcement map)")
+    if result.get("ok"):
+        print(f"  {UI.badge('OK', C.GREEN)}  {result['detail']}")
+    else:
+        print(f"  {UI.badge('ERROR', C.RED)}  {result['detail']}")
+        print("  Keys must be a subset of {author, merge, dispatch, archive};")
+        print("  values must be one of block | warn | self-waive.")
+
+
 def cmd_doctor(args: list[str]) -> int:
     """Check environment readiness — git, runtimes, CLI tools, MCP.
 
@@ -1163,6 +1217,11 @@ def cmd_doctor(args: list[str]) -> int:
     regload = _check_registry_loadability(root)
     _print_registry_loadability_report(regload)
     if regload.get("applicable") and not regload.get("ok"):
+        base_rc = 1
+
+    enfmap = _check_enforcement_map(root)
+    _print_enforcement_map_report(enfmap)
+    if enfmap.get("applicable") and not enfmap.get("ok"):
         base_rc = 1
 
     # ce-bootstrap-harness-deps task 3.1 — additive `--org` harness check

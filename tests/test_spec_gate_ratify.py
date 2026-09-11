@@ -217,3 +217,31 @@ def test_change_name_from_target_variants():
     assert _change_name_from_target("a/openspec/changes/my-feature/tasks.md") == "my-feature"
     assert _change_name_from_target("my-feature") == "my-feature"
     assert _change_name_from_target("") is None
+
+
+# ---------------------------------------------------------------------------
+# spec-gate-hardening 1.1 — per-action enforcement (map) flips the acting gate
+
+
+def _platform_map(root, mapping):
+    block = "project: demo\nspecs:\n  path: specs\nspec_policy:\n  enforcement:\n"
+    for k, v in mapping.items():
+        block += f"    {k}: {v}\n"
+    (root / "platform.yaml").write_text(block, encoding="utf-8")
+
+
+def test_dispatch_blocks_while_author_warns(root):
+    # {author: warn, dispatch: block}: an unapproved change refuses at dispatch.
+    _platform_map(root, {"author": "warn", "dispatch": "block"})
+    _change(root, "wip", stage="authored")  # not spec-approved → dispatch violation
+    allowed, lines = spec_cmd.dispatch_gate_check(root, "wip")
+    assert allowed is False
+    assert any("blocked" in ln for ln in lines)
+
+
+def test_dispatch_waives_under_warn_map(root):
+    # {dispatch: warn}: the same unapproved change proceeds (loudly waived).
+    _platform_map(root, {"dispatch": "warn"})
+    _change(root, "wip", stage="authored")
+    allowed, _lines = spec_cmd.dispatch_gate_check(root, "wip")
+    assert allowed is True

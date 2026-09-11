@@ -58,7 +58,7 @@ def _specs_root(program: Program) -> Path | None:
     return changes.parent.parent if changes else None  # <specs>/openspec/changes → <specs>
 
 
-def _load_policy(program: Program):
+def _load_policy(program: Program, action: str | None = None):
     import yaml
     from otaman_core.spec_lifecycle import resolve_spec_policy
 
@@ -66,7 +66,14 @@ def _load_policy(program: Program):
         cfg = yaml.safe_load((program.root / "platform.yaml").read_text(encoding="utf-8")) or {}
     except (OSError, yaml.YAMLError):
         cfg = {}
-    return resolve_spec_policy(None, cfg.get("spec_policy") if isinstance(cfg, dict) else None)
+    policy = resolve_spec_policy(None, cfg.get("spec_policy") if isinstance(cfg, dict) else None)
+    if action:
+        from dataclasses import replace
+
+        from otaman_cli.commands.spec import resolve_action_enforcement
+
+        return replace(policy, enforcement=resolve_action_enforcement(program.root, action))
+    return policy
 
 
 def _write_openspec(path: Path, data: dict) -> None:
@@ -188,7 +195,9 @@ def archive_change(program: Program, name: str) -> tuple[bool, str]:
     d = changes / name
     if not d.is_dir():
         return False, f"no change named {name!r}"
-    decision = check_archive_gate(read_openspec(d / ".openspec.yaml"), _load_policy(program))
+    decision = check_archive_gate(
+        read_openspec(d / ".openspec.yaml"), _load_policy(program, "archive")
+    )
     # Require a CLEAN pass, not a warn-mode waiver: a violation means the change
     # isn't properly archivable (e.g. ratify it first). D1's "gate ALLOWED" for the
     # button is the clean gate, not the waived one.
