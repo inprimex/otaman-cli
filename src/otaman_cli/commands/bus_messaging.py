@@ -361,6 +361,12 @@ def cmd_send(args: list[str]) -> int:
     active_dir.mkdir(parents=True, exist_ok=True)
     # Never overwrite: same-second sends on the same route share a stem; the
     # returned path carries any collision suffix (propose-hardening).
+    # NOTE (bus-writer-self-validation 1.2): the write-time gate is NOT enabled on
+    # cmd_send yet. Enabling it refuses `send all --type info|task-complete`, which
+    # the broadcast-whitelist-warning feature (conformance-2026-09 D5) deliberately
+    # warns-but-ALLOWS — a direct conflict with the validator's broadcast-type
+    # table. Reconciling the two is a spec decision (flagged to spec-agent); until
+    # then cmd_send stays ungated so it doesn't silently break that contract.
     msg_path = write_message_exclusive(active_dir / filename, content)
     # Keep id == the actual unique stem even when a same-second same-route
     # collision forced a `-N` suffix on the written file (B2 collision-proofing).

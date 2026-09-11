@@ -291,6 +291,16 @@ Use `/otaman:check` to track updates.
     ):
         return 1
 
+    from otaman_cli.bus_write import BusMessageValidationError, assert_message_valid
+
+    try:
+        assert_message_valid(broadcast, broadcast_file)  # bus-writer-self-validation 1.2
+    except BusMessageValidationError as exc:
+        UI.error("Refusing to write spec-change-approved broadcast — failed self-validation:")
+        for e in exc.errors:
+            UI.muted(f"  - {e}")
+        return 1
+
     ack_file = acks_dir / f"{target['stem']}.human.ack"
     ack_file.write_text("approved\n", encoding="utf-8")
     broadcast_file.write_text(broadcast, encoding="utf-8")
@@ -364,6 +374,16 @@ The spec-change-request has been **rejected**.
         content=reject_msg,
         command="approve",
     ):
+        return 1
+
+    from otaman_cli.bus_write import BusMessageValidationError, assert_message_valid
+
+    try:
+        assert_message_valid(reject_msg, reject_file)  # bus-writer-self-validation 1.2
+    except BusMessageValidationError as exc:
+        UI.error("Refusing to write spec-change-rejected message — failed self-validation:")
+        for e in exc.errors:
+            UI.muted(f"  - {e}")
         return 1
 
     ack_file = acks_dir / f"{target['stem']}.human.ack"

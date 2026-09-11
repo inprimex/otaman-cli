@@ -111,12 +111,19 @@ TODO: Which repos will need implementation changes after the spec updates.
 TODO: Concrete suggestions for what the spec should say.
 """
 
-    from otaman_cli.bus_write import write_message_exclusive
+    from otaman_cli.bus_write import BusMessageValidationError, write_message_exclusive
 
     # Never overwrite: two proposals in the same second must not clobber each
     # other (the stem is second-precision). The returned path carries any
     # collision suffix, so the blocked entry + report below stay consistent.
-    filepath = write_message_exclusive(active_dir / filename, content)
+    # Validated before write (bus-writer-self-validation 1.2).
+    try:
+        filepath = write_message_exclusive(active_dir / filename, content, validate=True)
+    except BusMessageValidationError as exc:
+        UI.error("Refusing to propose — message failed self-validation:")
+        for e in exc.errors:
+            UI.muted(f"  - {e}")
+        return 1
 
     # Record blocked task
     msg_stem = filepath.stem

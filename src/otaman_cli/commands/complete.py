@@ -293,7 +293,16 @@ status: pending
 **Timestamp**: {now_iso}
 """
 
+    from otaman_cli.bus_write import BusMessageValidationError, assert_message_valid
+
     filepath = active_dir / filename
+    try:
+        assert_message_valid(content, filepath)  # bus-writer-self-validation 1.2
+    except BusMessageValidationError as exc:
+        UI.error("Refusing to write task-complete — message failed self-validation:")
+        for e in exc.errors:
+            UI.muted(f"  - {e}")
+        return 1
     filepath.write_text(content, encoding="utf-8")
 
     print()
@@ -315,6 +324,13 @@ status: pending
         fanout_filename = f"{now_ts}-{agent}-to-{spec_owner.replace('/', '-')}-task-complete.md"
         fanout_content = content.replace(f"\nto: {recipient}\n", f"\nto: {spec_owner}\n", 1)
         fanout_path = active_dir / fanout_filename
+        try:
+            assert_message_valid(fanout_content, fanout_path)
+        except BusMessageValidationError as exc:
+            UI.error("Refusing to write task-complete fan-out — failed self-validation:")
+            for e in exc.errors:
+                UI.muted(f"  - {e}")
+            return 1
         fanout_path.write_text(fanout_content, encoding="utf-8")
         UI.ok(f"Bus notification: {fanout_path.relative_to(root)}")
         UI.muted(f"Type: task-complete | To: {spec_owner} (spec_owner) | Change: {change_name}")
