@@ -250,3 +250,32 @@ def test_dispatch_waives_under_warn_map(root):
     _change(root, "wip", stage="authored")
     allowed, _lines = spec_cmd.dispatch_gate_check(root, "wip")
     assert allowed is True
+
+
+# ---------------------------------------------------------------------------
+# spec-gate-hardening 1.3c — OTAMAN_GATE_WAIVED slug for the x-gate-waived stamp
+
+
+def test_violation_slug_kebab():
+    from otaman_cli.commands.spec import _violation_slug
+
+    v = "not spec-approved (authored artifacts lack a HITL approval)"
+    assert _violation_slug(v) == "not-spec-approved"
+
+
+def test_dispatch_waiver_slug_for_warn(root):
+    _platform(root)  # warn → waived
+    _change(root, "wip", stage="authored")
+    assert spec_cmd.dispatch_waiver_slug(root, "wip") == "not-spec-approved"
+
+
+def test_dispatch_waiver_slug_none_when_blocked(root):
+    _platform(root, enforcement="block")
+    _change(root, "wip", stage="authored")
+    assert spec_cmd.dispatch_waiver_slug(root, "wip") is None  # blocked != waived
+
+
+def test_dispatch_waiver_slug_none_when_clean(root):
+    _platform(root, enforcement="block")
+    _change(root, "ready", stage="spec-approved")
+    assert spec_cmd.dispatch_waiver_slug(root, "ready") is None

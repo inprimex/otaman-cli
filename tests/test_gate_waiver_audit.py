@@ -119,3 +119,28 @@ def test_spec_status_annotates_waived_change(root, capsys):
     spec_cmd.cmd_spec(["status"])
     out = capsys.readouterr().out
     assert "waived dispatch" in out
+
+
+def test_assign_sets_gate_waived_env_on_waived_dispatch(root, monkeypatch):
+    # 1.3c: a warn-mode (waived) dispatch hands map-tasks OTAMAN_GATE_WAIVED so it
+    # can stamp x-gate-waived; the env is scoped to the call and restored after.
+    import os
+    from types import SimpleNamespace
+
+    from otaman_cli.commands import bus_messaging
+
+    _platform(root)  # warn → waived
+    _change(root, "wip", stage="authored", tasks=True)
+    monkeypatch.setattr(bus_messaging, "find_project_root", lambda: root)
+    monkeypatch.delenv("OTAMAN_GATE_WAIVED", raising=False)
+
+    captured = {}
+
+    def fake_run_script(name, *a, **k):
+        captured["env"] = os.environ.get("OTAMAN_GATE_WAIVED")
+        return SimpleNamespace(returncode=0, stdout="{}", stderr=None)
+
+    monkeypatch.setattr(bus_messaging, "run_script", fake_run_script)
+    bus_messaging.cmd_assign(["openspec/changes/wip"])
+    assert captured["env"] == "not-spec-approved"
+    assert os.environ.get("OTAMAN_GATE_WAIVED") is None  # restored after the call
