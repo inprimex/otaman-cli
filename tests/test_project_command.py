@@ -183,6 +183,60 @@ def _make_local_git_repo(parent: Path, name: str, with_remote: str | None = None
     return repo
 
 
+def _write_agents_yaml(meta: Path, names: list[str]) -> None:
+    """Plant an agent registry so the owner-vs-registry rules engage."""
+    import yaml as _yaml
+
+    (meta / ".agents").mkdir(exist_ok=True)
+    (meta / ".agents" / "agents.yaml").write_text(
+        _yaml.dump({"agents": [{"name": n, "role": "developer"} for n in names]}),
+        encoding="utf-8",
+    )
+
+
+def test_assign_scaffolds_launch_block_with_agent_env(project: Path):
+    """identity-divergence 1.2: assign leaves the repo LAUNCHABLE — ownership
+    with no launch path is not a reachable end state (the pmeets phantom chain)."""
+    _write_agents_yaml(project, ["ops-agent"])
+    new_repo = _make_local_git_repo(project.parent, "new-svc")
+    rc = _run(project, "project", "assign", str(new_repo), "--owner", "ops-agent")
+    assert rc.returncode == 0, rc.stderr or rc.stdout
+
+    entry = find_repo(load_platform_yaml(project), "new-svc")
+    assert entry is not None
+    launch = entry.get("launch")
+    assert launch, "assign must scaffold a launch block"
+    commands = launch.get("commands")
+    assert commands, "a launch block without commands is not launchable"
+    assert "OTAMAN_AGENT=ops-agent" in commands[0]
+
+
+def test_assign_refuses_unregistered_owner_naming_what_is_missing(project: Path):
+    """identity-divergence 1.2/1.1: an owner absent from agents.yaml is refused,
+    never silently materialized as a new agent."""
+    _write_agents_yaml(project, ["ops-agent", "core-agent"])
+    new_repo = _make_local_git_repo(project.parent, "ghost-svc")
+    rc = _run(project, "project", "assign", str(new_repo), "--owner", "worker-agent")
+
+    assert rc.returncode != 0
+    out = rc.stdout + rc.stderr
+    assert "worker-agent" in out  # names the unknown owner
+    assert "agents.yaml" in out  # names what is missing
+    assert "ops-agent" in out  # names what IS registered
+    # and the refusal left no half-registration behind
+    assert find_repo(load_platform_yaml(project), "ghost-svc") is None
+
+
+def test_assign_without_registry_still_scaffolds(project: Path):
+    """No agents.yaml means no registry to check against — assign proceeds (and
+    still scaffolds), matching the doctor checks' no-op convention."""
+    new_repo = _make_local_git_repo(project.parent, "free-svc")
+    rc = _run(project, "project", "assign", str(new_repo), "--owner", "ops-agent")
+    assert rc.returncode == 0, rc.stderr or rc.stdout
+    entry = find_repo(load_platform_yaml(project), "free-svc")
+    assert entry is not None and entry.get("launch", {}).get("commands")
+
+
 def test_assign_existing_git_repo_with_origin(project: Path):
     """Origin URL is stored under the schema-accepted `remote:` field
     (not `url:`, which was the spec's term but doesn't validate)."""

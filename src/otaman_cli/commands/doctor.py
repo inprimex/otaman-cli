@@ -1033,6 +1033,9 @@ def cmd_doctor(args: list[str]) -> int:
         "edition": "Edition (CE/EE identity)",
         "human_roster": "Human Roster",
         "branch_policy": "Branch Policy (ownership/drift)",
+        "repo_owner_registration": "Repo Owners (registry match)",
+        "tmux_global_agent_env": "Agent Identity Scope (tmux)",
+        "orphan_status_files": "Status Files (orphans)",
     }
 
     for check in checks:

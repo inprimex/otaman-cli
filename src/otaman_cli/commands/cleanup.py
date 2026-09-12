@@ -63,7 +63,15 @@ def cmd_cleanup(args: list[str]) -> int:
         for d in deleted:
             UI.muted(d)
 
-    if not archived and not deleted and not report.get("migrated"):
+    # identity-divergence 1.4 — name every reaped phantom; a status file with no
+    # agents.yaml entry must never vanish silently any more than it should persist.
+    orphans = report.get("status_orphans", [])
+    if orphans:
+        UI.error(f"Reaped: {len(orphans)} orphaned status file(s) (no agents.yaml entry)")
+        for name in orphans:
+            UI.muted(name)
+
+    if not archived and not deleted and not orphans and not report.get("migrated"):
         UI.muted("Nothing to clean up.")
 
     UI.kv("Active", str(report.get("active_count", 0)))
