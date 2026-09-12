@@ -119,6 +119,34 @@ def migrate_flat_to_active(bus_dir: Path) -> int:
     return migrated
 
 
+def reap_orphan_status_files(project_root: Path, *, dry_run: bool = False) -> list[str]:
+    """Remove `.agents/status/*.yaml` files whose agent has no agents.yaml entry.
+
+    Returns the file names reaped (or that WOULD be reaped under *dry_run*) so
+    the caller can name each — a phantom agent must never disappear silently
+    either. Orphan detection is shared with `otaman doctor` (which reports the
+    same files) so the two can't disagree about what is an orphan.
+    """
+    try:
+        from otaman_core.validate_message import load_known_agents
+
+        from otaman_cli.doctor import find_orphan_status_files
+
+        orphans = find_orphan_status_files(project_root, load_known_agents(project_root))
+    except Exception:  # noqa: BLE001 - no registry/status dir → nothing to reap
+        return []
+
+    reaped: list[str] = []
+    for path in orphans:
+        if not dry_run:
+            try:
+                path.unlink()
+            except OSError:
+                continue
+        reaped.append(path.name)
+    return reaped
+
+
 def cleanup(
     project_root: Path,
     archive_days: int = 30,
@@ -130,10 +158,17 @@ def cleanup(
         "migrated": 0,
         "archived": [],
         "deleted": [],
+        "status_orphans": [],
         "active_count": 0,
         "archive_count": 0,
         "errors": [],
     }
+
+    # identity-divergence 1.4: reap status files with no agents.yaml entry. Runs
+    # BEFORE the bus-dir guard below — a phantom agent's status file must be
+    # reapable even on a program whose bus dir is absent, and it is precisely the
+    # surface that kept the pmeets phantom visible for 17 hours.
+    report["status_orphans"] = reap_orphan_status_files(project_root, dry_run=dry_run)
 
     # Load config for bus path
     config_path = project_root / "platform.yaml"

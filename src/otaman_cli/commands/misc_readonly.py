@@ -118,7 +118,47 @@ def cmd_validate(args: list[str]) -> int:
                 norm_path.unlink()
             except OSError:
                 pass
-    return result.returncode
+    owners_rc = _validate_repo_owners(config_path)
+    return result.returncode or owners_rc
+
+
+def _validate_repo_owners(config_path: Path) -> int:
+    """ERROR on any `repos[].owner` absent from agents.yaml (identity-divergence 1.1).
+
+    Runs the SAME predicate the doctor check uses
+    (:func:`otaman_cli.doctor.check_repo_owner_registration`) so the two surfaces
+    cannot drift — the schema validator in otaman-core checks the owner's SHAPE,
+    this checks its REGISTRATION. Returns 1 when an unknown owner is found, else
+    0; any failure to load either file is a silent no-op (nothing to check
+    against), never a validation failure of its own.
+    """
+    try:
+        import yaml
+        from otaman_core.validate_message import load_known_agents
+
+        from otaman_cli.doctor import check_repo_owner_registration
+
+        resolved = config_path.expanduser().resolve()
+        data = yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}
+        repos = data.get("repos") or []
+        root = resolved.parent
+        known_agents = load_known_agents(root)
+        if not known_agents:
+            # config validated from outside its program root — try the real one
+            fallback = find_project_root()
+            if fallback is not None:
+                known_agents = load_known_agents(fallback)
+        result = check_repo_owner_registration(repos, known_agents)
+    except Exception:  # noqa: BLE001 - unreadable config/registry → nothing to check
+        return 0
+
+    if result["status"] != "fail":
+        return 0
+    UI.error(f"OWNER VALIDATION FAILED for {config_path}:")
+    for issue in result.get("issues", []):
+        UI.error(f"  {issue['issue']}")
+        UI.muted(f"    fix: {issue['fix']}")
+    return 1
 
 
 def _cmd_validate_docs(rest: list[str]) -> int:

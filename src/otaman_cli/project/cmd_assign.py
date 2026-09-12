@@ -20,11 +20,22 @@ from otaman_cli.project._platform import (
     load_platform_yaml,
     save_platform_yaml,
 )
+from otaman_cli.project.launch_scaffold import build_launch_block, owner_refusal
 
 
 def _bail(msg: str, code: int = 1) -> int:
     UI.error(msg)
     return code
+
+
+def _known_agents(root: Path) -> set[str]:
+    """agents.yaml names, or an empty set on any failure (no registry to check)."""
+    try:
+        from otaman_core.validate_message import load_known_agents
+
+        return load_known_agents(root)
+    except Exception:  # noqa: BLE001 - absent core/agents.yaml → nothing to validate
+        return set()
 
 
 def _detect_origin_url(repo_path: Path) -> str | None:
@@ -98,6 +109,15 @@ def cmd_project_assign(
     except ValueError:
         path_field = str(repo_path)
 
+    # identity-divergence 1.2: an owner that isn't a registered agent must never
+    # become an implicit new agent — refuse naming exactly what is missing. An
+    # absent/empty agents.yaml means there's no registry to check against, so
+    # this is a no-op there (same convention as the doctor checks).
+    known_agents = _known_agents(root)
+    refusal = owner_refusal(owner, known_agents)
+    if refusal:
+        return _bail(refusal)
+
     entry: dict[str, Any] = {
         "name": repo_name,
         "path": path_field,
@@ -110,6 +130,14 @@ def cmd_project_assign(
         # representation must use `remote:` to pass otaman-core validation.
         entry["remote"] = origin
 
+    # identity-divergence 1.2: assign SHALL leave the repo LAUNCHABLE. `otaman
+    # init --update` only patches launch blocks that already exist, so without
+    # this a post-init repo keeps ownership with no launch path — the agent then
+    # starts via an untracked path and writes status under an unvalidated name
+    # (the pmeets phantom-agent chain). Idempotent: re-running refreshes only the
+    # OTAMAN_AGENT value.
+    entry["launch"] = build_launch_block(data, repo_name, owner)
+
     append_repo(data, entry)
     save_platform_yaml(root, data)
     UI.ok(f"Registered {repo_name} (owner: {owner}, path: {path_field})")
@@ -117,6 +145,7 @@ def cmd_project_assign(
         UI.muted(f"  remote: {origin}")
     else:
         UI.muted("  no remote origin detected; remote field omitted")
+    UI.muted(f"  launch: OTAMAN_AGENT={owner} (per-pane; scaffolded)")
 
     # Spec 10.5: run `otaman init` in the assigned repo so the per-repo
     # .otaman marker (with `agent: <owner>` field) gets written. Without
