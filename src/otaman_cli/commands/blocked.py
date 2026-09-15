@@ -115,9 +115,21 @@ def cmd_blocked(args: list[str]) -> int:
             return 1
         from datetime import datetime, timezone
 
+        from otaman_cli.blocked_entries import KIND_DEPENDENCY, render_entry
+
         now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
         by = blocked_by or "human"
-        entry = f"## Blocked: {slug}\n- **Blocked since**: {now_iso}\n- **Blocked by**: {by}\n"
+        # blocked-entry-lifecycle 1.1 — ADDITIVE: the entry gains `Kind` so the
+        # terminators can tell an approval wait (ended by a human decision) from
+        # a dependency wait (ended by the work completing). Every other field
+        # keeps its name and order, so the existing matcher is untouched. A
+        # hand-registered block waits on work, not on an approval.
+        entry = render_entry(
+            slug,
+            kind=KIND_DEPENDENCY,
+            since=now_iso,
+            extra={"Blocked by": by},
+        )
         blocked_file.parent.mkdir(parents=True, exist_ok=True)
         existing = blocked_file.read_text(encoding="utf-8") if blocked_file.is_file() else ""
         if f"## Blocked: {slug}" in existing:

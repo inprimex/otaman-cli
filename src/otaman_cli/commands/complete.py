@@ -335,28 +335,64 @@ status: pending
         UI.ok(f"Bus notification: {fanout_path.relative_to(root)}")
         UI.muted(f"Type: task-complete | To: {spec_owner} (spec_owner) | Change: {change_name}")
 
-    # Step 3: Clear blocked entry if all tasks are done
-    if mark_all:
-        blocked_file = root / ".agents" / "blocked" / f"{agent}.md"
-        if blocked_file.exists():
-            blocked_content = blocked_file.read_text(encoding="utf-8")
-            # Remove blocked entries for this change
-            pattern = re.compile(
-                rf"## Blocked:.*?{re.escape(change_name)}.*?(?=\n## |\Z)",
-                re.DOTALL | re.IGNORECASE,
-            )
-            new_blocked = pattern.sub("", blocked_content).strip()
-            if new_blocked:
-                blocked_file.write_text(new_blocked + "\n", encoding="utf-8")
-            else:
-                blocked_file.unlink()
-            UI.ok(f"Unblocked: Removed blocked entry for {change_name}")
+    # Step 3: clear this change's DEPENDENCY waits (blocked-entry-lifecycle 1.3)
+    _clear_dependency_waits(root, agent, change_name)
 
     # agent-status-presence task 1.7 — write idle if all this agent's tasks
     # for the change are complete; otherwise write working (task=null).
     _status_hook_after_complete(root, agent, change_name)
 
     return 0
+
+
+def _clear_dependency_waits(root: Path, agent: str, change_name: str) -> int:
+    """Terminate this agent's DEPENDENCY waits on *change_name* (1.3).
+
+    Three defects fixed here at once, all of which kept deploy-agent's 16-entry
+    file immortal:
+
+    1. **Matched by stable ref, not change-name-in-title.** The old pattern
+       searched for the change name INSIDE the entry title, but `otaman propose`
+       titles entries by proposal title — which rarely contains the change slug —
+       so the clearer could essentially never fire.
+    2. **Runs for `--tasks` too, not only `--all`.** Completing the tasks someone
+       was waiting on unblocks them whether or not you finished every task in the
+       change.
+    3. **Approval waits are NEVER cleared by task completion** (the ruling): an
+       entry waiting on a human decision is terminated by that decision, not by
+       somebody shipping code. Clearing those here would re-create the original
+       bug in reverse — a genuinely-blocked item silently disappearing.
+
+    Entries are TOMBSTONED, not deleted, matching the format plugin writes, so
+    the record of what was blocked and why it cleared survives.
+    """
+    from datetime import datetime, timezone
+
+    from otaman_cli.blocked_entries import KIND_DEPENDENCY, find_by_ref, tombstone
+
+    blocked_file = root / ".agents" / "blocked" / f"{agent}.md"
+    if not blocked_file.is_file():
+        return 0
+    try:
+        text = blocked_file.read_text(encoding="utf-8")
+    except OSError:
+        return 0
+
+    matches = find_by_ref(text, change_name, kinds=(KIND_DEPENDENCY,))
+    if not matches:
+        return 0
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    updated = tombstone(text, matches, reason=f"completed {change_name}", today=today)
+    try:
+        blocked_file.write_text(updated, encoding="utf-8")
+    except OSError as exc:
+        UI.warn(f"could not update {blocked_file}: {exc}")
+        return 0
+
+    for entry in matches:
+        UI.ok(f"Unblocked: {entry.title}")
+    return len(matches)
 
 
 def _status_hook_after_complete(root: Path, agent: str, change_name: str) -> None:
