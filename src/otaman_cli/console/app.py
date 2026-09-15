@@ -1201,7 +1201,9 @@ class LifecycleScreen(Screen):
         Binding("escape", "back", "Back", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
         Binding("n", "nudge", "Nudge", priority=True),
-        Binding("y", "ratify", "Ratify", priority=True),
+        # One human-advance key serving both steps where the human is the
+        # blocker: spec-approve an authored change, ratify a complete one (1.5).
+        Binding("y", "ratify", "Approve/Ratify", priority=True),
         Binding("a", "archive", "Archive", priority=True),
         Binding("q", "app.quit", "Quit", priority=True),
     ]
@@ -1228,7 +1230,7 @@ class LifecycleScreen(Screen):
         yield _identity_badge_widget(self.program.root)
         yield _mode_banner(
             f"Lifecycle — all changes by triage · {self.program.name}",
-            "↑↓ rows · n nudge · y ratify · a archive · r refresh · esc back · q quit",
+            "↑↓ rows · n nudge · y approve/ratify · a archive · r refresh · esc back · q quit",
         )
         table = DataTable(id="lifecycle-table", cursor_type="row", zebra_stripes=True)
         yield table
@@ -1325,14 +1327,48 @@ class LifecycleScreen(Screen):
         idx = table.cursor_row
         return self._rows[idx] if 0 <= idx < len(self._rows) else None
 
+    def _advanceable(self, change_name: str) -> bool:
+        """Whether *change_name* is one the spec-approved advance accepts.
+
+        Asks ``artifacts.list_authored_changes`` — the SAME set the b-screen
+        offers and ``advance_to_spec_approved`` accepts — so the console's offer
+        condition can't drift from the action's acceptance condition.
+        """
+        try:
+            from otaman_cli.console import artifacts
+
+            return any(c.name == change_name for c in artifacts.list_authored_changes(self.program))
+        except Exception:  # noqa: BLE001 - unresolvable specs repo → not advanceable
+            return False
+
     def action_ratify(self) -> None:
-        # D1: ratify is offered only where the human is the next actor (a
-        # ratify-blocked row); otherwise the key is a clear no-op with a hint.
+        """The human's ADVANCE action (ratify-spec-approve-split 1.5).
+
+        The human is the blocker at two different lifecycle steps, and this key
+        serves whichever one the highlighted row is actually waiting on:
+        an AUTHORED change waits on the dispatch gate (advance to spec-approved),
+        a COMPLETE one waits ratify-blocked at the archive gate (ratify). It
+        previously handled only the second and answered the first with "not
+        ratify-blocked" — a dead end on a step the screen itself displays, which
+        is what the canon now forbids. Where neither applies the refusal NAMES
+        the command that does, so the key is never merely inert.
+        """
         row = self._highlighted()
         if row is None:
             return
+
+        # An authored change: the human's decision IS the dispatch-gate blocker.
+        if self._advanceable(row.name):
+            self._advance_to_spec_approved(row)
+            return
+
         if "human" not in row.next_actor or "ratify" not in row.next_actor:
-            self.app.notify(f"Ratify not applicable — {row.name} is not ratify-blocked.", timeout=5)
+            self.app.notify(
+                f"{row.name} is at stage {row.stage or 'unknown'} — nothing for the human to "
+                f"advance here. To approve an authored change: `otaman spec approve {row.name}`; "
+                f'to ratify a complete one: `otaman ratify {row.name} --reason "..."`.',
+                timeout=8,
+            )
             return
 
         def _after(reason: str | None) -> None:
@@ -1356,6 +1392,35 @@ class LifecycleScreen(Screen):
                 self._load()
 
         self.app.push_screen(ReasonModal("ratify"), _after)
+
+    def _advance_to_spec_approved(self, row) -> None:
+        """Advance an authored row to spec-approved (1.5), via the shared action.
+
+        Runs ``artifacts.advance_to_spec_approved`` — the same code the b-screen
+        and ``otaman spec approve`` use — so the transition validation, approver
+        hat and audit record are identical from every entry point. The review
+        note is optional here (unlike ratify's mandatory reason): this is the
+        normal approval path, not a bypass of one.
+        """
+
+        def _after(reason: str | None) -> None:
+            if reason is None:
+                return
+            from otaman_cli.console import artifacts
+            from otaman_cli.console.journal import run_decision_action
+
+            ok, _ = run_decision_action(
+                self.app,
+                action="spec-approve",
+                target=row.name,
+                fn=lambda: artifacts.advance_to_spec_approved(
+                    self.program, row.name, reason=reason
+                ),
+            )
+            if ok:
+                self._load()
+
+        self.app.push_screen(ReasonModal("spec-approve"), _after)
 
     def action_archive(self) -> None:
         # D1: archive is offered only on a complete-unarchived row whose archive

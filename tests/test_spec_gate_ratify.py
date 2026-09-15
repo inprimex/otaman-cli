@@ -154,7 +154,15 @@ def test_ratify_writes_marker(root, monkeypatch, _confirm_yes):
     import yaml
 
     data = yaml.safe_load((d / ".openspec.yaml").read_text())
-    assert data["stage"] == "approved" and data["ratified"] is True
+    assert data["ratified"] is True
+    # An AUTHORED change now ADVANCES to spec-approved rather than being written
+    # back to `approved` (ratify-spec-approve-split 1.4): ratification is a floor
+    # at `approved`, so on an authored change the old write moved nothing and
+    # left the change stuck behind the dispatch gate — the contradictory record
+    # `otaman spec reconcile` reports. This fixture has no human-roster, so the
+    # advance is taken in founder-mode with the ratifier as approver.
+    assert data["stage"] == "spec-approved"
+    assert data["spec_approved_by"] == "roman"
     assert "roman" in data["approved_by"] and data["ratified_at"]
 
 

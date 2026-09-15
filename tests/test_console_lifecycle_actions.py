@@ -78,9 +78,33 @@ def test_ratify_writes_marker_and_commits(program):
     ok, msg = L.ratify_change(program, "stuck", by="roman", reason="founder-mode unblock")
     assert ok and "committed" in msg
     data = yaml.safe_load((d / ".openspec.yaml").read_text())
-    assert data["stage"] == "approved" and data["ratified"] is True
+    assert data["ratified"] is True
+    # Ratification is a FLOOR at `approved`, never a demotion (core's monotonic
+    # apply_ratification, ratify-spec-approve-split 1.1): this fixture is already
+    # `dispatched`, so it stays there. Before that fix it was silently rewritten
+    # back to `approved` — the wrong-stage write the change exists to end.
+    assert data["stage"] == "dispatched"
     assert "roman" in data["approved_by"] and data["ratified_at"]
     assert "ratify stuck" in _git_log(program)
+
+
+def test_ratify_raises_a_below_floor_stage_to_approved(program):
+    """The other half of monotonic: at/below the floor, ratify sets `approved`."""
+    d = _change(program, "early", stage="proposed")
+    ok, _ = L.ratify_change(program, "early", by="roman", reason="unblock")
+    assert ok
+    data = yaml.safe_load((d / ".openspec.yaml").read_text())
+    assert data["stage"] == "approved" and data["ratified"] is True
+
+
+def test_ratify_never_demotes_a_spec_approved_change(program):
+    """The scenario from the spec: re-ratify a spec-approved change → still
+    spec-approved (it must not fall back behind the dispatch gate)."""
+    d = _change(program, "done-review", stage="spec-approved")
+    ok, _ = L.ratify_change(program, "done-review", by="roman", reason="again")
+    assert ok
+    data = yaml.safe_load((d / ".openspec.yaml").read_text())
+    assert data["stage"] == "spec-approved" and data["ratified"] is True
 
 
 def test_ratify_requires_identity_and_reason(program):
