@@ -16,7 +16,7 @@ from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI
 
-_ACTIONS = ("status", "gate", "approve")
+_ACTIONS = ("status", "gate", "approve", "reconcile")
 _GATES = ("dispatch", "archive", "merge")
 
 #: Valid keys for a per-action ``spec_policy.enforcement`` map (spec-gate-hardening
@@ -56,12 +56,13 @@ def resolve_action_enforcement(root: Path, action: str) -> str:
 
 def cmd_spec(args: list[str]) -> int:
     if not args or args[0] in ("-h", "--help"):
-        UI.error("Usage: otaman spec <status|gate|approve> [options]")
+        UI.error("Usage: otaman spec <status|gate|approve|reconcile> [options]")
         UI.muted("  status [--json]                       — the lifecycle surface (D3)")
         UI.muted("  gate <change> [--at dispatch|archive|merge] [--no-delta] [--json]")
         UI.muted(
             '  approve <change> [--reason "..."]     — mint spec-approved (human, approver hat)'
         )
+        UI.muted("  reconcile [--json]                    — contradictory ratified records")
         return 0 if args and args[0] in ("-h", "--help") else 1
     action, *rest = args
     if action not in _ACTIONS:
@@ -76,7 +77,100 @@ def cmd_spec(args: list[str]) -> int:
         return _cmd_gate(root, rest)
     if action == "approve":
         return _cmd_approve(root, rest)
+    if action == "reconcile":
+        return _cmd_reconcile(root, rest)
     return _cmd_status(root, rest)
+
+
+# ---------------------------------------------------------------------------
+# reconcile — find contradictory ratified records (ratify-spec-approve-split 1.6)
+
+
+def _cmd_reconcile(root: Path, rest: list[str]) -> int:
+    """`otaman spec reconcile [--json]` (ratify-spec-approve-split 1.6).
+
+    Finds changes carrying ``ratified: true`` while their stage is short of
+    ``spec-approved`` — a human attestation the dispatch gate cannot see — so
+    they can be corrected with ``otaman spec approve`` instead of a hand-edit.
+
+    Findings are split so nobody is nagged about closed work: an ACTIVE record
+    is actionable, an ARCHIVED one is history (it passed the archive gate, which
+    keys on ``approved_by``, not the stage). Records whose ``.openspec.yaml``
+    will not parse are called out separately rather than counted clean —
+    ``read_openspec`` returns ``{}`` for those, so a contradiction inside one
+    would otherwise be invisible.
+
+    Exit 1 only when something is actionable, so it is usable as a check.
+    """
+    from otaman_cli.spec_reconcile import ACTIONABLE, CLOSED, UNREADABLE, by_category, scan
+
+    findings = scan(_specs_changes_dir(root))
+    groups = by_category(findings)
+
+    if "--json" in rest:
+        import json
+
+        print(
+            json.dumps(
+                {
+                    "actionable": [
+                        {
+                            "change": f.change,
+                            "stage": f.stage,
+                            "ratified_by": f.ratified_by,
+                            "ratified_at": f.ratified_at,
+                            "fix": f.fix_command,
+                        }
+                        for f in groups[ACTIONABLE]
+                    ],
+                    "already_archived": [
+                        {"change": f.change, "stage": f.stage, "ratified_by": f.ratified_by}
+                        for f in groups[CLOSED]
+                    ],
+                    "unreadable": [
+                        {"change": f.change, "error": f.error} for f in groups[UNREADABLE]
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 1 if groups[ACTIONABLE] else 0
+
+    UI.header("Ratification reconciliation")
+    actionable = groups[ACTIONABLE]
+    if actionable:
+        UI.error(f"{len(actionable)} change(s) ratified but never advanced to spec-approved:")
+        for f in actionable:
+            UI.bullet(
+                f"{f.change}  (stage: {f.stage}"
+                + (f", by {f.ratified_by}" if f.ratified_by else "")
+                + ")"
+            )
+            UI.muted(f"    fix: {f.fix_command}")
+        UI.muted("")
+        UI.muted("These block dispatch. Run the fix as the ratifying human — never hand-edit")
+        UI.muted(".openspec.yaml; the verb applies the transition validation and audit record.")
+    else:
+        UI.ok("No dispatch-relevant contradictions — nothing to correct.")
+
+    if groups[UNREADABLE]:
+        UI.warn(f"{len(groups[UNREADABLE])} change(s) could NOT be assessed (unparseable):")
+        for f in groups[UNREADABLE]:
+            UI.bullet(f"{f.change} — {f.error}")
+        UI.muted("    A record that cannot be read cannot be verified clean; fix the YAML.")
+
+    closed = groups[CLOSED]
+    if closed:
+        UI.muted("")
+        UI.muted(
+            f"({len(closed)} archived change(s) carry the same contradiction — closed work, "
+            "no action: they passed the archive gate, which keys on approved_by.)"
+        )
+        for f in closed:
+            UI.muted(f"    {f.change} (stage: {f.stage})")
+
+    return 1 if actionable else 0
 
 
 # ---------------------------------------------------------------------------
@@ -612,7 +706,7 @@ register(
         handler=cmd_spec,
         help=(
             "Spec lifecycle: status (surface) + gate (dispatch/archive/merge check) "
-            "+ approve (mint spec-approved)"
+            "+ approve (mint spec-approved) + reconcile (contradictory records)"
         ),
     )
 )
