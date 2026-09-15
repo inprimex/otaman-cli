@@ -595,8 +595,14 @@ def _normalize_ce_platform_yaml_for_validation(config_path: Path) -> tuple[Path,
 
 def cmd_help() -> int:
     """Show help."""
+    # version-authority 1.3: the banner shows the deploy RELEASE when a marker
+    # exists, else a `cli <x>`-labelled component version — never a bare number
+    # that reads like a shipping version.
+    from otaman_cli.release_version import banner_version, resolve_release_version
+
+    _v = banner_version(resolve_release_version(VERSION))
     print(f"""
-{C.BOLD}{C.CYAN}Otaman{C.RESET} - Multi-Repo Agent Orchestration (v{VERSION})
+{C.BOLD}{C.CYAN}Otaman{C.RESET} - Multi-Repo Agent Orchestration ({_v})
 
 {C.BOLD}Setup & maintenance:{C.RESET}
   {C.GREEN}scan{C.RESET} [path] [--otaman-dir D]    Scan repos, create otaman folder with draft config
@@ -749,7 +755,13 @@ def main() -> int:
         return cmd_help()
 
     if args[0] in ("-v", "--version"):
-        print(f"otaman {VERSION}")
+        # version-authority 1.3 — the otaman-deploy RELEASE is the authoritative
+        # installed version; this package's version is a component detail. It
+        # used to print `otaman <cli package version>`, which a tenant would
+        # reasonably quote as their installed version — and could not verify.
+        from otaman_cli.release_version import format_version, resolve_release_version
+
+        print(format_version(resolve_release_version(VERSION)))
         return 0
 
     # interactive-human-console: `otaman -i` opens the TTY human console (a
