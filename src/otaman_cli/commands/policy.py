@@ -41,6 +41,8 @@ delegation / drift per repo) — lives in ``commands/doctor.py``.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI, C
@@ -865,6 +867,143 @@ def _cmd_validate() -> int:
     return 0
 
 
+def _changed_paths_from_git(base: str) -> tuple[list[str], str | None]:
+    """(paths, error) — files changed against *base* via the merge-base diff."""
+    import subprocess
+
+    try:
+        r = subprocess.run(
+            ["git", "diff", "--name-only", f"{base}...HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [], f"git diff failed: {exc}"
+    if r.returncode != 0:
+        detail = (r.stderr or "").strip().splitlines()
+        return [], f"git diff against {base!r} failed: {detail[0] if detail else 'unknown error'}"
+    return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()], None
+
+
+def _cmd_check_changelog(
+    *,
+    base: str | None,
+    paths_arg: list[str],
+    paths_from: str | None,
+    pr: str | None,
+    body: str | None,
+    body_file: str | None,
+    repo_arg: str | None,
+    as_json: bool,
+) -> int:
+    """`otaman policy check-changelog` (release-notes-fragments 1.2).
+
+    Blocks a shipped-code PR that carries no customer-facing changelog fragment.
+    The incident this closes: release notes drafted by summarizing commit/PR
+    history spliced raw internal error strings into public copy. Release-cut can
+    only assemble what the pile contains, so the discipline has to hold at merge
+    time — here — and this is the gate that makes it hold.
+
+    Inputs are explicit so CI and humans get identical answers: paths come from
+    ``--paths``/``--paths-from``/stdin or a git diff against ``--base``, and the
+    exemption marker is read from ``--pr-body``/``--pr-body-file``. The decision
+    itself lives in :mod:`otaman_cli.changelog_fragment` — pure and unit-tested,
+    not a regex hidden in a workflow.
+    """
+    from otaman_cli.changelog_fragment import evaluate, resolve_fragment_config
+
+    root, config = _load_context()
+    if root is None:
+        return 1
+
+    from otaman_core.policy import PolicyError, effective_policy
+
+    try:
+        eff, _violations = effective_policy(root, config, "git", repo=repo_arg, agent=None)
+    except PolicyError as exc:
+        return _bail(f"cannot resolve effective git policy: {exc}", code=2)
+    rules = eff.rules or {}
+
+    # Collect the changed paths.
+    paths: list[str] = list(paths_arg)
+    if paths_from:
+        import sys
+
+        try:
+            raw = sys.stdin.read() if paths_from == "-" else Path(paths_from).read_text("utf-8")
+        except OSError as exc:
+            return _bail(f"cannot read --paths-from {paths_from!r}: {exc}", code=2)
+        paths.extend(ln.strip() for ln in raw.splitlines() if ln.strip())
+    if not paths:
+        git_paths, err = _changed_paths_from_git(base or "origin/main")
+        if err:
+            return _bail(
+                f"{err}\n  Pass the changed files explicitly instead: "
+                "--paths <f> ... | --paths-from <file>|-",
+                code=2,
+            )
+        paths = git_paths
+
+    # Collect the exemption text.
+    text = body or ""
+    if body_file:
+        try:
+            text += "\n" + Path(body_file).read_text("utf-8")
+        except OSError as exc:
+            return _bail(f"cannot read --pr-body-file {body_file!r}: {exc}", code=2)
+
+    verdict = evaluate(paths, rules, pr=pr, exemption_text=text)
+    cfg = resolve_fragment_config(rules)
+
+    if as_json:
+        import json
+
+        print(
+            json.dumps(
+                {
+                    "ok": verdict.ok,
+                    "required": verdict.required,
+                    "reason": verdict.reason,
+                    "exempted": verdict.exempted,
+                    "shipped_files": verdict.shipped,
+                    "fragments": verdict.fragments,
+                    "expected_path": verdict.expected_path,
+                    "exemption_marker": cfg.exemption_marker,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0 if verdict.ok else _GUARD_REFUSED
+
+    if verdict.ok:
+        UI.ok(f"changelog fragment: OK — {verdict.reason}")
+        if verdict.fragments:
+            for f in verdict.fragments:
+                UI.muted(f"  {f}")
+        return 0
+
+    # Loud, and every line actionable: what is missing, where to put it, what it
+    # must contain, and the one-line escape hatch for a PR that genuinely has no
+    # customer-facing change.
+    UI.error(f"Refused — {verdict.reason}.")
+    UI.muted(f"  Expected a fragment at: {verdict.expected_path}")
+    UI.muted(f"  Categories: {', '.join(cfg.categories)}")
+    UI.muted("  Write it for a CUSTOMER: what changed and why it matters to them —")
+    UI.muted("  release notes are assembled from these fragments and nothing else,")
+    UI.muted("  so an unwritten fragment is a change your users never hear about.")
+    UI.muted(f"  Docs/CI-only PR? Add `{cfg.exemption_marker}` to the PR body.")
+    if verdict.shipped:
+        shown = verdict.shipped[:10]
+        UI.muted(f"  Shipped-code files in this PR ({len(verdict.shipped)}):")
+        for p in shown:
+            UI.muted(f"    {p}")
+        if len(verdict.shipped) > len(shown):
+            UI.muted(f"    … and {len(verdict.shipped) - len(shown)} more")
+    return _GUARD_REFUSED
+
+
 def cmd_policy(args: list[str]) -> int:
     """`otaman policy <list|show|validate> …`."""
     if not args or args[0] in ("-h", "--help"):
@@ -874,6 +1013,9 @@ def cmd_policy(args: list[str]) -> int:
         UI.muted("       otaman policy apply [--dry-run] [--apply-live]")
         UI.muted("       otaman policy check-merge <base-branch> [--repo NAME]")
         UI.muted("       otaman policy annotate <base-branch> [--repo NAME]")
+        UI.muted("       otaman policy check-changelog [--base REF] [--paths F...]")
+        UI.muted("                   [--paths-from FILE|-] [--pr N] [--pr-body TEXT]")
+        UI.muted("                   [--pr-body-file F] [--repo NAME] [--json]")
         UI.muted("       otaman policy validate")
         return 0 if args else 1
 
@@ -901,6 +1043,50 @@ def cmd_policy(args: list[str]) -> int:
         if action == "check-merge":
             return _cmd_check_merge(branch, repo_arg)
         return _cmd_annotate(branch, repo_arg)
+    if action == "check-changelog":
+        base = pr = body = body_file = paths_from = repo_arg = None
+        paths: list[str] = []
+        as_json = False
+        i = 0
+        _VALUED = {
+            "--base": "base",
+            "--pr": "pr",
+            "--pr-body": "body",
+            "--pr-body-file": "body_file",
+            "--paths-from": "paths_from",
+            "--repo": "repo_arg",
+        }
+        slots: dict[str, str | None] = {}
+        while i < len(rest):
+            a = rest[i]
+            if a in _VALUED:
+                if i + 1 >= len(rest):
+                    return _bail(f"{a} needs a value", code=2)
+                slots[_VALUED[a]] = rest[i + 1]
+                i += 2
+            elif a == "--json":
+                as_json = True
+                i += 1
+            elif a == "--paths":
+                i += 1
+                while i < len(rest) and not rest[i].startswith("-"):
+                    paths.append(rest[i])
+                    i += 1
+            else:
+                return _bail(f"Unexpected argument: {a}", code=2)
+        base, pr = slots.get("base"), slots.get("pr")
+        body, body_file = slots.get("body"), slots.get("body_file")
+        paths_from, repo_arg = slots.get("paths_from"), slots.get("repo_arg")
+        return _cmd_check_changelog(
+            base=base,
+            paths_arg=paths,
+            paths_from=paths_from,
+            pr=pr,
+            body=body,
+            body_file=body_file,
+            repo_arg=repo_arg,
+            as_json=as_json,
+        )
     if action == "validate":
         return _cmd_validate()
     if action == "show":
