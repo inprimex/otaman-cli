@@ -16,7 +16,7 @@ from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI
 
-_ACTIONS = ("status", "gate")
+_ACTIONS = ("status", "gate", "approve")
 _GATES = ("dispatch", "archive", "merge")
 
 #: Valid keys for a per-action ``spec_policy.enforcement`` map (spec-gate-hardening
@@ -56,9 +56,12 @@ def resolve_action_enforcement(root: Path, action: str) -> str:
 
 def cmd_spec(args: list[str]) -> int:
     if not args or args[0] in ("-h", "--help"):
-        UI.error("Usage: otaman spec <status|gate> [options]")
+        UI.error("Usage: otaman spec <status|gate|approve> [options]")
         UI.muted("  status [--json]                       — the lifecycle surface (D3)")
         UI.muted("  gate <change> [--at dispatch|archive|merge] [--no-delta] [--json]")
+        UI.muted(
+            '  approve <change> [--reason "..."]     — mint spec-approved (human, approver hat)'
+        )
         return 0 if args and args[0] in ("-h", "--help") else 1
     action, *rest = args
     if action not in _ACTIONS:
@@ -71,7 +74,97 @@ def cmd_spec(args: list[str]) -> int:
         return 1
     if action == "gate":
         return _cmd_gate(root, rest)
+    if action == "approve":
+        return _cmd_approve(root, rest)
     return _cmd_status(root, rest)
+
+
+# ---------------------------------------------------------------------------
+# approve — mint spec-approved from the CLI (ratify-spec-approve-split 1.3)
+
+
+def agent_actor_refusal(root: Path) -> str | None:
+    """A refusal when an AGENT session is trying to mint a human approval.
+
+    `spec-approved` is a human attestation, so an agent may never mint it. The
+    "is an agent acting?" question goes through the ONE identity resolver
+    (identity-divergence D1) rather than trusting a raw ``OTAMAN_AGENT`` — a
+    leaked/stale env value is cross-checked against the cwd-resolved owner.
+    Returns None when a human identity is present (its ELIGIBILITY is then the
+    approver-hat check's business, not this guard's).
+    """
+    import os
+
+    if os.environ.get("OTAMAN_HUMAN", "").strip():
+        return None
+    from otaman_cli.identity import resolve_agent_identity
+
+    actor = resolve_agent_identity(root)
+    if actor and actor != "human":
+        return (
+            f"agents cannot mint spec-approved (acting as {actor!r}) — it is a human "
+            "attestation. Ask your human to run `otaman spec approve <change>`, or "
+            "have them approve it in `otaman -i`."
+        )
+    return (
+        "no verified human identity (OTAMAN_HUMAN unset) — minting spec-approved "
+        "requires a roster human holding the cto or approver hat."
+    )
+
+
+def _cmd_approve(root: Path, rest: list[str]) -> int:
+    """`otaman spec approve <change> [--reason "..."]` (ratify-spec-approve-split 1.3).
+
+    Closes the interface gap that hard-blocked the pmeets tenant: `spec-approved`
+    was mintable ONLY from the console b-screen, so a program whose human works
+    from a terminal had no path to it at all — under ``enforcement=block`` that
+    is a dead stop, "fixed" by hand-editing `.openspec.yaml`.
+
+    The rules are NOT reimplemented here. This delegates to the console's own
+    :func:`~otaman_cli.console.artifacts.advance_to_spec_approved`, so the
+    transition validation, approver-hat resolution (D5/Q8), commit-as-audit and
+    bus broadcast are literally the same code the b-screen runs — the two
+    interfaces cannot drift, which is the whole point of a lifecycle stage not
+    being reachable through only one of them. The one thing added is the
+    human-only guard the console gets for free by being a human seat.
+    """
+    if not rest or rest[0] in ("-h", "--help"):
+        UI.error('Usage: otaman spec approve <change> [--reason "<review note>"]')
+        UI.muted("  Mints spec-approved (authored → spec-approved); human-only, approver hat.")
+        return 0 if rest and rest[0] in ("-h", "--help") else 1
+
+    pos = [a for a in rest if not a.startswith("--")]
+    reason = ""
+    if "--reason" in rest:
+        i = rest.index("--reason")
+        if i + 1 < len(rest):
+            reason = rest[i + 1]
+    if not pos:
+        UI.error("spec approve requires a change name")
+        return 1
+    name = pos[0]
+
+    refusal = agent_actor_refusal(root)
+    if refusal:
+        UI.error(refusal)
+        return 2
+
+    if _change_dir(root, name) is None:
+        UI.error(f"No change named {name!r} under the specs repo")
+        return 1
+
+    from otaman_cli.console.artifacts import advance_to_spec_approved
+    from otaman_cli.console.bus import Program
+
+    ok, message = advance_to_spec_approved(Program(name=root.name, root=root), name, reason=reason)
+    if not ok:
+        UI.error(message)
+        return 1
+    UI.ok(message)
+    if reason:
+        UI.kv("reason", reason)
+    UI.muted("Dispatch unblocks off this stage — `otaman spec gate " + name + "` to confirm.")
+    return 0
 
 
 def _specs_changes_dir(root: Path) -> Path | None:
@@ -517,7 +610,10 @@ register(
     CommandSpec(
         name="spec",
         handler=cmd_spec,
-        help="Spec lifecycle: status (surface) + gate (local dispatch/archive/merge check)",
+        help=(
+            "Spec lifecycle: status (surface) + gate (dispatch/archive/merge check) "
+            "+ approve (mint spec-approved)"
+        ),
     )
 )
 register(
