@@ -206,6 +206,68 @@ def agent_actor_refusal(root: Path) -> str | None:
     )
 
 
+def _eligible_spec_approver(root: Path):
+    """The resolved roster human iff they may mint ``spec-approved``, else None.
+
+    Delegates to the console's ``_eligible_approver`` so the hat resolution
+    (cto or approver, with the default-approver stand-in — D5/Q8) is ONE
+    implementation shared by the b-screen, ``otaman spec approve`` and the
+    ratify advance. A second copy of this check is exactly how the interfaces
+    would drift apart again.
+    """
+    try:
+        from otaman_cli.console.artifacts import _eligible_approver
+        from otaman_cli.console.bus import Program
+
+        return _eligible_approver(Program(name=root.name, root=root))
+    except Exception:  # noqa: BLE001 - unresolvable roster → not eligible
+        return None
+
+
+def _has_human_roster(root: Path) -> bool:
+    """Whether the program configures a ``human-roster`` at all."""
+    try:
+        from otaman_core.human_roster import load_human_roster
+
+        return bool(load_human_roster(root / "platform.yaml"))
+    except Exception:  # noqa: BLE001 - absent/invalid roster → none configured
+        return False
+
+
+def _ratify_advance_approver(root: Path, by: str):
+    """(approver, refusal) for advancing an AUTHORED change during ratify (1.4).
+
+    Three cases, and the third is the one that matters:
+
+    * a roster exists and the ratifier holds the cto/approver hat → advance.
+    * a roster exists and they do NOT → refuse, pointing at the verb that does.
+    * NO roster is configured → advance in founder-mode, recording the ratifier
+      as the approver.
+
+    That last case is deliberate. ``resolve_spec_approver`` has no stand-in for
+    an absent roster, so refusing here would leave a rosterless program with NO
+    path to ``spec-approved`` — ``otaman spec approve`` needs the same hat — which
+    is exactly the dead end this change exists to remove, just relocated to a
+    different class of program. It also matches how every other registry check
+    here behaves (no registry → no gate) and the cli-ux requirement that a
+    program must be able to complete its lifecycle. The path is not unguarded:
+    ratify already demands ``OTAMAN_HUMAN``, a mandatory reason, and a TTY
+    HUMAN-DECISION confirm.
+    """
+    if not _has_human_roster(root):
+        from otaman_core.human_roster import HumanRosterEntry
+
+        return HumanRosterEntry(name=by, roles=["approver"]), None
+
+    approver = _eligible_spec_approver(root)
+    if approver is not None:
+        return approver, None
+    return None, (
+        "ratifying it cannot produce a correct stage unless you also hold the "
+        "spec-approver hat (cto or approver)."
+    )
+
+
 def _cmd_approve(root: Path, rest: list[str]) -> int:
     """`otaman spec approve <change> [--reason "..."]` (ratify-spec-approve-split 1.3).
 
@@ -646,17 +708,42 @@ def cmd_ratify(args: list[str]) -> int:
     from otaman_core.spec_lifecycle import (
         SpecLifecycleError,
         apply_ratification,
+        apply_spec_approved,
         ratify,
         read_openspec,
     )
 
     from otaman_cli import safety
 
+    # ratify-spec-approve-split 1.4 — decide the CORRECT outcome before asking a
+    # human to confirm anything, so a doomed ratify refuses instead of prompting.
+    #
+    # Ratification is a floor at `approved` (core 1.1, monotonic). On an AUTHORED
+    # change that floor is already behind the current stage, so a plain ratify
+    # would record an attestation and move nothing — leaving the change short of
+    # spec-approved and still blocked at the dispatch gate. The canon's answer:
+    # advance it to spec-approved when the ratifier passes the SAME approver
+    # check that mints that stage, and otherwise refuse loudly pointing at the
+    # verb that does. Never a silent wrong-stage write.
+    pre = read_openspec(d / ".openspec.yaml")
+    advance_to_spec_approved = pre.get("stage") == "authored"
+    approver = None
+    if advance_to_spec_approved:
+        approver, refusal = _ratify_advance_approver(root, by)
+        if refusal:
+            UI.error(f"{name} is at stage 'authored': {refusal}")
+            UI.muted("  Ratified-but-authored is the contradictory record `otaman spec")
+            UI.muted("  reconcile` reports — so this refuses rather than writing one.")
+            UI.muted(f"  Fix: have a cto/approver run `otaman spec approve {name}`,")
+            UI.muted("  then ratify if a ratification is still wanted.")
+            return 2
+
     # HUMAN-DECISION: ratification bypasses the normal HITL approval, so it must
     # be a genuine human at a TTY — no agent-session bypass (D4).
-    if not safety.confirm_human_decision(
-        f"Ratify change '{name}' as {by} (bypasses spec-approved HITL): {reason}"
-    ):
+    intent = f"Ratify change '{name}' as {by}"
+    if advance_to_spec_approved:
+        intent += " AND advance it to spec-approved (unblocks the dispatch gate)"
+    if not safety.confirm_human_decision(f"{intent} (bypasses spec-approved HITL): {reason}"):
         UI.error("Ratification aborted — not confirmed by a human.")
         return 2
 
@@ -672,9 +759,25 @@ def cmd_ratify(args: list[str]) -> int:
     data = read_openspec(d / ".openspec.yaml")
     updated = apply_ratification(data, record)
     updated["ratified_at"] = at  # the month-count marker doctor/status read
+    if advance_to_spec_approved and approver is not None:
+        # Compose: the ratification markers, then the approver-gated advance.
+        updated = apply_spec_approved(updated, approver)
     _write_openspec(d / ".openspec.yaml", updated)
 
-    UI.ok(f"Ratified {name!r} → stage=approved (ratified)")
+    # Report the stage that was actually written. `apply_ratification` is a FLOOR,
+    # not an assignment, so a change already past `approved` keeps its stage — the
+    # old fixed "→ stage=approved" line became untrue the moment ratify went
+    # monotonic, and a wrong-stage REPORT is the same class of lie as a
+    # wrong-stage write.
+    final_stage = updated.get("stage") or "unknown"
+    UI.ok(f"Ratified {name!r} → stage={final_stage} (ratified)")
+    if advance_to_spec_approved and approver is not None:
+        UI.ok(f"Advanced the DISPATCH gate: authored → spec-approved (by {approver.name})")
+        if not _has_human_roster(root):
+            UI.muted(
+                "  (founder-mode: no human-roster configured, so the ratifying human "
+                "stood in as approver — add a roster to require the cto/approver hat)"
+            )
     UI.kv("by", by)
     UI.kv("reason", reason)
     UI.kv("at", at)
