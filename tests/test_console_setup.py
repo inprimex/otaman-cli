@@ -44,6 +44,61 @@ def test_setup_menu_shells_out_to_real_verbs():
     assert ("connection", "map") in argvs  # the values-free credentials map
 
 
+def test_connection_health_check_passes_a_target():
+    """`connection check` REQUIRES `<name>` or `--all`; without one it is a usage
+    error, so the panel showed that instead of health on every run (deploy-agent,
+    2026-09-15). The menu has no target to offer, so it checks them all."""
+    argvs = [v.argv for v in setup.SETUP_VERBS]
+    assert ("connection", "check", "--all") in argvs
+    assert ("connection", "check") not in argvs
+
+
+def test_every_setup_verb_is_actually_invocable(tmp_path, monkeypatch):
+    """GUARD for the bug CLASS, not just the one entry.
+
+    The prior test asserted verbs were PRESENT, never that they were RUNNABLE —
+    which is exactly how an argument-less `connection check` shipped and failed
+    100% of the time in a tenant's console. Every menu entry is dispatched here
+    through the real command registry inside a minimal program, so each command
+    reaches its own argument parsing. A malformed argv announces itself with a
+    `Usage:` refusal, which is what this asserts against; a legitimate runtime
+    failure (nothing configured) prints something else and is fine.
+
+    NOTE this test was itself verified by reintroducing the bug — an earlier
+    version passed with the defect present (it called `main()`, which reads
+    sys.argv and raised TypeError into a broad `except`, making it vacuous). A
+    guard that does not fail on the bug it guards is worse than none.
+    """
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+
+    from otaman_cli.commands import dispatch
+
+    root = tmp_path / "meta"
+    (root / ".agents").mkdir(parents=True)
+    root.joinpath("platform.yaml").write_text(
+        "project: demo\nversion: '1.0'\nrepos: []\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(root)
+    monkeypatch.setenv("OTAMAN_ROOT", str(root))
+    monkeypatch.setenv("MAESTRO_ROOT", str(root))
+
+    for verb in setup.SETUP_VERBS:
+        name, *rest = verb.argv
+        buf, err = io.StringIO(), io.StringIO()
+        try:
+            with redirect_stdout(buf), redirect_stderr(err):
+                dispatch(name, list(rest))
+        except SystemExit:
+            pass
+        out = buf.getvalue() + err.getvalue()
+        assert "Usage:" not in out, (
+            f"Setup menu entry {verb.label!r} runs `otaman {' '.join(verb.argv)}`, "
+            f"which the CLI answers with a usage error — the panel would show that "
+            f"instead of output:\n{out.strip()[:300]}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # run_verb — the shell-out round-trip
 

@@ -34,7 +34,11 @@ SETUP_VERBS: tuple[SetupVerb, ...] = (
     SetupVerb("Repos — re-scan (dry-run)", ("sync-repos", "--dry-run")),
     SetupVerb("Team — roster", ("human", "list")),
     SetupVerb("Connections — list", ("connection", "list")),
-    SetupVerb("Connections — health check", ("connection", "check")),
+    # `--all` is REQUIRED: `connection check` alone is a usage error (it wants
+    # `<name>` or `--all`), so the panel showed that error instead of health on
+    # every run (deploy-agent, 2026-09-15). The menu has no target to offer, so
+    # checking them all is the meaningful read-first action.
+    SetupVerb("Connections — health check", ("connection", "check", "--all")),
     SetupVerb("Credentials map (values-free)", ("connection", "map")),
 )
 
