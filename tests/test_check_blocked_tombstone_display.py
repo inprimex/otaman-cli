@@ -90,6 +90,17 @@ def test_all_tombstoned_entries_produce_no_blocked_section(project: Path) -> Non
 
 
 def test_active_entry_still_shown_alongside_tombstoned(project: Path) -> None:
+    """The invariant this test exists for: a tombstoned entry must not hide a
+    live one, and must not resurface itself.
+
+    The live entry's RENDERING changed with blocked-entry-lifecycle 1.4 — this
+    fixture's bus holds no message for its `**Proposal**:` stem, so the ref
+    resolves to nothing and it now renders `[stale]` with the reason instead of
+    "waiting for human approval". Still shown, still by title; the entry is
+    reported, never auto-removed. The companion test below pins the
+    approval-wording path for a ref that DOES resolve, so neither rendering is
+    lost.
+    """
     (project / ".agents" / "blocked" / "cli-agent.md").write_text(
         MIXED,
         encoding="utf-8",
@@ -97,7 +108,24 @@ def test_active_entry_still_shown_alongside_tombstoned(project: Path) -> None:
     out = _run_check(project)
     assert "BLOCKED TASKS" in out
     assert "Still-active-change" in out
-    assert "waiting for human approval" in out
+    assert "[stale]" in out
     # Tombstoned entries must not resurface
     assert "Destructive-command safety framework" not in out
     assert "Git-flow / branch-environment configuration" not in out
+
+
+def test_resolvable_entry_renders_the_approval_wording(project: Path) -> None:
+    """The other half of 1.4: when the proposal IS on the bus, the entry is live
+    and keeps its "waiting for human approval" rendering."""
+    stem = "20260705T000000-cli-agent-to-human-spec-change-request"
+    (project / ".agents" / "bus" / "active" / f"{stem}.md").write_text(
+        f"---\nid: {stem}\nfrom: cli-agent\nto: human\ntype: spec-change-request\n"
+        "---\n\n## Subject: a proposal\n",
+        encoding="utf-8",
+    )
+    (project / ".agents" / "blocked" / "cli-agent.md").write_text(MIXED, encoding="utf-8")
+    out = _run_check(project)
+    assert "Still-active-change" in out
+    assert "waiting for human approval" in out
+    assert "[stale]" not in out
+    assert "1 live" in out

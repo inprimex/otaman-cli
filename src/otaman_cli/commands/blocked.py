@@ -41,6 +41,7 @@ def cmd_blocked(args: list[str]) -> int:
         UI.muted("Usage: otaman blocked --list")
         UI.muted("       otaman blocked --clear <slug>")
         UI.muted("       otaman blocked clear <stem>")
+        UI.muted("       otaman blocked migrate [--apply]   (one-time sweep, dry-run default)")
         UI.muted("       otaman blocked <slug> [--blocked-by NAME]")
         return 0
 
@@ -74,6 +75,10 @@ def cmd_blocked(args: list[str]) -> int:
     # reason `manually-cleared`.  Idempotent (no-match exits 0).
     if len(positional) >= 2 and positional[0] == "clear":
         return _cmd_blocked_clear_by_stem(root, positional[1])
+
+    # blocked-entry-lifecycle 1.5 — one-time migration sweep (dry-run default).
+    if positional and positional[0] == "migrate":
+        return _cmd_blocked_migrate(root, apply="--apply" in args)
 
     agent = resolve_agent_identity(root) or "unknown-agent"
     blocked_file = root / ".agents" / "blocked" / f"{agent}.md"
@@ -148,6 +153,7 @@ def cmd_blocked(args: list[str]) -> int:
     UI.muted("  otaman blocked --list")
     UI.muted("  otaman blocked --clear <slug>          (title, substring, or Proposal stem)")
     UI.muted("  otaman blocked clear <proposal-stem>   (tombstones across ALL agents)")
+    UI.muted("  otaman blocked migrate [--apply]       (one-time sweep; dry run by default)")
     UI.muted("  otaman blocked <slug> [--blocked-by NAME]")
     return 1
 
@@ -221,6 +227,172 @@ def _cmd_blocked_clear(blocked_file: Path, clear_slug: str) -> int:
     blocked_file.write_text(new_text + "\n" if new_text else "", encoding="utf-8")
     UI.ok(f"Cleared blocked task: {matched_title} (matched '{clear_slug}')")
     return 0
+
+
+def _cmd_blocked_migrate(root: Path, *, apply: bool) -> int:
+    """`otaman blocked migrate [--apply]` — the one-time sweep (1.5).
+
+    Three rules, in order, and the first is the one the re-scope added:
+
+    1. **A TOMBSTONED entry is already terminated.** Plugin wraps cleared entries
+       in an HTML comment rather than deleting them, so a migration that didn't
+       recognise the format would "migrate" work that is already done — putting
+       closed entries back into the live set.
+    2. **A live entry whose change is ARCHIVED is swept** (the backstop
+       terminator): the work finished, nothing cleared the entry.
+    3. **Everything else is REPORTED for human triage, never bulk-deleted.** A
+       list that deletes what it cannot explain is how a genuinely-blocked item
+       disappears silently — the same class of failure as never clearing at all,
+       just in the other direction.
+
+    Dry-run by default; ``--apply`` writes. A one-time destructive-ish sweep over
+    every agent's file should have to be asked for twice.
+    """
+    from datetime import datetime, timezone
+
+    from otaman_cli.blocked_entries import parse_entries, tombstone
+
+    blocked_dir = root / ".agents" / "blocked"
+    if not blocked_dir.is_dir():
+        UI.muted("No .agents/blocked/ directory — nothing to migrate.")
+        return 0
+
+    archived = _archived_change_refs(root)
+    decided = _decided_proposal_stems(root)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    swept: list[tuple[str, str, str]] = []
+    triage: list[tuple[str, str]] = []
+    already_done = 0
+
+    for path in sorted(blocked_dir.glob("*.md")):
+        agent_name = path.stem
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        all_entries = parse_entries(text, include_tombstoned=True)
+        already_done += sum(1 for e in all_entries if e.tombstoned)
+
+        live = [e for e in all_entries if not e.tombstoned]
+        # Two kinds of evidence that a live entry is actually finished:
+        #   * its referenced CHANGE is archived (the backstop terminator), or
+        #   * its PROPOSAL was approved/rejected — the same evidence 1.2's
+        #     terminator uses, applied retroactively, which is exactly what a
+        #     one-time migration is for. Without this second source the entire
+        #     historical pile (all approval waits) is punted to triage wholesale
+        #     and the migration cleans nothing.
+        reasons: dict[str, str] = {}
+        sweepable = []
+        for e in live:
+            if not e.ref:
+                continue
+            if e.ref in archived:
+                reasons[e.ref] = "referenced change archived"
+            elif e.ref in decided:
+                reasons[e.ref] = "proposal approved/rejected"
+            else:
+                continue
+            sweepable.append(e)
+        for e in live:
+            if e not in sweepable:
+                triage.append((agent_name, e.title))
+        if not sweepable:
+            continue
+        swept.extend((agent_name, e.title, reasons[e.ref]) for e in sweepable)
+        if apply:
+            updated = text
+            for entry in sweepable:
+                updated = tombstone(updated, [entry], reason=reasons[entry.ref], today=today)
+            try:
+                path.write_text(updated, encoding="utf-8")
+            except OSError as exc:
+                UI.warn(f"could not write {path}: {exc}")
+
+    UI.header("Blocked-entry migration" + ("" if apply else " (dry run)"))
+    UI.kv("already terminated (tombstoned)", str(already_done))
+    if swept:
+        UI.ok(f"{'Swept' if apply else 'Would sweep'}: {len(swept)} entry(ies) — already finished")
+        for agent_name, title, why in swept:
+            UI.muted(f"  {agent_name}: {title}")
+            UI.muted(f"    reason: {why}")
+    if triage:
+        UI.warn(f"For human triage: {len(triage)} entry(ies) — NOT removed")
+        for agent_name, title in triage:
+            UI.muted(f"  {agent_name}: {title}")
+        UI.muted("  These could not be explained automatically. Clear a confirmed-done one")
+        UI.muted("  with `otaman blocked clear <proposal-stem>`; leave genuine blocks alone.")
+    if not swept and not triage:
+        UI.ok("Nothing to migrate — every live entry is accounted for.")
+    if swept and not apply:
+        UI.muted("")
+        UI.muted("Dry run — re-run with `--apply` to write the sweeps.")
+    return 0
+
+
+#: Proposal stems look like `20260913T144246-cli-agent-to-human-spec-change-request`.
+_PROPOSAL_STEM_RE = re.compile(r"\d{8}T\d{6}-[a-z0-9-]+-to-[a-z0-9-]+-[a-z0-9-]+")
+
+
+def _decided_proposal_stems(root: Path) -> set[str]:
+    """Proposal stems that already received an approval or rejection (1.5).
+
+    This is the evidence 1.2's terminator will act on, applied retroactively —
+    the reason a one-time migration exists at all. Scans the bus (active AND
+    archive) for `spec-change-approved` / `spec-change-rejected` messages and
+    pulls the proposal stems out of their bodies, using the same stem shape
+    plugin's matcher uses.
+
+    Best-effort: an unreadable bus yields an empty set, which sweeps nothing and
+    sends everything to triage — the safe direction, since triage never deletes.
+    """
+    stems: set[str] = set()
+    try:
+        from otaman_cli.main import _resolve_bus_paths
+
+        active_dir, _ = _resolve_bus_paths(root)
+        bus_dir = active_dir.parent if active_dir.name == "active" else active_dir
+    except Exception:  # noqa: BLE001 - unresolvable bus → nothing sweepable
+        return stems
+    try:
+        paths = list(bus_dir.rglob("*.md"))
+    except OSError:
+        return stems
+    for path in paths:
+        name = path.name
+        if "spec-change-approved" not in name and "spec-change-rejected" not in name:
+            continue
+        try:
+            body = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        stems.update(_PROPOSAL_STEM_RE.findall(body))
+    return stems
+
+
+def _archived_change_refs(root: Path) -> set[str]:
+    """Slugs of ARCHIVED changes — the backstop terminator's evidence (1.5)."""
+    refs: set[str] = set()
+    try:
+        from otaman_cli.commands.spec import _specs_changes_dir
+
+        changes_dir = _specs_changes_dir(root)
+        if changes_dir is None:
+            return refs
+        archive = changes_dir / "archive"
+        if not archive.is_dir():
+            return refs
+        for d in archive.iterdir():
+            if not d.is_dir():
+                continue
+            refs.add(d.name)
+            # archived dirs are date-prefixed (2026-09-09-<slug>); an entry
+            # names the bare slug.
+            parts = d.name.split("-", 3)
+            if len(parts) == 4:
+                refs.add(parts[3])
+    except Exception:  # noqa: BLE001 - specs stack unavailable → nothing sweepable
+        return refs
+    return refs
 
 
 def _cmd_blocked_clear_by_stem(root: Path, stem: str) -> int:

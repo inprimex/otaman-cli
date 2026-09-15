@@ -307,68 +307,59 @@ def cmd_check(args: list[str]) -> int:
         for subject, stem in awaiting:
             UI.bullet(f"{subject}  ({stem})")
 
-    # Show blocked tasks
+    # Show blocked tasks (blocked-entry-lifecycle 1.4)
     blocked_file = root / ".agents" / "blocked" / f"{agent}.md"
     if blocked_file.exists():
-        blocked_content = blocked_file.read_text(encoding="utf-8").strip()
-        # Tombstoned entries (`otaman blocked --clear` / `blocked clear <stem>`)
-        # are wrapped in `<!-- ... cleared YYYY-MM-DD — manually-cleared -->`
-        # rather than deleted outright. Strip them before parsing, otherwise
-        # the split below fails to find a bare "\n## Blocked: " boundary
-        # (the tombstoned line reads "<!-- ## Blocked: ...", not "## Blocked:
-        # ..."), so the whole file — including already-cleared entries — is
-        # treated as one active block and nagged forever.
-        blocked_content = re.sub(
-            r"<!--.*?-->",
-            "",
-            blocked_content,
-            flags=re.DOTALL,
-        ).strip()
-        if blocked_content:
-            print()
-            UI.blocked("BLOCKED TASKS:")
-            # Parse blocked entries and check if any are now unblocked
-            for block in blocked_content.split("\n## Blocked: "):
-                block = block.strip()
-                if not block:
-                    continue
-                lines = block.splitlines()
-                task_title = lines[0] if lines else "?"
-                # Find the proposal stem
-                proposal_stem = ""
-                for line in lines:
-                    if line.strip().startswith("- **Proposal**:"):
-                        proposal_stem = line.split(":", 1)[1].strip()
-                        break
+        from otaman_cli.blocked_entries import parse_entries, stale_reason
 
-                # Check if approval + spec-change arrived
+        # Parsing (and tombstone recognition) via the ONE parser — this used to
+        # be a bespoke `<!--.*?-->` strip plus a `\n## Blocked: ` split, one of
+        # the five divergent implementations that let the surface drift.
+        entries = parse_entries(blocked_file.read_text(encoding="utf-8"))
+        if entries:
+            known = _known_refs(root)
+            marked = [(e, stale_reason(e, known_refs=known)) for e in entries]
+            live = [e for e, reason in marked if not reason]
+            stale = [(e, reason) for e, reason in marked if reason]
+
+            print()
+            # The banner distinguishes live from stale: a list that is mostly
+            # stale trains agents to ignore the one surface meant to tell them
+            # they are genuinely blocked, so the count has to say which is which.
+            headline = f"BLOCKED TASKS: {len(live)} live"
+            if stale:
+                headline += f", {len(stale)} stale"
+            UI.blocked(headline)
+
+            for entry in live:
+                stem = entry.proposal
                 has_approval = any(
-                    m["type"] == "spec-change-approved"
-                    and proposal_stem
-                    and proposal_stem in m.get("subject", "")
+                    m["type"] == "spec-change-approved" and stem and stem in m.get("subject", "")
                     for m in messages
                 )
                 has_spec_change = any(m["type"] == "spec-change" for m in messages)
-
+                has_rejection = any(
+                    m["type"] == "spec-change-rejected" and stem and stem in m.get("subject", "")
+                    for m in messages
+                )
                 if has_approval and has_spec_change:
-                    UI.ok(f"READY TO RESUME: {task_title}")
+                    UI.ok(f"READY TO RESUME: {entry.title}")
                     UI.ok("Specs updated — read them and continue implementation")
                 elif has_approval:
-                    UI.bullet(f"{task_title} — approved, waiting for spec commit...")
+                    UI.bullet(f"{entry.title} — approved, waiting for spec commit...")
+                elif has_rejection:
+                    UI.error(f"REJECTED: {entry.title} — read rejection reason and adapt")
                 else:
-                    # Check for rejection
-                    has_rejection = any(
-                        m["type"] == "spec-change-rejected"
-                        and proposal_stem
-                        and proposal_stem in m.get("subject", "")
-                        for m in messages
-                    )
-                    if has_rejection:
-                        UI.error(f"REJECTED: {task_title} — read rejection reason and adapt")
-                    else:
-                        UI.bullet(f"{task_title} — waiting for human approval")
-                if proposal_stem:
-                    UI.muted(f"Proposal: {proposal_stem}")
+                    UI.bullet(f"{entry.title} — waiting for human approval")
+                if stem:
+                    UI.muted(f"Proposal: {stem}")
+
+            for entry, reason in stale:
+                UI.bullet(f"[stale] {entry.title}")
+                UI.muted(f"  {reason}")
+            if stale:
+                UI.muted("  Stale entries are reported, never auto-removed — clear with")
+                UI.muted("  `otaman blocked clear <stem>` once you've confirmed they're done.")
 
     UI.kv(
         "Summary",
@@ -383,6 +374,50 @@ def cmd_check(args: list[str]) -> int:
     _check_render_fleet(root)
 
     return 0
+
+
+def _known_refs(root: Path) -> set[str]:
+    """Every ref a blocked entry could legitimately point at (1.4).
+
+    Two sources, both searched including their archives so a completed item is
+    "resolved", not "vanished":
+      * bus message stems — what an approval wait's ``**Proposal**:`` names;
+      * change directory names — what a dependency wait's ``**Change**:`` names.
+
+    Best-effort by design: a source that cannot be read contributes nothing, and
+    an entry is only called stale when NOTHING can account for it. Under-reading
+    here would mislabel live blocks as stale, which is the more damaging error —
+    so every failure degrades toward "live".
+    """
+    refs: set[str] = set()
+    try:
+        active_dir, _ = _resolve_bus_paths(root)
+        bus_dir = active_dir.parent if active_dir.name == "active" else active_dir
+        for path in bus_dir.rglob("*.md"):
+            refs.add(path.stem)
+    except Exception:  # noqa: BLE001 - unreadable bus → contributes nothing
+        pass
+    try:
+        from otaman_cli.commands.spec import _specs_changes_dir
+
+        changes_dir = _specs_changes_dir(root)
+        if changes_dir is not None:
+            for d in changes_dir.iterdir():
+                if d.is_dir() and d.name != "archive":
+                    refs.add(d.name)
+            archive = changes_dir / "archive"
+            if archive.is_dir():
+                for d in archive.iterdir():
+                    if d.is_dir():
+                        refs.add(d.name)
+                        # archived dirs are date-prefixed (2026-09-09-<slug>);
+                        # a dependency wait names the bare slug.
+                        parts = d.name.split("-", 3)
+                        if len(parts) == 4:
+                            refs.add(parts[3])
+    except Exception:  # noqa: BLE001 - specs stack unavailable → contributes nothing
+        pass
+    return refs
 
 
 def _check_render_fleet(root: Path) -> None:

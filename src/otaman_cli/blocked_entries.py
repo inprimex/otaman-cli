@@ -175,6 +175,26 @@ def tombstone(text: str, entries: list[BlockedEntry], *, reason: str, today: str
     return out
 
 
+def stale_reason(entry: BlockedEntry, *, known_refs: set[str]) -> str:
+    """Why *entry* cannot be resolved, or ``""`` when it is live (1.4).
+
+    An entry is STALE when nothing it points at can be found: no ref recorded at
+    all, or a ref that matches no known proposal/change. Stale is deliberately
+    *reported*, never auto-removed — the whole defect being fixed here is entries
+    disappearing or persisting without anyone being able to tell which, so the
+    surface says which it is and a human decides.
+
+    Pure: the caller supplies *known_refs* (bus message stems, change slugs),
+    which is the only part that needs I/O.
+    """
+    if not entry.has_ref:
+        return "no stable ref recorded — cannot be resolved to a proposal or change"
+    if entry.ref not in known_refs:
+        label = "proposal" if entry.kind == KIND_APPROVAL else "change"
+        return f"{label} {entry.ref!r} not found — it may have been archived or renamed"
+    return ""
+
+
 def find_by_ref(text: str, ref: str, *, kinds: tuple[str, ...] | None = None) -> list[BlockedEntry]:
     """Live entries whose stable ref equals *ref*, optionally limited to *kinds*.
 
@@ -199,5 +219,6 @@ __all__ = [
     "find_by_ref",
     "parse_entries",
     "render_entry",
+    "stale_reason",
     "tombstone",
 ]
