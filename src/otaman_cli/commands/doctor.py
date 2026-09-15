@@ -9,6 +9,7 @@ itself.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -905,6 +906,115 @@ def _print_registry_loadability_report(result: dict) -> None:
         print("  falls back to changes-only. Run `otaman outcome list` for the error.")
 
 
+#: The canonical pre-register solutioning marker (program-strategy-cofounder-
+#: registries): ``SOLUTION: spec-direct (<change-name>)`` in product-notes.
+#: Detection deliberately does NOT parse the parenthesized change name — live
+#: markers nest parens, e.g. `spec-direct (hitl-adapters (approved 2026-09-01
+#: batch))`, and a name-parsing regex would mis-read them. Presence of the
+#: marker is what clears the lint; the name is documentation for humans.
+_SPEC_DIRECT_MARKER = re.compile(r"SOLUTION:\s*spec-direct", re.IGNORECASE)
+
+#: The R1 alternative disposition: the solution is described in the outcome itself.
+_INLINE_SOLUTION_NOTE = re.compile(r"solution\s+inline", re.IGNORECASE)
+
+
+def _check_solution_disposition(root: Path) -> dict:
+    """spec-direct-disposition 1.1 — Approved outcomes with NO solution disposition.
+
+    Twenty Approved outcomes were solutioned through spec changes before the
+    solutions register existed, so "Approved with no linked solution" conflated
+    two very different things and the lint number was noise. With the canonical
+    ``SOLUTION: spec-direct (<change>)`` marker applied, the count becomes a true
+    signal: an outcome here has no linked solution, no spec-direct marker, and no
+    R1 'solution inline' note.
+
+    A linked solution must be a LIVE one — an outcome whose only solutions are
+    Discarded is genuinely unsolutioned, and counting it as solutioned would put
+    the noise straight back into the number.
+
+    REPORT, not a failure: the expected members are research-stage outcomes
+    awaiting spikes (absent by design), so this must not fail the exit code —
+    doctor would then be permanently red on a healthy program.
+    """
+    out: dict = {
+        "applicable": False,
+        "unsolutioned": [],
+        "approved": 0,
+        "linked": 0,
+        "spec_direct": 0,
+        "inline": 0,
+    }
+    try:
+        from otaman_cli.registries.loader import resolve_registry_path, yaml_load
+        from otaman_cli.registries.platform_ext import load_program_extensions
+
+        ext = load_program_extensions(root / "platform.yaml")
+        if not getattr(ext.processes.outcomes, "enabled", False):
+            return out
+        op = resolve_registry_path(root, "outcomes")
+        if not (op and op.is_file()):
+            return out  # absent/unresolved → the Registry Home check owns that
+        outcomes = (yaml_load(op) or {}).get("outcomes") or []
+        if not isinstance(outcomes, list):
+            return out
+        out["applicable"] = True
+
+        # outcome-ids carrying at least one NON-discarded solution
+        live_linked: set[str] = set()
+        sp = resolve_registry_path(root, "solutions")
+        if sp and sp.is_file():
+            for s in (yaml_load(sp) or {}).get("solutions") or []:
+                if not isinstance(s, dict):
+                    continue
+                if str(s.get("status") or "").strip().lower() == "discarded":
+                    continue
+                oid = s.get("outcome-id")
+                if oid:
+                    live_linked.add(str(oid))
+
+        for o in outcomes:
+            if not isinstance(o, dict) or str(o.get("status") or "").strip() != "Approved":
+                continue
+            out["approved"] += 1
+            oid = str(o.get("id") or "")
+            notes = str(o.get("product-notes") or "")
+            if oid in live_linked:
+                out["linked"] += 1
+            elif _SPEC_DIRECT_MARKER.search(notes):
+                out["spec_direct"] += 1
+            elif _INLINE_SOLUTION_NOTE.search(notes):
+                out["inline"] += 1
+            else:
+                out["unsolutioned"].append(oid or "(unnamed outcome)")
+    except Exception:  # noqa: BLE001 - absent/broken registries stack → not applicable
+        out["applicable"] = False
+        return out
+    return out
+
+
+def _print_solution_disposition_report(result: dict) -> None:
+    """The unsolutioned count with its breakdown, so the number is interpretable."""
+    if not result.get("applicable"):
+        return
+    print()
+    UI.header("Approved Outcomes (solution disposition)")
+    unsolutioned = result.get("unsolutioned") or []
+    breakdown = (
+        f"{result['approved']} approved — {result['linked']} with a live solution, "
+        f"{result['spec_direct']} spec-direct, {result['inline']} inline, "
+        f"{len(unsolutioned)} unsolutioned"
+    )
+    if not unsolutioned:
+        print(f"  {UI.badge('OK', C.GREEN)}  {breakdown}")
+        return
+    print(f"  {UI.badge('INFO', C.YELLOW)}  {breakdown}")
+    for oid in unsolutioned:
+        UI.bullet(oid)
+    print("  No linked solution, no `SOLUTION: spec-direct (<change>)` marker, and no")
+    print("  'solution inline' note. Research-stage outcomes awaiting spikes are the")
+    print("  expected members here; anything else needs a solution or a disposition.")
+
+
 def _check_enforcement_map(root: Path) -> dict:
     """spec-gate-hardening 1.1 — when ``spec_policy.enforcement`` is a per-action
     map, its keys must be a subset of {author, merge, dispatch, archive} and its
@@ -1248,6 +1358,12 @@ def cmd_doctor(args: list[str]) -> int:
     _print_registry_loadability_report(regload)
     if regload.get("applicable") and not regload.get("ok"):
         base_rc = 1
+
+    # spec-direct-disposition 1.1 — REPORT only, never folded into the exit code:
+    # the expected members are research-stage outcomes awaiting spikes (absent by
+    # design), so failing on them would leave doctor permanently red on a healthy
+    # program and train everyone to ignore it.
+    _print_solution_disposition_report(_check_solution_disposition(root))
 
     enfmap = _check_enforcement_map(root)
     _print_enforcement_map_report(enfmap)
