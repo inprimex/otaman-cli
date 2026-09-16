@@ -483,13 +483,27 @@ def _change_dir(root: Path, name: str) -> Path | None:
     return d if d.is_dir() else None
 
 
-def _run_gate(data: dict, policy, at: str, *, has_capability_delta: bool = True):
-    """Run the requested lifecycle gate against a change's .openspec.yaml dict."""
+def _run_gate(
+    data: dict, policy, at: str, *, has_capability_delta: bool = True, change_name: str = ""
+):
+    """Run the requested lifecycle gate against a change's .openspec.yaml dict.
+
+    *change_name* is stamped onto the record when the file itself does not carry
+    one (ratify-spec-approve-split 2.1). Core's violation text interpolates the
+    name into the remediation — "run `otaman spec approve <change>`" — but only
+    when the caller puts it on the record; without it the message ships the
+    literal `<change>`, which is not a command anyone can run. The stamp lives
+    HERE rather than at the three call sites so a fourth caller cannot forget it,
+    and the dict is copied, never mutated: it is the caller's parsed file.
+    """
     from otaman_core.spec_lifecycle import (
         check_archive_gate,
         check_dispatch_gate,
         check_merge_gate,
     )
+
+    if change_name and not str(data.get("change") or "").strip():
+        data = {**data, "change": change_name}
 
     if at == "dispatch":
         return check_dispatch_gate(data, policy)
@@ -552,7 +566,7 @@ def dispatch_gate_check(
     data = read_openspec(d / ".openspec.yaml")
     if not data:
         return True, []  # legacy/unbackfilled change → not gated until it has a stage
-    decision = _run_gate(data, _load_policy(root, "dispatch"), "dispatch")
+    decision = _run_gate(data, _load_policy(root, "dispatch"), "dispatch", change_name=change_name)
     if audit_actor and decision.waived:
         # A real dispatch proceeding under a waiver leaves a durable trail
         # (spec-gate-hardening 1.3). Pure checks (no actor) never log.
@@ -598,7 +612,7 @@ def dispatch_waiver_slug(root: Path, change_name: str) -> str | None:
     data = read_openspec(d / ".openspec.yaml")
     if not data:
         return None
-    decision = _run_gate(data, _load_policy(root, "dispatch"), "dispatch")
+    decision = _run_gate(data, _load_policy(root, "dispatch"), "dispatch", change_name=change_name)
     if not (decision.waived and decision.violations):
         return None
     return _violation_slug(decision.violations[0])
@@ -626,7 +640,11 @@ def _cmd_gate(root: Path, rest: list[str]) -> int:
         return 1
     data = read_openspec(d / ".openspec.yaml")
     decision = _run_gate(
-        data, _load_policy(root, at), at, has_capability_delta="--no-delta" not in rest
+        data,
+        _load_policy(root, at),
+        at,
+        has_capability_delta="--no-delta" not in rest,
+        change_name=name,
     )
 
     if "--json" in rest:
