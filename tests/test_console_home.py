@@ -175,9 +175,14 @@ def test_home_renders_summary_off_thread(program):
 @pytest.mark.parametrize(
     "key,target",
     [
-        ("decisions", "PendingListScreen"),
+        # console-ia-consolidation 2.3 / D8 — `d` and `b` are now ALIASES that
+        # land on their new home: decisions merged into Messages (2.1), spec
+        # review became an action on an authored change row in Artifacts (2.2).
+        # They still dispatch and still land somewhere real, which is what this
+        # test exists to guarantee; only the destination moved.
+        ("decisions", "InboxScreen"),
         ("lifecycle", "LifecycleScreen"),
-        ("review", "ArtifactBrowserScreen"),
+        ("review", "TreeScreen"),
     ],
 )
 def test_jump_keys_land_on_real_screens(program, key, target):
