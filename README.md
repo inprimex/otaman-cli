@@ -5,6 +5,28 @@
 The `otaman` command-line binary — local project management, remote bridge
 operations, and interactive agent launching from a single entry point.
 
+## Versioning — tags in this repo are NON-SHIPPING
+
+**Nothing installs from this repo's tags.** They are development history. The
+shipping version is the **otaman-deploy release**, which bundles this repo's
+`main` at cut time — see otaman-deploy's `RELEASING.md` for the authority chain
+and the release cadence.
+
+To find out what a machine is actually running:
+
+```
+otaman --version        # answers with the otaman-deploy release — quote this
+```
+
+Reading this repo's tags to judge whether work has shipped gives the wrong
+answer. On 2026-09-15 that trap fired: a reader checked otaman-cli's tags,
+correctly computed "137 commits past v0.5.0, nothing shipped", and was one step
+from telling a tenant the delivery loop was broken — while the work in question
+had been installed on that tenant four days earlier in deploy v0.5.5. The tag
+namespace was simply not the shipping one, and nothing in the repo said so.
+
+(version-authority 1.1)
+
 ## What this repo owns
 
 - **The `otaman` binary** — single entry point for all local and remote
