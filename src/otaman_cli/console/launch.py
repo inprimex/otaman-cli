@@ -27,6 +27,67 @@ def _resolve_search_root(argv: list[str]) -> Path:
     return root.parent if root else Path.cwd()
 
 
+#: Flags that consume the token after them — their VALUE is never a program name.
+_VALUED_FLAGS = ("--path", "--search-root")
+
+
+def positional_program_name(argv: list[str]) -> str:
+    """The bare program name in ``otaman -i <program>``, or ``""``.
+
+    Skips flags and the values of value-taking flags, so ``-i --path /x myprog``
+    yields ``myprog`` and ``-i --path /x`` yields nothing.
+    """
+    skip_next = False
+    for tok in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if tok in _VALUED_FLAGS:
+            skip_next = True
+            continue
+        if tok.startswith("-"):
+            continue
+        return tok
+    return ""
+
+
+def select_program(argv: list[str], programs: list):
+    """(program, error) — which program to open, skipping the picker (1.1).
+
+    * a NAME given → that program, or an error listing the candidates when it
+      matches none or is ambiguous;
+    * no name and exactly ONE program discovered → that one (an unambiguous
+      choice is not a choice worth asking about);
+    * otherwise → (None, None), meaning show the picker.
+
+    Exactly one of the pair is ever non-None. Matching is case-insensitive and
+    tolerant of a trailing slash, because the name is usually typed from a
+    directory listing.
+    """
+    wanted = positional_program_name(argv).strip().rstrip("/")
+    if not wanted:
+        if len(programs) == 1:
+            return programs[0], None
+        return None, None
+
+    key = wanted.lower()
+    matches = [p for p in programs if p.name.lower() == key]
+    if len(matches) == 1:
+        return matches[0], None
+
+    names = ", ".join(sorted(p.name for p in programs)) or "(none discovered)"
+    if not matches:
+        return None, (
+            f"No program named {wanted!r}.\n  Discovered: {names}\n"
+            "  Run `otaman -i` with no name to pick from the list, or pass "
+            "`--path <dir>` to search elsewhere."
+        )
+    return None, (
+        f"{wanted!r} is ambiguous — {len(matches)} discovered programs share that name.\n"
+        f"  Discovered: {names}\n  Pass `--path <dir>` to disambiguate."
+    )
+
+
 def run_console(argv: list[str], *, _run: bool = True) -> int:
     """Launch the console. `_run=False` builds the app without entering the
     event loop (test seam)."""
@@ -71,10 +132,20 @@ def run_console(argv: list[str], *, _run: bool = True) -> int:
     # from inside a one-off checkout (5.1 finding #3); canonical CE-layout
     # enumeration handles the standard home-dir launch.
     programs = discover_programs(search_root, cwd=Path.cwd())
-    app = OtamanConsole(programs, search_root=search_root)
+
+    # console-ia-consolidation 1.1 — open the named (or only) program directly.
+    # An unknown/ambiguous name is a loud non-zero exit rather than a silent
+    # fallback to the picker: the operator asked for a specific program, and
+    # quietly showing a list instead hides the typo they need to see.
+    initial, error = select_program(argv, programs)
+    if error:
+        print(error)
+        return 2
+
+    app = OtamanConsole(programs, search_root=search_root, initial_program=initial)
     if _run:  # pragma: no cover - the blocking TUI loop is not unit-tested
         app.run()
     return 0
 
 
-__all__ = ["run_console"]
+__all__ = ["positional_program_name", "run_console", "select_program"]
