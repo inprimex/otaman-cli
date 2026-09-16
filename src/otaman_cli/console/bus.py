@@ -42,6 +42,26 @@ class Proposal:
     body: str
     msg_type: str = "spec-change-request"
 
+    @property
+    def from_human(self) -> bool:
+        """Display flag: the sender looks like a human, not an ``*-agent``.
+
+        Mirrors ``InboxMessage.from_human`` — the merged queue (2.1) carries
+        every row as a ``Proposal``, so the read view's sender label needs the
+        same flag it had when the two row models were separate.
+        """
+        f = (self.from_agent or "").strip()
+        return f == "human" or not f.endswith("-agent")
+
+    @property
+    def is_decision(self) -> bool:
+        """Whether this row carries decision actions (approve/reject/defer).
+
+        A property of the ITEM, not of which screen found it — that inversion
+        is what console-ia-consolidation 2.1 removes.
+        """
+        return self.msg_type in _QUEUE_TYPES
+
 
 # Directories that never hold a distinct PROGRAM root: heavy build dirs, the
 # bus itself, and — the 5.1 picker finding (spec 20260827T065715) — fixture /
@@ -240,6 +260,130 @@ def _frontmatter_head(f: Path, limit: int = 8192) -> str | None:
 _QUEUE_TYPES = ("spec-change-request", "outcome-proposal")
 
 
+def _subject_head(path: Path, limit: int = 4096) -> str:
+    """The `## Subject:` line from a bounded head of *path*, or ``""``.
+
+    The subject sits immediately after the frontmatter, so a small head is
+    enough and a full read is waste multiplied by the message count.
+    """
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            head = fh.read(limit)
+    except OSError:
+        return ""
+    for line in head.splitlines():
+        if line.strip().startswith("## Subject:"):
+            return line.strip().replace("## Subject:", "").strip()
+    return ""
+
+
+def read_body(item: Proposal) -> str:
+    """The message body, read on demand from ``item.path``.
+
+    The list carries no bodies (see :func:`list_human_queue`); a detail screen
+    is opened for ONE item, so one read there is free where 700 reads in the
+    list were not. Falls back to an already-populated ``body`` so callers of
+    ``list_pending_proposals`` — which still eager-loads — are unaffected.
+    """
+    if item.body:
+        return item.body
+    try:
+        content = item.path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    return content.split("---", 2)[-1] if content.count("---") >= 2 else content
+
+
+def list_human_queue(program: Program) -> list[Proposal]:
+    """EVERY pending item addressed to the human — decisions and plain messages
+    alike, newest-relevant first (console-ia-consolidation 2.1).
+
+    The type-exclusion split is gone. There were two scanners over the same
+    directory with complementary filters: ``list_pending_proposals`` kept only
+    ``_QUEUE_TYPES`` and the inbox kept only everything else, so an item's TYPE
+    decided which of two screens could see it — and a human looking for
+    "what needs me" had to remember which list a thing lands in. One list,
+    typed rows: :attr:`Proposal.is_decision` says whether a row carries decision
+    actions, rather than a screen boundary saying it.
+
+    Every row is a ``Proposal`` because the two row models had the same fields
+    under different names; decision rows are the ones whose ``msg_type`` is in
+    :data:`_QUEUE_TYPES`, and they are what the action keys operate on.
+
+    Keeps the 5.1 perf shape (bounded frontmatter read, one ack-dir listing, full
+    read only for rows that survive filtering) — it now pays that cost once
+    instead of twice.
+    """
+    import yaml
+
+    active_dir, acks_dir = program.bus_paths()
+    if not active_dir.is_dir():
+        return []
+    try:
+        acked = {p.name for p in acks_dir.glob("*.human.ack")} if acks_dir.is_dir() else set()
+    except OSError:
+        acked = set()
+
+    out: list[Proposal] = []
+    for f in sorted(active_dir.glob("*.md")):
+        fm_text = _frontmatter_head(f)
+        if fm_text is None:
+            continue
+        # Cheap substring pre-filter before any YAML parse (the 5.1 perf shape).
+        # It must admit BOTH clauses of the union below — an early
+        # `"human" not in fm_text` alone silently dropped the two live
+        # agent-addressed outcome-proposals, because their frontmatter never
+        # mentions the human at all.
+        if "human" not in fm_text and not any(t in fm_text for t in _QUEUE_TYPES):
+            continue
+        if f"{f.stem}.human.ack" in acked:
+            continue
+        try:
+            fm = yaml.safe_load(fm_text)
+        except yaml.YAMLError:
+            continue
+        if not isinstance(fm, dict):
+            continue
+        # The UNION of what the two old listers surfaced, deliberately: a row
+        # qualifies if it is addressed to the human OR it is a decision type.
+        #
+        # That second clause is not redundant. `list_pending_proposals` filtered
+        # on TYPE ALONE, so an outcome-proposal addressed to a strategic agent
+        # still appeared in the human's decision queue — measured on the live
+        # bus, two do. Requiring `to: human` would have silently dropped them,
+        # and a pending decision disappearing from the human's queue is the
+        # silent-approval-loss failure this codebase keeps relearning. Absorbing
+        # a surface must not narrow it; the routing question is raised with
+        # spec-agent/cofounder separately rather than settled by a filter here.
+        msg_type = str(fm.get("type", ""))
+        if fm.get("to") != "human" and msg_type not in _QUEUE_TYPES:
+            continue
+        # CC copies are addressed to strategic agents; the human's primary shows once.
+        if fm.get("x-cc"):
+            continue
+        # BOUNDED read, not the whole file. The list needs only the subject; the
+        # body is read on open by the detail screens (`read_body`), which is the
+        # only place it is rendered. Full-reading every row cost ~1.6s on this
+        # bus's 5.4k messages — a visible freeze on the screen Roman opens most.
+        subject = _subject_head(f)
+        out.append(
+            Proposal(
+                stem=f.stem,
+                subject=subject or f.stem,
+                from_agent=str(fm.get("from", "?")),
+                timestamp=str(fm.get("timestamp", "")),
+                priority=str(fm.get("priority", "normal")),
+                path=f,
+                body="",  # lazy — see read_body()
+                msg_type=msg_type,
+            )
+        )
+    # Decisions first — they are the rows that need the human to act; then by
+    # recency. A single list still has to say what is urgent.
+    out.sort(key=lambda p: (not p.is_decision, p.timestamp), reverse=False)
+    return out
+
+
 def list_pending_proposals(program: Program) -> list[Proposal]:
     """Pending human decision items for *program* (no `<stem>.human.ack`): both
     spec-change-requests AND outcome-proposals addressed to the human (1.1).
@@ -317,4 +461,11 @@ def list_pending_proposals(program: Program) -> list[Proposal]:
     return out
 
 
-__all__ = ["Program", "Proposal", "discover_programs", "list_pending_proposals"]
+__all__ = [
+    "Program",
+    "Proposal",
+    "discover_programs",
+    "list_human_queue",
+    "list_pending_proposals",
+    "read_body",
+]

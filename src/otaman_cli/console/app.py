@@ -29,7 +29,13 @@ from textual.widgets import (
     Tree,
 )
 
-from otaman_cli.console.bus import Program, Proposal, discover_programs, list_pending_proposals
+from otaman_cli.console.bus import (
+    Program,
+    Proposal,
+    discover_programs,
+    list_pending_proposals,
+    read_body,
+)
 
 # A path that can never be a program root — used to resolve the identity badge
 # on the picker (no program picked yet) without a cwd platform.yaml false-match.
@@ -81,15 +87,32 @@ class _ProgramItem(ListItem):
 _TYPE_TAG = {"spec-change-request": "SCR", "outcome-proposal": "outcome"}
 
 
+def queue_row_label(proposal: Proposal) -> str:
+    """One merged-queue row's text (2.1).
+
+    A pure function so the row's wording is testable without mounting a widget —
+    a ListItem's children do not exist until it is mounted, which made the
+    rendered text unreachable from a unit test.
+    """
+    tag = _TYPE_TAG.get(proposal.msg_type, proposal.msg_type or "msg")
+    mark = "* " if proposal.is_decision else "  "
+    keys = "   [a/A/x/d]" if proposal.is_decision else ""
+    return (
+        f"{mark}[{tag}] [{proposal.priority}] {proposal.subject}"
+        f"  —  from {proposal.from_agent}{keys}"
+    )
+
+
 class _ProposalItem(ListItem):
+    """One row of the human queue — a decision or a plain message (2.1).
+
+    A DECISION row is marked so the action keys are discoverable on the row
+    itself rather than only after opening it: the merged list carries both
+    kinds, so the row has to say which it is.
+    """
+
     def __init__(self, proposal: Proposal) -> None:
-        tag = _TYPE_TAG.get(proposal.msg_type, proposal.msg_type)
-        super().__init__(
-            Label(
-                f"[{tag}] [{proposal.priority}] {proposal.subject}  —  from {proposal.from_agent}",
-                markup=False,
-            )
-        )
+        super().__init__(Label(queue_row_label(proposal), markup=False))
         self.proposal = proposal
 
 
@@ -259,14 +282,30 @@ class HomeScreen(Screen):
 
     # -- navigation (every advertised key dispatches with a visible ack) ------
 
+    # console-ia-consolidation 2.3 / D8 — ALIASES, not removals. `d`, `b` and
+    # `l` keep working, land on their new home, and say so in one line. Removal
+    # waits for a clean usage signal and never rides in the same release as the
+    # move: Roman presses these every day, and a key that silently stops working
+    # is worse than one that moves.
+    def _alias(self, screen, *, key: str, moved_to: str) -> None:
+        self.app.push_screen(screen)
+        self.app.notify(f"`{key}` now lands on {moved_to}.", timeout=6)
+
     def action_decisions(self) -> None:
-        self.app.push_screen(PendingListScreen(self.program))
+        # Decisions merged INTO Messages (2.1) — same rows, same action keys.
+        self._alias(InboxScreen(self.program), key="d", moved_to="Messages (m)")
 
     def action_lifecycle(self) -> None:
         self.app.push_screen(LifecycleScreen(self.program))
 
     def action_review(self) -> None:
-        self.app.push_screen(ArtifactBrowserScreen(self.program))
+        # Spec review is an ACTION on an authored change now (2.2); `b` lands on
+        # Artifacts filtered to exactly those rows.
+        self._alias(
+            TreeScreen(self.program, authored_only=True),
+            key="b",
+            moved_to="Artifacts (t), filtered to authored changes",
+        )
 
     def action_messages(self) -> None:
         self.app.push_screen(InboxScreen(self.program))
@@ -567,13 +606,96 @@ class _InboxItem(ListItem):
         self.message = message
 
 
-class InboxScreen(Screen):
-    """Messages-to-human inbox (console-ux-redesign 1.2): bus messages addressed
-    to the human — from agents OR other humans — that aren't decisions. Enter opens
-    the full read view. Reuses the pending-list machinery (ListView + off-thread
-    refresh)."""
+class _DecisionActions:
+    """approve / approve-auto / reject / defer, shared by every screen that can
+    decide (console-ia-consolidation 2.1).
+
+    Extracted from ProposalScreen so the merged Messages list acts through the
+    SAME writes rather than a second copy — "the same writes as today" is the
+    task's wording, and a second copy is how the five blocked-entry parsers
+    happened. Subclasses supply `self.program`, `_decision_target()` (the
+    Proposal to act on, or None) and `_after_decision()`.
+    """
+
+    def _decision_target(self):  # pragma: no cover - overridden
+        raise NotImplementedError
+
+    def _after_decision(self) -> None:  # pragma: no cover - overridden
+        raise NotImplementedError
+
+    def _apply_decision(self, verb: str, reason: str, *, delivery: str | None = None) -> None:
+        target = self._decision_target()
+        if target is None:
+            return
+        from otaman_cli.console import decision
+        from otaman_cli.console.identity import resolve_identity
+        from otaman_cli.console.journal import run_decision_action
+
+        identity = resolve_identity(self.program.root)
+        if verb == "approve":
+
+            def fn():
+                return decision.approve(
+                    self.program, target, identity, reason=reason, delivery=delivery
+                )
+        else:
+            verb_fn = {"reject": decision.reject, "defer": decision.defer}[verb]
+
+            def fn():
+                return verb_fn(self.program, target, identity, reason=reason)
+
+        label = f"{verb}-auto" if delivery == "auto" else verb
+        ok, _ = run_decision_action(self.app, action=label, target=target.stem, fn=fn)
+        if ok:
+            self._after_decision()
+
+    def _prompt_and_decide(self, verb: str, *, delivery: str | None = None) -> None:
+        target = self._decision_target()
+        if target is None:
+            # A plain message has no decision to make; say so rather than
+            # swallowing the keypress (the dead-end rule from P0's 1.1).
+            self.app.notify(
+                "Not a decision row — approve/reject/defer apply to "
+                "spec-change-requests and outcome-proposals.",
+                timeout=5,
+            )
+            return
+
+        def _after(reason: str | None) -> None:
+            if reason is not None:  # None = cancelled
+                self._apply_decision(verb, reason, delivery=delivery)
+
+        label = "approve-auto" if delivery == "auto" else verb
+        self.app.push_screen(ReasonModal(label), _after)
+
+    def action_approve_auto(self) -> None:
+        self._prompt_and_decide("approve", delivery="auto")
+
+    def action_approve(self) -> None:
+        self._prompt_and_decide("approve")
+
+    def action_reject(self) -> None:
+        self._prompt_and_decide("reject")
+
+    def action_defer(self) -> None:
+        self._prompt_and_decide("defer")
+
+
+class InboxScreen(_DecisionActions, Screen):
+    """Messages — the ONE list of everything addressed to the human (2.1).
+
+    Decisions used to live on a separate screen, so an item's TYPE decided which
+    of two lists could see it and the human had to remember which. Now one list
+    carries both: decision rows are marked `*` with their keys shown, and the
+    action keys act through the same writes the standalone proposal screen uses
+    (`_DecisionActions`). Enter opens the full read view either way.
+    """
 
     BINDINGS = [
+        Binding("a", "approve", "Approve", priority=True),
+        Binding("A", "approve_auto", "Approve (auto-delivery)", priority=True),
+        Binding("x", "reject", "Reject", priority=True),
+        Binding("d", "defer", "Defer", priority=True),
         Binding("escape", "back", "Back", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
         Binding("q", "app.quit", "Quit", priority=True),
@@ -587,8 +709,9 @@ class InboxScreen(Screen):
         yield _header()
         yield _identity_badge_widget(self.program.root)
         yield _mode_banner(
-            f"Messages to you — inbox · {self.program.name}",
-            "enter open · r refresh · esc back · q quit",
+            f"Messages to you · {self.program.name}",
+            "enter open · a approve · A approve-auto · x reject · d defer · "
+            "r refresh · esc back · q quit",
         )
         yield ListView(id="inbox-list")
         yield Footer()
@@ -602,24 +725,80 @@ class InboxScreen(Screen):
         self._load()
 
     def _load(self) -> None:
-        from otaman_cli.console.inbox import list_inbox_messages
+        from otaman_cli.console.bus import list_human_queue
 
         lv = self.query_one("#inbox-list", ListView)
         lv.clear()
-        messages = list_inbox_messages(self.program)
-        if messages:
-            for m in messages:
-                lv.append(_InboxItem(m))
+        rows = list_human_queue(self.program)
+        if rows:
+            decisions = sum(1 for r in rows if r.is_decision)
+            for r in rows:
+                lv.append(_ProposalItem(r))
+            # The count says what needs ACTING on, not just what arrived — a
+            # single list still has to distinguish those.
+            self.query_one("#mode-banner", Static).update(
+                f"Messages to you · {self.program.name} — "
+                f"{decisions} awaiting your decision, {len(rows) - decisions} to read\n"
+                "enter open · a approve · A approve-auto · x reject · d defer · "
+                "r refresh · esc back · q quit"
+            )
         else:
-            lv.append(ListItem(Label("No messages to you.")))
+            lv.append(ListItem(Label("Nothing addressed to you.")))
+
+    def _highlighted_proposal(self):
+        lv = self.query_one("#inbox-list", ListView)
+        item = lv.highlighted_child
+        return getattr(item, "proposal", None)
+
+    def _decision_target(self):
+        row = self._highlighted_proposal()
+        return row if row is not None and row.is_decision else None
+
+    def _after_decision(self) -> None:
+        self._load()  # stay on the list; the decided row disappears
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
-        item = event.item
-        if isinstance(item, _InboxItem):
-            self.app.push_screen(InboxMessageScreen(self.program, item.message))
+        row = getattr(event.item, "proposal", None)
+        if row is None:
+            return
+        # A decision opens the decide view; a plain message opens the read view.
+        if row.is_decision:
+            self.app.push_screen(ProposalScreen(self.program, row))
+        else:
+            self.app.push_screen(InboxMessageScreen(self.program, row))
 
     def action_back(self) -> None:
         self.app.pop_screen()
+
+
+def _authored_change_roots(program, roots):
+    """*roots* reduced to the authored changes awaiting spec-approval (2.2).
+
+    The set comes from `artifacts.list_authored_changes` — the same one the old
+    standalone browser listed and `advance_to_spec_approved` accepts — so the
+    filtered view and the action agree by construction. Change nodes are lifted
+    to the top level: a human reviewing authored specs wants the changes, not
+    the outcomes they hang under.
+    """
+    try:
+        from otaman_cli.console import artifacts
+
+        names = {c.name for c in artifacts.list_authored_changes(program)}
+    except Exception:  # noqa: BLE001 - unresolvable specs repo → nothing to filter to
+        return []
+    if not names:
+        return []
+    found, seen = [], set()
+
+    def walk(nodes):
+        for n in nodes:
+            if n.kind == "change" and n.id in names and n.id not in seen:
+                seen.add(n.id)
+                found.append(n)
+            walk(n.children)
+
+    walk(roots)
+    return found
 
 
 class TreeScreen(Screen):
@@ -632,23 +811,28 @@ class TreeScreen(Screen):
     BINDINGS = [
         Binding("f", "toggle_closed", "Show/hide closed", priority=True),
         Binding("p", "toggle_panel", "Read panel", priority=True),
+        # 2.2 — spec review is an ACTION on an authored change row, not a screen.
+        Binding("v", "review", "Spec-approve (authored)", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
         Binding("escape", "back", "Back", priority=True),
         Binding("q", "app.quit", "Quit", priority=True),
     ]
 
-    def __init__(self, program: Program) -> None:
+    def __init__(self, program: Program, *, authored_only: bool = False) -> None:
         super().__init__()
         self.program = program
         self._show_closed = False
         self._panel_open = False
+        # 2.2 — `b`'s new home: Artifacts filtered to authored changes, which is
+        # what the standalone spec-review browser used to be a separate screen for.
+        self._authored_only = authored_only
 
     def compose(self) -> ComposeResult:
         yield _header()
         yield _identity_badge_widget(self.program.root)
         yield _mode_banner(
             f"Artifact tree · {self.program.name}",
-            "↑↓ move · → expand · ← collapse · enter open · "
+            "↑↓ move · → expand · ← collapse · enter open · v spec-approve · "
             "f closed · p read · r refresh · esc back · q quit",
         )
         notice = Static("", id="tree-notice", markup=False)
@@ -709,6 +893,8 @@ class TreeScreen(Screen):
         from otaman_cli.console.tree import build_artifact_tree, tree_fallback_notice
 
         roots = build_artifact_tree(self.program, show_closed=self._show_closed)
+        if self._authored_only:
+            roots = _authored_change_roots(self.program, roots)
         notice = tree_fallback_notice(self.program)
         self.app.call_from_thread(self._populate, roots, notice)
 
@@ -752,6 +938,58 @@ class TreeScreen(Screen):
                 self._add(branch, child, width)
         else:
             parent.add_leaf(label, data=node)
+
+    def action_review(self) -> None:
+        """Spec-approve the highlighted authored change (2.2).
+
+        Reuses `artifacts.advance_to_spec_approved` — the same function the
+        lifecycle key, `otaman spec approve` and the b-screen all run — so the
+        transition validation, approver hat and audit record are identical from
+        every entry point. A row that is not an authored change is refused by
+        name rather than ignored (the dead-end rule).
+        """
+        node = self._cursor_node()
+        if node is None:
+            return
+        if node.kind != "change" or not self._is_authored(node.id):
+            self.app.notify(
+                f"{node.id} is not an authored change awaiting spec-approval — "
+                "nothing to review here.",
+                timeout=6,
+            )
+            return
+
+        def _after(reason: str | None) -> None:
+            if reason is None:
+                return
+            from otaman_cli.console import artifacts
+            from otaman_cli.console.journal import run_decision_action
+
+            ok, _ = run_decision_action(
+                self.app,
+                action="spec-approve",
+                target=node.id,
+                fn=lambda: artifacts.advance_to_spec_approved(self.program, node.id, reason=reason),
+            )
+            if ok:
+                self._reload()
+
+        self.app.push_screen(ReasonModal("spec-approve"), _after)
+
+    def _cursor_node(self):
+        """The highlighted tree row's data, or None — a seam mirroring
+        LifecycleScreen's `_highlighted`, so actions are testable without
+        driving Textual's cursor."""
+        tree = self.query_one("#artifact-tree", Tree)
+        return getattr(tree.cursor_node, "data", None)
+
+    def _is_authored(self, change_name: str) -> bool:
+        try:
+            from otaman_cli.console import artifacts
+
+            return any(c.name == change_name for c in artifacts.list_authored_changes(self.program))
+        except Exception:  # noqa: BLE001 - unresolvable specs repo → not reviewable
+            return False
 
     def on_tree_node_selected(self, event) -> None:
         node = getattr(event.node, "data", None)
@@ -947,7 +1185,7 @@ class InboxMessageScreen(Screen):
             markup=False,
         )
         yield MarkdownViewer(
-            self.message.body or "(empty message)",
+            read_body(self.message) or "(empty message)",
             show_table_of_contents=False,
             id="inbox-msg-body",
         )
@@ -1094,7 +1332,7 @@ class ReasonModal(ModalScreen[str | None]):
         self.dismiss(None)
 
 
-class ProposalScreen(Screen):
+class ProposalScreen(_DecisionActions, Screen):
     """Read the rendered item and approve / reject / defer it (task 1.2).
 
     The human's keypress here is the confirmation — no LLM, no adapter prompt.
@@ -1131,51 +1369,18 @@ class ProposalScreen(Screen):
             id="proposal-title",
             markup=False,
         )
-        yield MarkdownViewer(self.proposal.body, show_table_of_contents=False, id="proposal-body")
+        yield MarkdownViewer(
+            read_body(self.proposal), show_table_of_contents=False, id="proposal-body"
+        )
         yield Footer()
 
-    def _apply_decision(self, verb: str, reason: str, *, delivery: str | None = None) -> None:
-        from otaman_cli.console import decision
-        from otaman_cli.console.identity import resolve_identity
-        from otaman_cli.console.journal import run_decision_action
+    # The decide path lives in _DecisionActions, shared with the merged
+    # Messages list so both run the same writes.
+    def _decision_target(self):
+        return self.proposal
 
-        identity = resolve_identity(self.program.root)
-        if verb == "approve":
-
-            def fn():
-                return decision.approve(
-                    self.program, self.proposal, identity, reason=reason, delivery=delivery
-                )
-        else:
-            verb_fn = {"reject": decision.reject, "defer": decision.defer}[verb]
-
-            def fn():
-                return verb_fn(self.program, self.proposal, identity, reason=reason)
-
-        label = f"{verb}-auto" if delivery == "auto" else verb
-        ok, _ = run_decision_action(self.app, action=label, target=self.proposal.stem, fn=fn)
-        if ok:
-            self.app.pop_screen()  # PendingListScreen.on_screen_resume refreshes
-
-    def _prompt_and_decide(self, verb: str, *, delivery: str | None = None) -> None:
-        def _after(reason: str | None) -> None:
-            if reason is not None:  # None = cancelled
-                self._apply_decision(verb, reason, delivery=delivery)
-
-        label = "approve-auto" if delivery == "auto" else verb
-        self.app.push_screen(ReasonModal(label), _after)
-
-    def action_approve_auto(self) -> None:
-        self._prompt_and_decide("approve", delivery="auto")
-
-    def action_approve(self) -> None:
-        self._prompt_and_decide("approve")
-
-    def action_reject(self) -> None:
-        self._prompt_and_decide("reject")
-
-    def action_defer(self) -> None:
-        self._prompt_and_decide("defer")
+    def _after_decision(self) -> None:
+        self.app.pop_screen()  # the caller's on_screen_resume refreshes
 
     def action_back(self) -> None:
         self.app.pop_screen()
