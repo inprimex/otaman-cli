@@ -54,36 +54,40 @@ def _transitions_tail(entry: dict, limit: int = 6) -> list[str]:
     return out
 
 
-def outcome_detail_text(program: Program, oid: str, *, scope: str | None = None) -> str:
+def outcome_detail_text(program: Program, oid: str, *, emphasis: set[str] | None = None) -> str:
     """Full outcome detail — the console equivalent of ``otaman outcome show``.
 
-    *scope* role-scopes the surface (team-mode 2.4b): ``"value"`` hides the
-    costing fields, ``"costing"`` hides the pure-value narrative, ``None`` shows
-    all. Core (id/status/priority/impact/release + the JTBD statement) is always
-    shown."""
+    *emphasis* MARKS the field groups the acting hat is here for — it never
+    hides anything (console-ia-consolidation 4.2). Everything is always shown.
+
+    This replaces a `scope` parameter that HID the other groups, which inverted
+    the intent: a cto got a reduced "costing" view while an unresolved identity
+    got everything, so a CTO saw LESS THAN A STRANGER. Scoping is additive
+    emphasis; transparency is not a privilege to be traded for a hat."""
     data = _load_raw(program, "outcomes")
     if data is None:
         return "(outcomes registry unavailable — run `otaman outcome list` for the error)"
     o: dict[str, Any] | None = _find(data.get("outcomes") or [], oid)
     if not o:
         return f"Outcome not found: {oid}"
-    show_value = scope != "costing"
-    show_costing = scope != "value"
+    emphasis = emphasis or set()
     lines = [f"Outcome: {o['id']}", ""]
-    if scope:
-        lines.append(f"  [role view: {scope}]")
+    if emphasis:
+        lines.append(f"  [your focus: {', '.join(sorted(emphasis))} — everything below is shown]")
         lines.append("")
+
+    def mark(group: str) -> str:
+        return "» " if group in emphasis else "  "
+
     lines.append(f"  Status:           {o.get('status')}")
     lines.append(f"  Priority:         {o.get('priority')}")
     lines.append(f"  Impact:           {o.get('impact') or '-'}")
     lines.append(f"  Release:          {o.get('release') or '-'}")
-    if show_value:
-        lines.append(f"  Category:         {o.get('category') or '-'}")
-        lines.append(f"  Persona:          {o.get('persona') or '-'}")
-    if show_costing:
-        lines.append(f"  Estimate-req'd:   {o.get('estimate-requested')}")
-        lines.append(f"  Chosen-solution:  {o.get('chosen-solution') or '-'}")
-        lines.append(f"  Cost-accepted:    {o.get('cost-accepted')}")
+    lines.append(f"{mark('value')}Category:         {o.get('category') or '-'}")
+    lines.append(f"{mark('value')}Persona:          {o.get('persona') or '-'}")
+    lines.append(f"{mark('costing')}Estimate-req'd:   {o.get('estimate-requested')}")
+    lines.append(f"{mark('costing')}Chosen-solution:  {o.get('chosen-solution') or '-'}")
+    lines.append(f"{mark('costing')}Cost-accepted:    {o.get('cost-accepted')}")
     lines.append("")
     lines.append("  JTBD statement")
     stmt = o.get("statement") or {}
@@ -93,7 +97,7 @@ def outcome_detail_text(program: Program, oid: str, *, scope: str | None = None)
     lines.append(f"    So I can   {stmt.get('so-i-can')}")
     if stmt.get("ultimate-outcome"):
         lines.append(f"    Ultimate   {stmt.get('ultimate-outcome')}")
-    if show_value and o.get("product-notes"):
+    if o.get("product-notes"):
         lines.append("")
         lines.append("  Product notes")
         for line in str(o["product-notes"]).splitlines() or [o["product-notes"]]:
@@ -104,39 +108,39 @@ def outcome_detail_text(program: Program, oid: str, *, scope: str | None = None)
     return "\n".join(lines)
 
 
-def solution_detail_text(program: Program, sid: str, *, scope: str | None = None) -> str:
+def solution_detail_text(program: Program, sid: str, *, emphasis: set[str] | None = None) -> str:
     """Full solution detail — the console equivalent of ``otaman solution show``.
 
-    *scope* role-scopes the surface (team-mode 2.4b): ``"costing"`` shows the
-    t-shirt/effort/cto-notes and hides pros/cons; ``"value"`` shows pros/cons and
-    hides the costing; ``None`` shows all."""
+    *emphasis* marks the acting hat's field groups; nothing is hidden (4.2)."""
     data = _load_raw(program, "solutions")
     if data is None:
         return "(solutions registry unavailable — run `otaman solution list` for the error)"
     s: dict[str, Any] | None = _find(data.get("solutions") or [], sid)
     if not s:
         return f"Solution not found: {sid}"
-    show_value = scope != "costing"
-    show_costing = scope != "value"
+    emphasis = emphasis or set()
     lines = [f"Solution: {s['id']}", ""]
-    if scope:
-        lines.append(f"  [role view: {scope}]")
+    if emphasis:
+        lines.append(f"  [your focus: {', '.join(sorted(emphasis))} — everything below is shown]")
         lines.append("")
+
+    def mark(group: str) -> str:
+        return "» " if group in emphasis else "  "
+
     lines.append(f"  Outcome:        {s.get('outcome-id')}")
     lines.append(f"  Status:         {s.get('status')}")
-    if show_costing:
-        lines.append(f"  T-shirt:        {s.get('t-shirt') or '-'}")
-        lines.append(f"  Effort-days:    {s.get('effort-days') or '-'}")
+    lines.append(f"{mark('costing')}T-shirt:        {s.get('t-shirt') or '-'}")
+    lines.append(f"{mark('costing')}Effort-days:    {s.get('effort-days') or '-'}")
     lines.append(f"  Release:        {s.get('release') or '-'}")
     lines.append("")
     lines.append("  Description")
     for line in str(s.get("description") or "").splitlines() or [s.get("description", "")]:
         lines.append(f"    {line}")
-    if show_value and s.get("pros"):
+    if s.get("pros"):
         lines.append("")
         lines.append("  Pros")
         lines.extend(f"    • {p}" for p in s["pros"])
-    if show_value and s.get("cons"):
+    if s.get("cons"):
         lines.append("")
         lines.append("  Cons")
         lines.extend(f"    • {c}" for c in s["cons"])
@@ -147,7 +151,7 @@ def solution_detail_text(program: Program, sid: str, *, scope: str | None = None
             if isinstance(d, dict):
                 ref = d.get("ref") or d.get("name") or "?"
                 lines.append(f"    [{d.get('kind')}] {ref}")
-    if show_costing and s.get("cto-notes"):
+    if s.get("cto-notes"):
         lines.append("")
         lines.append("  CTO notes")
         for line in str(s["cto-notes"]).splitlines() or [s["cto-notes"]]:
@@ -159,22 +163,19 @@ def solution_detail_text(program: Program, sid: str, *, scope: str | None = None
 
 
 def node_detail_text(
-    program: Program, kind: str, node_id: str, *, scope: str | None = None
+    program: Program, kind: str, node_id: str, *, emphasis: set[str] | None = None
 ) -> str | None:
     """Detail text for an outcome/solution tree node, or None for other kinds.
-    *scope* role-scopes the surface (team-mode 2.4b)."""
+    *emphasis* marks the acting hat's groups; it never hides (4.2)."""
     if kind == "outcome":
-        return outcome_detail_text(program, node_id, scope=scope)
+        return outcome_detail_text(program, node_id, emphasis=emphasis)
     if kind == "solution":
-        return solution_detail_text(program, node_id, scope=scope)
+        return solution_detail_text(program, node_id, emphasis=emphasis)
     return None
 
 
-def role_scope(program: Program) -> str | None:
-    """The role-scoped detail view for the acting human (team-mode 2.4b):
-    founder → ``None`` (founder-mode, all keys visible per canon); a cto without
-    the founder hat → ``"costing"``; anyone else / unverified → ``None`` (never
-    hide the surface from an operator we can't scope)."""
+def acting_hats(program: Program) -> set[str]:
+    """The acting human's roster hats, lowercased — empty when unresolved."""
     try:
         import os
 
@@ -182,19 +183,46 @@ def role_scope(program: Program) -> str | None:
 
         roster = load_human_roster(program.root / "platform.yaml")
         entry = resolve_roster_human(roster, os.environ.get("OTAMAN_HUMAN"))
-        hats = {r.lower() for r in (getattr(entry, "roles", None) or [])} if entry else set()
-    except Exception:  # noqa: BLE001 - roster unavailable → no scoping (show all)
-        return None
-    if "founder" in hats:
-        return None  # founder-mode: all keys visible
-    if "cto" in hats:
-        return "costing"
-    return None
+        return {r.lower() for r in (getattr(entry, "roles", None) or [])} if entry else set()
+    except Exception:  # noqa: BLE001 - roster unavailable → no hats, and so no emphasis
+        return set()
+
+
+#: Which field groups each hat is here for. EMPHASIS only — never a hiding rule.
+_HAT_EMPHASIS = {
+    "cto": {"costing"},
+    "founder": {"costing", "value"},
+    "cofounder": {"costing", "value"},
+    "ceo": {"value"},
+    "cpo": {"value"},
+    "approver": set(),
+}
+
+
+def role_emphasis(program: Program) -> set[str]:
+    """The field groups to MARK for the acting hat (4.2).
+
+    Additive by construction: the return value only ever adds a marker, and the
+    detail builders render every group regardless. An unresolved identity gets
+    an empty set — no emphasis — which is strictly LESS than any resolved hat
+    receives, never more. That direction is the whole fix: the previous
+    `role_scope` gave `founder` everything, gave `cto` a REDUCED costing view and
+    gave an unresolved identity everything, so a CTO saw less than a stranger.
+
+    Hiding is still possible where a capability's own spec requires it (D6); it
+    is simply not something a ROLE does.
+    """
+    hats = acting_hats(program)
+    out: set[str] = set()
+    for hat in hats:
+        out |= _HAT_EMPHASIS.get(hat, set())
+    return out
 
 
 __all__ = [
     "outcome_detail_text",
     "solution_detail_text",
     "node_detail_text",
-    "role_scope",
+    "acting_hats",
+    "role_emphasis",
 ]

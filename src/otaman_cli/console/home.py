@@ -20,6 +20,45 @@ from dataclasses import dataclass, field
 
 from otaman_cli.console.bus import Program
 
+# Role shapes the QUEUE, not the menu. Navigation is never role-gated: browsing
+# stays open to every hat, because transparency is not a privilege in this
+# product and a solo operator must never be locked out of a view by whichever
+# hat they happen to resolve to.
+
+#: hat -> the queue rows that hat is the next actor for.
+_HAT_ROWS = {
+    "founder": ("cost_acceptance", "value_decisions", "scr", "outcome"),
+    "cofounder": ("cost_acceptance", "value_decisions", "scr", "outcome"),
+    "ceo": ("cost_acceptance", "value_decisions"),
+    "cpo": ("value_decisions", "outcome"),
+    "cto": ("solution_choices", "spec_review"),
+    "approver": ("scr",),
+    "developer": ("assigned_tasks",),
+}
+
+#: Every row, in display order — the union a solo operator sees.
+QUEUE_ROWS = (
+    "scr",
+    "outcome",
+    "cost_acceptance",
+    "value_decisions",
+    "solution_choices",
+    "spec_review",
+    "ratify_blocked",
+    "assigned_tasks",
+)
+
+_ROW_LABEL = {
+    "scr": "spec-change requests",
+    "outcome": "outcome-proposals",
+    "cost_acceptance": "awaiting cost acceptance",
+    "value_decisions": "value decisions",
+    "solution_choices": "solution choices",
+    "spec_review": "awaiting spec review",
+    "ratify_blocked": "ratify-blocked",
+    "assigned_tasks": "tasks assigned to you",
+}
+
 
 @dataclass(frozen=True)
 class HomeSummary:
@@ -37,6 +76,17 @@ class HomeSummary:
     # PROGRAM (triage vocabulary — adaptive to the program's own model)
     changes_total: int = 0
     triage: dict[str, int] = field(default_factory=dict)
+    # 4.1 — extra queue counts, and which rows this hat is the next actor for
+    cost_acceptance: int = 0
+    value_decisions: int = 0
+    solution_choices: int = 0
+    assigned_tasks: int = 0
+    hats: set = field(default_factory=set)
+    # The UNION by default, never (). An empty tuple renders "nothing waiting on
+    # you" over a summary that may hold real counts — which is the very
+    # inversion 4.2 fixes on the detail surface, reintroduced through a
+    # dataclass default. No hat resolved means show everything, everywhere.
+    queue_rows: tuple = QUEUE_ROWS
     # panels
     processes_enabled: list[str] = field(default_factory=list)
     team_humans: int = 0
@@ -124,6 +174,48 @@ def _fleet(program: Program) -> tuple[dict[str, int], bool]:
         return {}, False
 
 
+def _registry_queue_counts(program) -> tuple[int, int, int]:
+    """(cost_acceptance, value_decisions, solution_choices) from the registries.
+
+    Best-effort: a program without the outcomes process contributes zeros rather
+    than an error, and a zero row simply does not render.
+    """
+    try:
+        from otaman_cli.registries.loader import resolve_registry_path, yaml_load
+
+        op = resolve_registry_path(program.root, "outcomes")
+        sp = resolve_registry_path(program.root, "solutions")
+        outcomes = (yaml_load(op) or {}).get("outcomes") or [] if op and op.is_file() else []
+        solutions = (yaml_load(sp) or {}).get("solutions") or [] if sp and sp.is_file() else []
+    except Exception:  # noqa: BLE001 - registries absent/broken → nothing queued
+        return 0, 0, 0
+
+    cost = sum(
+        1
+        for o in outcomes
+        if isinstance(o, dict) and o.get("estimate-requested") and not o.get("cost-accepted")
+    )
+    # an Approved outcome with no chosen solution is a value decision waiting
+    value = sum(
+        1
+        for o in outcomes
+        if isinstance(o, dict)
+        and str(o.get("status") or "") == "Approved"
+        and not o.get("chosen-solution")
+    )
+    chosen = {o.get("id") for o in outcomes if isinstance(o, dict) and o.get("chosen-solution")}
+    # outcomes with MORE THAN ONE live candidate and no choice yet
+    by_outcome: dict[str, int] = {}
+    for s in solutions:
+        if not isinstance(s, dict) or str(s.get("status") or "").lower() == "discarded":
+            continue
+        oid = str(s.get("outcome-id") or "")
+        if oid and oid not in chosen:
+            by_outcome[oid] = by_outcome.get(oid, 0) + 1
+    choices = sum(1 for n in by_outcome.values() if n > 1)
+    return cost, value, choices
+
+
 def build_home_summary(program: Program) -> HomeSummary:
     """Aggregate the whole Home in one call (safe to run off the UI thread)."""
     cfg = _load_cfg(program)
@@ -202,7 +294,19 @@ def build_home_summary(program: Program) -> HomeSummary:
     except Exception:  # noqa: BLE001
         policy = "warn"
 
+    # 4.1 — the acting hat decides which rows are YOURS to act on. Counts are
+    # computed the same way regardless; only which rows are SHOWN differs, and
+    # navigation stays open to every hat (D6).
+    from otaman_cli.console.registry_detail import acting_hats
+
+    hats = acting_hats(program)
+    cost_acceptance, value_decisions, solution_choices = _registry_queue_counts(program)
     return HomeSummary(
+        hats=hats,
+        queue_rows=queue_rows_for_hats(hats),
+        cost_acceptance=cost_acceptance,
+        value_decisions=value_decisions,
+        solution_choices=solution_choices,
         scr_count=scr,
         outcome_count=outcome,
         ratify_blocked=ratify_blocked,
@@ -224,3 +328,26 @@ def build_home_summary(program: Program) -> HomeSummary:
 
 
 __all__ = ["HomeSummary", "build_home_summary"]
+
+
+# ---------------------------------------------------------------------------
+# 4.1 — the needs-you queue, filtered by the ACTING HAT (D6)
+#
+def queue_rows_for_hats(hats: set[str]) -> tuple[str, ...]:
+    """Which queue rows the acting hat is the next actor for (4.1 / D6).
+
+    A SOLO OPERATOR — no resolved hat, or several — sees the UNION. Showing an
+    unresolved human an empty queue would hide their own work from them, which
+    is the same inversion 4.2 fixes on the detail surface: never let a missing
+    or ambiguous identity produce LESS than a resolved one.
+    """
+    rows: set[str] = set()
+    for hat in hats:
+        rows |= set(_HAT_ROWS.get(hat, ()))
+    if not rows:
+        return QUEUE_ROWS  # unresolved → the union, never an empty queue
+    return tuple(r for r in QUEUE_ROWS if r in rows)
+
+
+def queue_label(row: str) -> str:
+    return _ROW_LABEL.get(row, row)
