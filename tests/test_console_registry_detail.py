@@ -105,57 +105,62 @@ def test_registry_unavailable_is_graceful(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# team-mode 2.4b part 3 — role-scoped surface visibility
+# team-mode 2.4b part 3 — role-scoped surfaces, CORRECTED by
+# console-ia-consolidation 4.2.
+#
+# These tests originally asserted that a scope HID the other field groups. That
+# was the inversion: `founder` got everything, `cto` got a reduced costing view,
+# and an unresolved identity got everything — so a CTO saw LESS THAN A STRANGER.
+# Scoping is now additive EMPHASIS, so the assertions are inverted and the
+# reason recorded rather than the tests quietly deleted.
 
 
-def test_outcome_costing_scope_hides_value(program):
-    text = outcome_detail_text(program, "JTBD-1-account", scope="costing")
-    assert "role view: costing" in text
-    assert "Chosen-solution:" in text and "Cost-accepted:" in text  # costing shown
-    assert "Persona:" not in text and "Product notes" not in text  # value hidden
-    assert "sign in" in text  # core JTBD statement always shown
+def test_costing_emphasis_marks_without_hiding_value(program):
+    text = outcome_detail_text(program, "JTBD-1-account", emphasis={"costing"})
+    assert "your focus" in text and "costing" in text
+    assert "Chosen-solution:" in text and "Cost-accepted:" in text  # emphasised
+    assert "Persona:" in text and "Product notes" in text  # NOT hidden any more
+    assert "sign in" in text  # core statement, as always
 
 
-def test_outcome_value_scope_hides_costing(program):
-    text = outcome_detail_text(program, "JTBD-1-account", scope="value")
-    assert "role view: value" in text
-    assert "Chosen-solution:" not in text and "Cost-accepted:" not in text
-    assert "keep it simple" in text  # product notes (value) shown
+def test_value_emphasis_marks_without_hiding_costing(program):
+    text = outcome_detail_text(program, "JTBD-1-account", emphasis={"value"})
+    assert "Chosen-solution:" in text and "Cost-accepted:" in text  # still shown
+    assert "keep it simple" in text
 
 
-def test_solution_costing_scope_shows_costing_hides_proscons(program):
-    text = solution_detail_text(program, "SOL-1-a", scope="costing")
+def test_solution_costing_emphasis_keeps_pros_and_cons(program):
+    text = solution_detail_text(program, "SOL-1-a", emphasis={"costing"})
     assert "T-shirt:" in text and "Effort-days:" in text and "CTO notes" in text
-    # section headers gone (note: "Cons" is a substring of the "Considering" status)
-    assert "\n  Pros" not in text and "\n  Cons" not in text
+    assert "\n  Pros" in text and "\n  Cons" in text  # present, merely unemphasised
 
 
-def test_solution_value_scope_hides_costing(program):
-    text = solution_detail_text(program, "SOL-1-a", scope="value")
-    assert "T-shirt:" not in text and "CTO notes" not in text
-    assert "fast" in text and "minimal" in text  # pros/cons shown
+def test_solution_value_emphasis_keeps_costing(program):
+    text = solution_detail_text(program, "SOL-1-a", emphasis={"value"})
+    assert "T-shirt:" in text and "CTO notes" in text
+    assert "fast" in text and "minimal" in text
 
 
-def test_no_scope_shows_everything(program):
+def test_no_emphasis_shows_everything_unmarked(program):
     text = outcome_detail_text(program, "JTBD-1-account")
-    assert "Persona:" in text and "Chosen-solution:" in text and "role view" not in text
+    assert "Persona:" in text and "Chosen-solution:" in text
+    assert "your focus" not in text and "»" not in text
 
 
-def test_role_scope_founder_sees_all(program, monkeypatch):
-    from otaman_cli.console.registry_detail import role_scope
+def test_role_emphasis_founder_gets_both_groups(program, monkeypatch):
+    from otaman_cli.console.registry_detail import role_emphasis
 
-    # the fixture's platform.yaml has no roster; add one with a founder
     (program.root / "platform.yaml").write_text(
         (program.root / "platform.yaml").read_text(encoding="utf-8")
         + "human-roster:\n  - {name: roman, roles: [founder]}\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("OTAMAN_HUMAN", "roman")
-    assert role_scope(program) is None  # founder-mode: all keys
+    assert role_emphasis(program) == {"costing", "value"}
 
 
-def test_role_scope_cto_is_costing(program, monkeypatch):
-    from otaman_cli.console.registry_detail import role_scope
+def test_role_emphasis_cto_gets_costing(program, monkeypatch):
+    from otaman_cli.console.registry_detail import role_emphasis
 
     (program.root / "platform.yaml").write_text(
         (program.root / "platform.yaml").read_text(encoding="utf-8")
@@ -163,11 +168,13 @@ def test_role_scope_cto_is_costing(program, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setenv("OTAMAN_HUMAN", "tina")
-    assert role_scope(program) == "costing"
+    assert role_emphasis(program) == {"costing"}
 
 
-def test_role_scope_unverified_shows_all(program, monkeypatch):
-    from otaman_cli.console.registry_detail import role_scope
+def test_role_emphasis_unverified_gets_none_not_everything(program, monkeypatch):
+    """The direction of the fix: unresolved gets LESS emphasis than a resolved
+    hat — never more — while still seeing every field."""
+    from otaman_cli.console.registry_detail import role_emphasis
 
     monkeypatch.delenv("OTAMAN_HUMAN", raising=False)
-    assert role_scope(program) is None
+    assert role_emphasis(program) == set()

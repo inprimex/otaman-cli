@@ -249,11 +249,29 @@ class HomeScreen(Screen):
     @staticmethod
     def _body_text(summary) -> str:
         lines: list[str] = []
-        lines.append("YOUR QUEUE")
-        lines.append(f"  {summary.scr_count} spec-change requests ⏳")
-        lines.append(f"  {summary.outcome_count} outcome-proposals")
-        lines.append(f"  {summary.ratify_blocked} ratify-blocked")
-        lines.append(f"  {summary.spec_review} awaiting spec review")
+        # 4.1 / D6 — the queue is filtered by the ACTING HAT; navigation is not.
+        # A solo operator (unresolved or many hats) sees the union, because an
+        # empty queue would hide a human's own work from them.
+        from otaman_cli.console.home import queue_label
+
+        counts = {
+            "scr": summary.scr_count,
+            "outcome": summary.outcome_count,
+            "cost_acceptance": summary.cost_acceptance,
+            "value_decisions": summary.value_decisions,
+            "solution_choices": summary.solution_choices,
+            "spec_review": summary.spec_review,
+            "ratify_blocked": summary.ratify_blocked,
+            "assigned_tasks": summary.assigned_tasks,
+        }
+        hat_label = ", ".join(sorted(summary.hats)) if summary.hats else "all hats (unresolved)"
+        lines.append(f"YOUR QUEUE — {hat_label}")
+        shown = [r for r in (summary.queue_rows or ()) if counts.get(r)]
+        if shown:
+            for row in shown:
+                lines.append(f"  {counts[row]} {queue_label(row)}")
+        else:
+            lines.append("  nothing waiting on you")
         lines.append("")
         lines.append("MESSAGES TO YOU")
         lines.append(f"  {summary.inbox_count} in inbox   (m to open)")
@@ -926,10 +944,10 @@ class TreeScreen(Screen):
             body.update("(nothing selected)")
             return
         if node.kind in ("outcome", "solution"):
-            from otaman_cli.console.registry_detail import node_detail_text, role_scope
+            from otaman_cli.console.registry_detail import node_detail_text, role_emphasis
 
             text = node_detail_text(
-                self.program, node.kind, node.id, scope=role_scope(self.program)
+                self.program, node.kind, node.id, emphasis=role_emphasis(self.program)
             )
             body.update(text or f"{node.id}")
         else:
@@ -1161,12 +1179,16 @@ class RegistryDetailScreen(Screen):
         self._reload()
 
     def _reload(self) -> None:
-        from otaman_cli.console.registry_detail import node_detail_text, role_scope
+        from otaman_cli.console.registry_detail import node_detail_text, role_emphasis
 
-        # team-mode 2.4b — role-scoped surface: founder sees all (founder-mode),
-        # a CTO sees the costing view; anyone else sees the full surface.
-        scope = role_scope(self.program)
-        text = node_detail_text(self.program, self.kind, self.node_id, scope=scope) or "(no detail)"
+        # 4.2 — the acting hat EMPHASISES its field groups; nothing is hidden.
+        # (Was: a `scope` that hid the others, which made a CTO see less than an
+        # unresolved identity.)
+        emphasis = role_emphasis(self.program)
+        text = (
+            node_detail_text(self.program, self.kind, self.node_id, emphasis=emphasis)
+            or "(no detail)"
+        )
         # team-mode 2.4a (+ follow-up) — surface the one-key accept-cost affordance.
         # Outcome node: auto-derive the single clear solution. Solution node: accept
         # THIS solution's cost (dissolves the multi-candidate gap, no choose step).
