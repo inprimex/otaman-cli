@@ -182,7 +182,10 @@ def dispositions_group(program) -> TreeNode | None:
         kind="group",
         id="(dispositions — approved, never minted a change)",
         title=f"{len(rows)}",
-        closed=True,  # collapsed by default: history, not live work
+        collapsed=True,  # collapsed by default: history, not live work
+        # NOT `closed`: that HIDES a node until `f`. This said `closed=True` and
+        # meant "collapsed", so it rendered expanded and was one filter away
+        # from disappearing (console-ia 5.1).
     )
     for row in rows:
         title = str(row.get("title") or row.get("approval") or "?")

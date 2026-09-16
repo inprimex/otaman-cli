@@ -40,7 +40,34 @@ SETUP_VERBS: tuple[SetupVerb, ...] = (
     # checking them all is the meaningful read-first action.
     SetupVerb("Connections — health check", ("connection", "check", "--all")),
     SetupVerb("Credentials map (values-free)", ("connection", "map")),
+    # console-ia-consolidation 5.2 / D7 — the recorded-but-unbuilt surfaces
+    # (policy, connections, blocked, watchdog) are reachable HERE, not from a
+    # top-level door each. Connections already lived here; these three join it,
+    # so four planned screens cost zero doors.
+    SetupVerb("Policy — registered packs", ("policy", "list")),
+    SetupVerb("Blocked — registered items", ("blocked", "--list")),
+    # `--list`, not `list`: bare `blocked <slug>` REGISTERS, so `blocked list`
+    # used to create an entry named "list". Fixed in commands/blocked.py, but
+    # the flag form is the one that works on every installed version.
+    SetupVerb(
+        "Watchdog — status",
+        ("watchdog", "status"),
+        note="needs a reachable runner endpoint",
+    ),
 )
+
+
+def setup_item_label(verb: SetupVerb) -> str:
+    """The menu row for *verb*: label, the command it shells out to, and any
+    caveat.
+
+    Textual-free so the row is unit-testable without mounting a widget, like the
+    runner below. A verb whose result depends on the environment — watchdog
+    needs a reachable runner — says so BEFORE it is run, not only in its error
+    output; `note` existed but was never rendered (console-ia 5.2).
+    """
+    tail = f"  — {verb.note}" if verb.note else ""
+    return f"{verb.label}   ($ otaman {' '.join(verb.argv)}){tail}"
 
 
 @dataclass(frozen=True)

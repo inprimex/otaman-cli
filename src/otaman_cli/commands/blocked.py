@@ -80,6 +80,16 @@ def cmd_blocked(args: list[str]) -> int:
     if positional and positional[0] == "migrate":
         return _cmd_blocked_migrate(root, apply="--apply" in args)
 
+    # `otaman blocked list` — the verb-shaped form every other noun already uses
+    # (`project list`, `human list`, `policy list`, `connection list`). Without
+    # it, `blocked list` fell through to "register a slug" and SILENTLY created
+    # a blocked entry literally named "list" — found by running it against the
+    # live program while picking Setup entries (console-ia 5.2). A read that
+    # writes is the worst kind of surprise, and `list` is not a plausible slug.
+    if positional == ["list"]:
+        list_mode = True
+        positional = []
+
     agent = resolve_agent_identity(root) or "unknown-agent"
     blocked_file = root / ".agents" / "blocked" / f"{agent}.md"
 
