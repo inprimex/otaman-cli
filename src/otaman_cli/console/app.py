@@ -258,7 +258,8 @@ class HomeScreen(Screen):
         if not summary.fleet:
             return "agents: none reporting"
         # adaptive: only the states that actually exist, in a stable order
-        order = ["working", "waiting", "blocked", "idle"]
+        # STALE first: it is the entry that changes what the reader believes.
+        order = ["STALE", "working", "waiting", "blocked", "idle"]
         keys = [k for k in order if k in summary.fleet] + [
             k for k in sorted(summary.fleet) if k not in order
         ]

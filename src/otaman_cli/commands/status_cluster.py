@@ -127,6 +127,34 @@ def cmd_set_status(args: list[str]) -> int:
         else:
             blocked_by = None
 
+    # status-heartbeat 1.3 — `working` may not be recorded with no task at all.
+    #
+    # REFUSAL, not a warning, and the measurement is why. The task said to
+    # refuse unless callers would break, so I measured both ends:
+    #
+    #   * The check is on the RESULTING task, not on `--task` being passed. A
+    #     bare `set-status working` INHERITS the recorded task (just above), and
+    #     re-affirming work already on the record is legitimate — refusing that
+    #     would break the honest caller and teach nothing. Only a record that
+    #     would land genuinely bare is refused.
+    #   * The two internal writers that set `working` deliberately with no task
+    #     (`complete.py`, and the ack hook in `bus_messaging.py`) construct
+    #     AgentStatus directly and never reach this verb, so they are unaffected
+    #     by design. `complete.py`'s null task is marked "per spec" in its own
+    #     comment and is reported to spec-agent rather than changed here.
+    #
+    # On the live fleet this would have caught spec-agent's current
+    # `working`/`task: null` record — which is exactly the case the change
+    # exists to stop, so nothing that "must not break" is refused.
+    if new_state == State.WORKING and not (task or "").strip():
+        UI.error("set-status working requires a task — refusing to record bare 'working'.")
+        UI.muted('  Fix: otaman set-status working --task "<N.M what you are doing>"')
+        UI.muted("  A working record with no task cannot be told from a dead session,")
+        UI.muted("  which is what this refusal exists to prevent.")
+        UI.muted("  (Omitting --task is fine when a task is already on the record — it")
+        UI.muted("   is inherited. This refuses only a record that would land empty.)")
+        return 2
+
     status = AgentStatus(
         agent=agent,
         state=new_state,
@@ -206,6 +234,22 @@ def cmd_fleet_status(args: list[str]) -> int:
     records.sort(key=lambda r: (order.get(r.state, 99), r.agent))
 
     if ns.as_json:
+        from otaman_cli.status.staleness import age_seconds, is_stale, render_state, ttl_seconds
+
+        ttl = ttl_seconds(root)
+
+        def _row(r):
+            # `state` stays the RECORDED fact — consumers that key off the enum
+            # keep working. The derived truth is added beside it, because a JSON
+            # reader that only sees `state: working` for a dead session is the
+            # same confidently-wrong surface, just machine-readable (1.2).
+            row = r.to_dict()
+            row["stale"] = is_stale(r, ttl=ttl)
+            row["rendered_state"] = render_state(r, ttl=ttl)
+            age = age_seconds(r)
+            row["last_seen_seconds"] = None if age is None else int(age)
+            return row
+
         print(
             json.dumps(
                 {
@@ -214,7 +258,8 @@ def cmd_fleet_status(args: list[str]) -> int:
                     .datetime.now(__import__("datetime").timezone.utc)
                     .isoformat(timespec="seconds")
                     .replace("+00:00", "Z"),
-                    "agents": [r.to_dict() for r in records],
+                    "stale_ttl_seconds": ttl,
+                    "agents": [_row(r) for r in records],
                 },
                 indent=2,
             )
@@ -245,11 +290,21 @@ def cmd_fleet_status(args: list[str]) -> int:
             return f"{secs // 3600}h"
         return f"{secs // 86400}d"
 
-    # Render compact table
+    # Render compact table. State comes from the SHARED staleness rule, not from
+    # `r.state` — a record nobody has heard from must never print as working
+    # (status-heartbeat 1.2).
+    from otaman_cli.status.staleness import is_stale, last_seen, render_state, ttl_seconds
+
+    ttl = ttl_seconds(root)
     print(f"  {'AGENT':<18} {'STATE':<9} {'SINCE':<8} TASK / CHANGE")
     counts = {s: 0 for s in State}
+    stale_count = 0
     for r in records:
-        counts[r.state] = counts.get(r.state, 0) + 1
+        stale = is_stale(r, ttl=ttl, now=now_utc)
+        if stale:
+            stale_count += 1
+        else:
+            counts[r.state] = counts.get(r.state, 0) + 1
         tail = ""
         if r.state != State.IDLE:
             parts: list[str] = []
@@ -262,15 +317,29 @@ def cmd_fleet_status(args: list[str]) -> int:
             tail = "—"
         if r.state == State.BLOCKED and r.blocked_by:
             tail = f"blocked by {r.blocked_by}  ·  {tail}".removesuffix("  ·  ")
-        print(f"  {r.agent:<18} {r.state.value:<9} {_since_human(r.since):<8} {tail}")
+        if stale:
+            # Name the claim AND the last-seen time: "stale" alone tells the
+            # reader something is wrong without telling them what was lost.
+            tail = f"was {r.state.value}, {last_seen(r, now=now_utc)}" + (
+                f"  ·  {tail}" if tail and tail != "—" else ""
+            )
+        print(
+            f"  {r.agent:<18} {render_state(r, ttl=ttl, now=now_utc):<9} "
+            f"{_since_human(r.since):<8} {tail}"
+        )
 
     print()
-    UI.muted(
+    rollup = (
         f"Blocked: {counts.get(State.BLOCKED, 0)}   "
         f"Waiting: {counts.get(State.WAITING, 0)}   "
         f"Working: {counts.get(State.WORKING, 0)}   "
         f"Idle: {counts.get(State.IDLE, 0)}"
     )
+    # Stale records are counted as STALE, not as the work they claim — the
+    # rollup is what made "4 working" believable when none of them were.
+    if stale_count:
+        rollup += f"   STALE: {stale_count}"
+    UI.muted(rollup)
     return 0
 
 

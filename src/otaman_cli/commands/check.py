@@ -451,11 +451,19 @@ def _check_render_fleet(root: Path) -> None:
         cmd_fleet_status([])
         return
 
-    # Compact one-liner
+    # Compact one-liner. Renders through the SHARED staleness rule so `check`
+    # and `status` can never disagree about who is alive (status-heartbeat 1.2).
+    from otaman_cli.status.staleness import is_stale, last_seen, render_state, ttl_seconds
+
+    ttl = ttl_seconds(root)
     parts: list[str] = []
     for r in non_idle:
-        tag = r.task or r.change or "—"
-        parts.append(f"{r.agent} {r.state.value} ({tag})")
+        if is_stale(r, ttl=ttl):
+            # The claim and the last-seen time, not just the word "stale".
+            parts.append(f"{r.agent} STALE (was {r.state.value}, {last_seen(r)})")
+        else:
+            tag = r.task or r.change or "—"
+            parts.append(f"{r.agent} {render_state(r, ttl=ttl)} ({tag})")
     print()
     UI.muted(f"Fleet: {' · '.join(parts)}")
 

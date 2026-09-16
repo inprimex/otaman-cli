@@ -1015,6 +1015,82 @@ def _print_solution_disposition_report(result: dict) -> None:
     print("  expected members here; anything else needs a solution or a disposition.")
 
 
+def _check_stale_presence(root: Path) -> dict:
+    """Working/waiting status records nobody has heard from (status-heartbeat 1.2).
+
+    WARN, never a failure. A stale record means a session died or its hooks
+    stopped — real information, but not a broken program, and folding it into
+    the exit code would leave doctor red whenever an agent's session ends
+    untidily. That is how a check trains people to ignore it (the same reason
+    solution-disposition reports rather than fails).
+    """
+    try:
+        from otaman_cli.status import get_backend, is_agent_presence_enabled
+        from otaman_cli.status.staleness import is_stale, last_seen, ttl_seconds
+    except Exception:  # noqa: BLE001
+        return {"check": "stale_presence", "applicable": False}
+    if not is_agent_presence_enabled(root):
+        return {"check": "stale_presence", "applicable": False}
+    try:
+        records = get_backend(root).read_all()
+    except Exception:  # noqa: BLE001 - unreadable backend → nothing to say
+        return {"check": "stale_presence", "applicable": False}
+
+    ttl = ttl_seconds(root)
+    stale = [
+        {
+            "agent": r.agent,
+            "claimed": r.state.value if hasattr(r.state, "value") else str(r.state),
+            "last_seen": last_seen(r),
+            "task": r.task,
+        }
+        for r in records
+        if is_stale(r, ttl=ttl)
+    ]
+    return {
+        "check": "stale_presence",
+        "applicable": True,
+        "status": "warn" if stale else "ok",
+        "ttl_seconds": ttl,
+        "total": len(records),
+        "stale": stale,
+        "issues": [
+            {
+                "issue": f"{s['agent']} claims {s['claimed']} but was {s['last_seen']}",
+                "fix": "the session likely died — re-run `otaman set-status` from a live "
+                "session, or set idle if the work stopped",
+                "severity": "warn",
+            }
+            for s in stale
+        ],
+    }
+
+
+def _print_stale_presence_report(result: dict) -> None:
+    if not result.get("applicable"):
+        return
+    print()
+    UI.header("Agent presence (staleness)")
+    stale = result.get("stale") or []
+    ttl_min = int(result.get("ttl_seconds", 0)) // 60
+    if not stale:
+        print(
+            f"  {UI.badge('OK', C.GREEN)}  no stale records "
+            f"({result.get('total', 0)} agents, TTL {ttl_min}m)"
+        )
+        return
+    print(
+        f"  {UI.badge('WARN', C.YELLOW)}  {len(stale)} of {result.get('total', 0)} "
+        f"records claim work nobody has heard from (TTL {ttl_min}m)"
+    )
+    for s in stale:
+        tail = f" — {s['task']}" if s.get("task") else ""
+        UI.bullet(f"{s['agent']}: was {s['claimed']}, {s['last_seen']}{tail}")
+    print("  A heartbeat refreshes a live session; an unrefreshed working record is")
+    print("  a session that died. Reported, not failed — an untidy session end is not")
+    print("  a broken program.")
+
+
 def _check_enforcement_map(root: Path) -> dict:
     """spec-gate-hardening 1.1 — when ``spec_policy.enforcement`` is a per-action
     map, its keys must be a subset of {author, merge, dispatch, archive} and its
@@ -1364,6 +1440,9 @@ def cmd_doctor(args: list[str]) -> int:
     # design), so failing on them would leave doctor permanently red on a healthy
     # program and train everyone to ignore it.
     _print_solution_disposition_report(_check_solution_disposition(root))
+
+    # status-heartbeat 1.2 — WARN only, deliberately outside the exit code.
+    _print_stale_presence_report(_check_stale_presence(root))
 
     enfmap = _check_enforcement_map(root)
     _print_enforcement_map_report(enfmap)
