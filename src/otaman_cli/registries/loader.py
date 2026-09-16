@@ -44,6 +44,25 @@ def yaml_load(path: Path) -> Any:
     return _YAML.load(text)
 
 
+def yaml_read(path: Path) -> Any:
+    """Read a registry file for DISPLAY ONLY — fast, memoized, lossy.
+
+    :func:`yaml_load` round-trips through ruamel so a later :func:`yaml_dump`
+    preserves the human's comments and formatting; every write path must keep
+    using it. That round-trip cost 0.42 s per registry load, and the console was
+    paying it six times on Home alone just to count rows.
+
+    This returns plain dicts/lists with comments discarded, so NEVER feed the
+    result back to :func:`yaml_dump` — it would silently rewrite the file
+    without the comments its author put there.
+    """
+    if not path.is_file():
+        return {}
+    from otaman_cli.yaml_fast import load_file
+
+    return load_file(path, {})
+
+
 def yaml_dump(data: Any, path: Path) -> None:
     """Round-trip write *data* back to *path* preserving format."""
     path.parent.mkdir(parents=True, exist_ok=True)

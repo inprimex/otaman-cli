@@ -17,7 +17,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _OUTCOME_ID_RE = re.compile(r"^JTBD-\d+-[a-z0-9-]+$")
@@ -249,5 +248,7 @@ class OutcomeRegistry(BaseModel):
 
 def load_outcomes(path: Path) -> OutcomeRegistry:
     """Load and validate `outcomes.yaml`."""
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    from otaman_cli.yaml_fast import load_file
+
+    raw = load_file(path, {}) or {}
     return OutcomeRegistry.model_validate(raw)

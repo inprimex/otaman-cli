@@ -160,9 +160,9 @@ def load_dispositions(program) -> list[dict]:
         return []
     path = changes_dir.parent / "dispositions.yaml"
     try:
-        import yaml
+        from otaman_cli.yaml_fast import load_file
 
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data = load_file(path)
     except Exception:  # noqa: BLE001 - absent/unparseable ledger → nothing to show
         return []
     return [d for d in data or [] if isinstance(d, dict)]

@@ -116,6 +116,23 @@ class _ProposalItem(ListItem):
         self.proposal = proposal
 
 
+def invalidate_read_caches() -> None:
+    """Drop the memoized YAML and bus-frontmatter reads.
+
+    Every `r` must really re-read. The caches key on (path, mtime, size), so a
+    changed file already re-parses on its own; this exists for the case the key
+    cannot see — a filesystem with coarse mtime granularity rewriting a file to
+    the same size — and because "refresh" that served a cached answer would
+    make the key a lie. Called by EVERY screen's refresh action; the
+    binding-conformance test asserts that.
+    """
+    from otaman_cli.console.bus_index import clear_cache as clear_bus_cache
+    from otaman_cli.yaml_fast import clear_cache as clear_yaml_cache
+
+    clear_yaml_cache()
+    clear_bus_cache()
+
+
 class ProgramPickerScreen(Screen):
     """Pick which program's bus to work on (one bus at a time — Q8)."""
 
@@ -202,6 +219,7 @@ class HomeScreen(Screen):
         self.run_worker(self._load, thread=True, exclusive=True, group="home")
 
     def action_refresh(self) -> None:
+        invalidate_read_caches()
         self.on_mount()
 
     def _load(self) -> None:
@@ -546,6 +564,7 @@ class AgentsScreen(Screen):
         self.run_worker(self._load, thread=True, exclusive=True, group="agents")
 
     def action_refresh(self) -> None:
+        invalidate_read_caches()
         self.on_mount()
 
     def _load(self) -> None:
@@ -744,6 +763,7 @@ class InboxScreen(_DecisionActions, Screen):
         yield Footer()
 
     def action_refresh(self) -> None:
+        invalidate_read_caches()
         self._load()
 
     def on_screen_resume(self) -> None:
@@ -921,6 +941,7 @@ class TreeScreen(Screen):
         )
 
     def action_refresh(self) -> None:
+        invalidate_read_caches()
         self._reload()
 
     def action_toggle_closed(self) -> None:
@@ -1427,6 +1448,7 @@ class PendingListScreen(Screen):
         self.app.pop_screen()
 
     def action_refresh(self) -> None:
+        invalidate_read_caches()
         self._refresh(show_loading=not self._cache)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
@@ -1576,6 +1598,7 @@ class LifecycleScreen(Screen):
         self._load()
 
     def action_refresh(self) -> None:
+        invalidate_read_caches()
         self._load()
 
     def action_back(self) -> None:
@@ -1949,6 +1972,7 @@ class ArtifactBrowserScreen(Screen):
         yield Footer()
 
     def action_refresh(self) -> None:
+        invalidate_read_caches()
         self._load()
 
     def action_back(self) -> None:

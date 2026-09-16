@@ -33,12 +33,12 @@ class ChangeMeta:
 def read_pm_sync(change_dir) -> tuple[str | None, str | None]:
     """(issue_id, provider) from ``<change_dir>/.pm-sync.yaml`` — (None, None) if absent."""
     try:
-        import yaml
+        from otaman_cli.yaml_fast import load_file
 
         pf = change_dir / ".pm-sync.yaml"
         if not pf.is_file():
             return None, None
-        data = yaml.safe_load(pf.read_text(encoding="utf-8"))
+        data = load_file(pf)
         if not isinstance(data, dict):
             return None, None
         issue = data.get("change_issue_id") or data.get("issue_id")

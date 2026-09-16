@@ -23,12 +23,12 @@ from otaman_cli.lifecycle import (
 
 def _specs_changes_dir(program: Program) -> Path | None:
     """The specs repo's ``openspec/changes`` dir (from platform.yaml specs.path)."""
-    import yaml
+    from otaman_cli.yaml_fast import load_file
 
-    try:
-        cfg = yaml.safe_load((program.root / "platform.yaml").read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
-        return None
+    # Memoized: this was called 107 times per tree render, each time re-parsing
+    # the same 376-line platform.yaml with the slow parser (9.4 s of a single
+    # 8 s render — the dominant cost of the whole artifacts view).
+    cfg = load_file(program.root / "platform.yaml", {}) or {}
     specs = cfg.get("specs") if isinstance(cfg, dict) else None
     path = specs.get("path") if isinstance(specs, dict) else None
     if not path:

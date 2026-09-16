@@ -11,7 +11,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _ID_RE = re.compile(r"^persona-[a-z0-9-]+$")
@@ -80,5 +79,7 @@ class PersonaRegistry(BaseModel):
 
 def load_personas(path: Path) -> PersonaRegistry:
     """Load and validate `personas.yaml`. Returns a `PersonaRegistry`."""
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    from otaman_cli.yaml_fast import load_file
+
+    raw = load_file(path, {}) or {}
     return PersonaRegistry.model_validate(raw)
