@@ -322,6 +322,17 @@ def build_artifact_tree(
     """The linked artifact tree roots. Outcome-first when registries are enabled;
     otherwise a flat changes tree. *show_closed* re-includes closed/absorbed
     items (hidden by default); dormant changes always sort last."""
+    # 3.2 — the capability spine is a different arrangement of the same
+    # objects, built from the accumulated specs rather than the registries.
+    if lens == LENS_CAPABILITY:
+        from otaman_cli.console.capability import build_capability_tree, dispositions_group
+
+        roots = dedupe_one_parent(build_capability_tree(program))
+        ledger = dispositions_group(program)
+        if ledger is not None:
+            roots.append(ledger)
+        return roots
+
     rows = _change_rows(program)
     blocked = _blocked_map(program)
     outcomes, solutions = _load_registries(program) if registries_enabled(program) else (None, None)

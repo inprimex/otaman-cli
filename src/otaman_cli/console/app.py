@@ -1065,6 +1065,17 @@ class TreeScreen(Screen):
         else:
             self.app.notify(f"{node_id} ({kind}) has no detail view yet.", timeout=5)
 
+    def _capability_detail(self, node) -> None:
+        """A capability root's own read-out: its requirement headings (3.2)."""
+        from otaman_cli.console.capability import _specs_dirs
+
+        specs_dir, _ = _specs_dirs(self.program)
+        spec_file = (specs_dir / node.id / "spec.md") if specs_dir else None
+        if spec_file is None or not spec_file.is_file():
+            self.app.notify(f"No spec file for capability {node.id}.", timeout=5)
+            return
+        self.app.push_screen(CapabilityDetailScreen(self.program, node.id, spec_file))
+
     def _cursor_node(self):
         """The highlighted tree row's data, or None — a seam mirroring
         LifecycleScreen's `_highlighted`, so actions are testable without
@@ -1087,6 +1098,14 @@ class TreeScreen(Screen):
         # A reference NAVIGATES to its target (D4) rather than opening itself.
         if node.kind == "reference":
             self._navigate_to(node.ref_kind, node.ref_id)
+            return
+        if node.kind == "capability":
+            self._capability_detail(node)
+            return
+        if node.kind == "disposition":
+            # A ledger row minted nothing — there is no artifact to open, and
+            # saying so is better than a dead keypress.
+            self.app.notify(f"{node.id} — no change was minted from this.", timeout=6)
             return
         if node.kind == "change":
             self.app.push_screen(ChangeDetailScreen(self.program, node.id))
@@ -1723,6 +1742,49 @@ class LifecycleScreen(Screen):
             self._load()
 
 
+class CapabilityDetailScreen(Screen):
+    """One capability's requirements, read in place (3.2).
+
+    The capability lens answers "what does the system do"; this is the read-out
+    of a single answer. Renders the spec's own markdown rather than a summary —
+    the spec IS the artifact, and paraphrasing it here would create a second
+    description to drift.
+    """
+
+    BINDINGS = [
+        Binding("escape", "back", "Back", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
+    ]
+
+    def __init__(self, program: Program, capability: str, spec_file) -> None:
+        super().__init__()
+        self.program = program
+        # NOT `self.name`: Textual's Widget already owns that as a read-only
+        # property, so assigning it raises at construction.
+        self.capability = capability
+        self.spec_file = spec_file
+
+    def compose(self) -> ComposeResult:
+        from otaman_cli.console.capability import requirement_count
+
+        yield _header()
+        yield _identity_badge_widget(self.program.root)
+        count = requirement_count(self.spec_file)
+        yield _mode_banner(
+            f"Capability — {self.capability}",
+            f"{count} requirement{'s' if count != 1 else ''} · esc back · q quit",
+        )
+        try:
+            body = self.spec_file.read_text(encoding="utf-8")
+        except OSError as exc:
+            body = f"(could not read {self.spec_file}: {exc})"
+        yield MarkdownViewer(body, show_table_of_contents=False, id="capability-body")
+        yield Footer()
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
 class ChangeDetailScreen(Screen):
     """Per-change detail (console-lifecycle-actions 1.3): stage, triage, tasks,
     gate results with block reasons, delivery badge, artifacts (per-file), and the
@@ -1781,6 +1843,12 @@ class ChangeDetailScreen(Screen):
             "gates: " + " · ".join(self._gate_labels(d.get("gates", {}))),
             "actions: " + ", ".join(d.get("actions", [])),
         ]
+        # 3.4 / D5 — the approved SCR appears HERE, as provenance on the change
+        # it minted, rather than as a node of its own anywhere in the tree.
+        provenance = d.get("provenance") or []
+        if provenance:
+            lines.append("provenance:")
+            lines.extend(f"  {line}" for line in provenance)
         # S9/S10 metadata (creator/when/priority/deadline slot/pm-sync id).
         meta = getattr(self, "_meta", None)
         if meta is not None:
