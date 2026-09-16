@@ -236,6 +236,46 @@ def _available_actions(state: str, next_actor: str, archive_clean: bool) -> list
     return actions
 
 
+def _provenance(data: dict) -> list[str]:
+    """The proposal edges a change records (3.4) — delegated so the console and
+    any other reader share one definition."""
+    try:
+        from otaman_cli.console.capability import provenance_lines
+
+        return provenance_lines(data)
+    except Exception:  # noqa: BLE001 - never block the detail view
+        return []
+
+
+def _resolve_change_dir(changes: Path, name: str) -> Path | None:
+    """The directory for *name*, searching the ARCHIVE too (3.2).
+
+    Previously active-only, which made a reference to an archived change a dead
+    end — and most changes are archived, so the capability lens's "what shaped
+    this" lines would have pointed nowhere. Accepts either the bare slug or the
+    dated archive directory name, because a reader may hold either.
+    """
+    direct = changes / name
+    if direct.is_dir():
+        return direct
+    archive = changes / "archive"
+    if not archive.is_dir():
+        return None
+    dated = archive / name
+    if dated.is_dir():
+        return dated
+    # bare slug → the most recent dated dir with that suffix (a capability can be
+    # shaped more than once by changes sharing a slug; newest is the live truth)
+    try:
+        matches = sorted(
+            (p for p in archive.iterdir() if p.is_dir() and p.name.endswith(f"-{name}")),
+            key=lambda p: p.name,
+        )
+    except OSError:
+        return None
+    return matches[-1] if matches else None
+
+
 def change_detail(program: Program, name: str) -> dict:
     """Assemble the per-change detail (values-free) the detail screen renders."""
     import re
@@ -252,8 +292,8 @@ def change_detail(program: Program, name: str) -> dict:
     changes = _specs_changes_dir(program)
     if changes is None:
         return {}
-    d = changes / name
-    if not d.is_dir():
+    d = _resolve_change_dir(changes, name)
+    if d is None:
         return {}
     data = read_openspec(d / ".openspec.yaml")
     policy = _load_policy(program)
@@ -314,6 +354,10 @@ def change_detail(program: Program, name: str) -> dict:
         "gates": gates,
         "state": state,
         "next_actor": next_actor,
+        # 3.4 / D5 — the approved SCR renders as PROVENANCE on the change it
+        # minted, not as a node of its own. `.openspec.yaml` already carries the
+        # stems, so this needs no new storage and cannot drift from the record.
+        "provenance": _provenance(data),
         "actions": _available_actions(state, next_actor, archive_clean),
         "change_dir": d,
     }
