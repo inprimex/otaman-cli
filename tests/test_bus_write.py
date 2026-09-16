@@ -15,6 +15,29 @@ from otaman_cli.bus_write import write_message_exclusive
 # the helper
 
 
+# generated-artifact-quality 1.1 — `propose` now REFUSES an SCR with unfilled
+# sections, so a bare title no longer files one. These tests are not about that
+# rule (they cover collision handling / the pending-queue enqueue / the help
+# footgun); they just needed an SCR to exist. They now file a decision-grade
+# one. The refusal itself is covered by tests/test_scr_template.py.
+_SCR = [
+    "--problem",
+    "an observed problem",
+    "--evidence",
+    "src/otaman_cli/main.py:1",
+    "--impact",
+    "one caller",
+    "--direction",
+    "a direction",
+    "--scope",
+    "n/a because nothing is excluded",
+    "--routing",
+    "otaman-cli",
+    "--workaround",
+    "n/a because none is needed",
+]
+
+
 def test_writes_to_the_requested_path_when_free(tmp_path):
     p = tmp_path / "20260905T202928-a-to-human-spec-change-request.md"
     out = write_message_exclusive(p, "first")
@@ -92,8 +115,8 @@ def test_propose_same_second_does_not_overwrite(tmp_path, monkeypatch):
     _fixed_clock(monkeypatch)
 
     active = root / ".agents" / "bus" / "active"
-    propose_team.cmd_propose(["First proposal"])
-    propose_team.cmd_propose(["Second proposal"])
+    propose_team.cmd_propose(["First proposal", *_SCR])
+    propose_team.cmd_propose(["Second proposal", *_SCR])
 
     scrs = sorted(active.glob("*spec-change-request*.md"))
     assert len(scrs) == 2  # both survived — no silent overwrite

@@ -22,6 +22,28 @@ from otaman_cli.commands.propose_team import (  # noqa: E402
     cmd_team,
 )
 
+# generated-artifact-quality 1.1 — `propose` now REFUSES an SCR with unfilled
+# sections, so a bare title no longer files one. These tests are not about that
+# rule (they cover collision handling / the pending-queue enqueue / the help
+# footgun); they just needed an SCR to exist. They now file a decision-grade
+# one. The refusal itself is covered by tests/test_scr_template.py.
+_SCR = [
+    "--problem",
+    "an observed problem",
+    "--evidence",
+    "src/otaman_cli/main.py:1",
+    "--impact",
+    "one caller",
+    "--direction",
+    "a direction",
+    "--scope",
+    "n/a because nothing is excluded",
+    "--routing",
+    "otaman-cli",
+    "--workaround",
+    "n/a because none is needed",
+]
+
 
 def _project(tmp_path: Path, monkeypatch) -> Path:
     (tmp_path / ".agents" / "bus" / "active").mkdir(parents=True)
@@ -84,7 +106,7 @@ def test_propose_real_title_still_files_request(tmp_path, monkeypatch):
     # regression: the normal path writes the SCR (plus, since spec-gate-hardening
     # 1.4, a spec-approval-pending item for the human's triage queue).
     root = _project(tmp_path, monkeypatch)
-    rc = cmd_propose(["Add", "user", "pagination"])
+    rc = cmd_propose(["Add", "user", "pagination", *_SCR])
     assert rc == 0
     files = _bus_files(root)
     scr = [f for f in files if f.name.endswith("spec-change-request.md")]
