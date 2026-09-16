@@ -9,18 +9,23 @@ is an otaman-cli package version and their installation is a deploy release.
 The concrete defect: `otaman --version` printed `otaman 0.4.0` (this package, via
 importlib.metadata) while the live deploy release was v0.5.7.
 
-**The release marker does not exist yet.** Searched at implementation time
-(2026-09-16): no manifest under ``~/.otaman/``, no writer in otaman-deploy's
-scripts. ``~/.otaman/edition.yaml`` carries a ``version:`` field, but it is
-written once at install and never refreshed — it read 0.3.0 against a live v0.5.7
-— and the file documents itself as identity/UX only. Presenting that as the
-installed version would be worse than the wrong-but-fresh package version, so it
-is NOT read as the release pointer.
+**The marker, and a correction.** At first implementation no release marker
+existed, and this module concluded ``edition.yaml``'s ``version:`` was "never
+refreshed" because it read 0.3.0 against a live v0.5.7. deploy-agent corrected
+that (2026-09-16): the field IS rewritten on every bootstrap — five EE tenants
+all read 0.5.7 minutes after that roll. The 0.3.0 was THIS host's, because
+otaman-dev is the fleet dev box and releases are never rolled to it. So the value
+was accurate for a machine that genuinely is old, not evidence of a broken
+mechanism.
 
-So this module resolves the release from a marker when one exists and says so
-honestly when none does. Deploy owns the marker (asked 20260915T233409); the
-candidate paths below are checked in order, so the moment it is written the
-answer becomes complete with no change here.
+deploy still chose a dedicated ``~/.otaman/release.yaml`` (they own the writer),
+on the architectural argument rather than the freshness one: ``edition.yaml``
+documents itself as identity/UX-only, and a single-purpose file is the only place
+to record the TAG (``v0.5.7``) rather than a bare version string — the tag is
+what canon says to quote. Their reader guidance, implemented below: prefer
+``release.yaml``, fall back to ``edition.yaml``'s field, and only then report
+unknown — so an already-deployed tenant gets a truthful answer today rather than
+a blank until the writer reaches them.
 """
 
 from __future__ import annotations
@@ -32,8 +37,14 @@ from pathlib import Path
 #: whose single job is "what release is installed" is harder to let drift than a
 #: field inside a file about something else — and drift is the bug being fixed.
 _CANDIDATES = (
+    # deploy's dedicated marker (they own the writer): `release:` is the TAG
+    # (`v0.5.7`) — what canon says to quote — with `version:` the tag-less form.
     (Path.home() / ".otaman" / "release.yaml", ("release", "version")),
-    (Path.home() / ".otaman" / "edition.yaml", ("release",)),  # `release:`, NOT `version:`
+    # Fallback while the writer rolls out. deploy-agent measured this field as
+    # fresh on every upgraded tenant (2026-09-16), so reading it gives a
+    # truthful answer TODAY rather than a blank until the next roll. It carries
+    # the tag-less form only.
+    (Path.home() / ".otaman" / "edition.yaml", ("release", "version")),
 )
 
 
