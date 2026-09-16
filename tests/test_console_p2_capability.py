@@ -269,7 +269,13 @@ def test_ledger_renders_as_one_collapsed_group(program):
     )
     group = dispositions_group(prog)
     assert group is not None
-    assert group.kind == "group" and group.closed is True  # history, not live work
+    assert group.kind == "group"
+    # `collapsed`, not `closed` (corrected in 5.1). This asserted `closed is
+    # True` and called it "collapsed by default" — but `closed` HIDES a node
+    # until `f`, and every branch was added with `expand=True`, so the ledger
+    # actually rendered EXPANDED and was one filter away from vanishing.
+    assert group.collapsed is True  # history, not live work: visible, not open
+    assert group.closed is False
     assert group.title == "2"
     labels = [c.id for c in group.children]
     assert "[absorbed] absorbed thing → other-change" in labels

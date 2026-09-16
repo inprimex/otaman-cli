@@ -351,8 +351,9 @@ class HomeScreen(Screen):
 
 class _SetupItem(ListItem):
     def __init__(self, verb) -> None:
-        hint = "otaman " + " ".join(verb.argv)
-        super().__init__(Label(f"{verb.label}   ($ {hint})", markup=False))
+        from otaman_cli.console.setup import setup_item_label
+
+        super().__init__(Label(setup_item_label(verb), markup=False))
         self.verb = verb
 
 
@@ -1024,7 +1025,7 @@ class TreeScreen(Screen):
         # A reference is always a LEAF: it navigates on activation and never
         # expands in place (D4), so it cannot grow a second copy of a subtree.
         if node.children and node.kind != "reference":
-            branch = parent.add(label, data=node, expand=True)
+            branch = parent.add(label, data=node, expand=not node.collapsed)
             for child in node.children:
                 self._add(branch, child, width)
         else:

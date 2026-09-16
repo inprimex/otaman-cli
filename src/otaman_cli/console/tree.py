@@ -42,6 +42,13 @@ class TreeNode:
     blocked_by: str | None = None
     next_actor: str | None = None
     closed: bool = False
+    #: Render this branch COLLAPSED. Distinct from ``closed``, which HIDES a node
+    #: until `f`: a collapsed node is visible, just not expanded. They were
+    #: conflated — `dispositions_group` set ``closed=True`` and commented it
+    #: "collapsed by default", so it rendered expanded (every branch is added
+    #: with ``expand=True``) and would have vanished the moment anything
+    #: filtered it. D7's sideways growth needs the real thing.
+    collapsed: bool = False
     dormant: bool = False
     grayed: bool = False  # decided-out sibling solution (tree-view-polish 1.3)
     marker: str = ""  # e.g. ★ for the chosen solution
@@ -316,6 +323,22 @@ def _change_node(program: Program, row, blocked: dict[str, str]) -> TreeNode:
     )
 
 
+def _extra_registry_roots(program: Program) -> list[TreeNode]:
+    """Collapsed sibling roots for enabled non-spine registries (5.1 / D7).
+
+    Appended AFTER ``dedupe_one_parent``: these are a separate namespace of
+    roots, not another view of a spine node, so they must never be dropped as a
+    "duplicate" of an outcome that happens to share a key. Imported lazily —
+    ``extra_registries`` imports ``TreeNode`` from here.
+    """
+    try:
+        from otaman_cli.console.extra_registries import registry_roots
+
+        return registry_roots(program)
+    except Exception:  # noqa: BLE001 - a bad process block never breaks the tree
+        return []
+
+
 def build_artifact_tree(
     program: Program, *, show_closed: bool = False, lens: str = LENS_VALUE
 ) -> list[TreeNode]:
@@ -351,7 +374,7 @@ def build_artifact_tree(
     if outcomes is None:
         # simplified: flat changes tree, no empty outcome scaffolding (D2)
         roots = _sort_changes([n for n in change_nodes.values() if _visible(n)])
-        return roots
+        return roots + _extra_registry_roots(program)
 
     roots: list[TreeNode] = []
     linked_changes: set[str] = set()
@@ -413,7 +436,7 @@ def build_artifact_tree(
         roots.append(TreeNode(kind="group", id="(unlinked changes)", title="", children=orphans))
     # D4 (3.3): enforced at the BUILDER, not asked of each caller — a node drawn
     # twice makes counts lie and collapse state meaningless.
-    return dedupe_one_parent(roots)
+    return dedupe_one_parent(roots) + _extra_registry_roots(program)
 
 
 __all__ = [
