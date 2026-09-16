@@ -669,9 +669,41 @@ class _DecisionActions:
     def _after_decision(self) -> None:  # pragma: no cover - overridden
         raise NotImplementedError
 
-    def _apply_decision(self, verb: str, reason: str, *, delivery: str | None = None) -> None:
-        target = self._decision_target()
+    def _apply_decision(
+        self, verb: str, reason: str, *, target=None, delivery: str | None = None
+    ) -> None:
+        """Run *verb* against *target* — which the CALLER captured.
+
+        `target` is passed in rather than re-derived, and that is the whole of
+        gate 6.1 F2. This re-read `self._decision_target()` here, AFTER the
+        reason modal's async round-trip. On the merged Messages list the target
+        comes from the ListView highlight, and dismissing the modal fires
+        `on_screen_resume` → `_load()`, which rebuilds the list and clears that
+        highlight BEFORE this callback runs. So the target was None by the time
+        it was read, the guard below returned, and the approval evaporated:
+        modal closed, no journal line, no notification, nothing written. Roman
+        lost two real approvals to it before it was caught.
+
+        The old ProposalScreen path never hit this because its target is a fixed
+        attribute, not a live selection — the merged surface introduced the
+        re-read. A decision belongs to the row the human was looking at when
+        they pressed the key, so it is captured then and carried through.
+        """
         if target is None:
+            target = self._decision_target()
+        if target is None:
+            # LOUDLY, never a bare return. A decision that cannot find its
+            # target is exactly the silent loss this whole path guards against,
+            # so it is journaled and shown even though it "does nothing".
+            log = getattr(self.app, "session_log", None)
+            if log is not None:
+                log.event("action-target-lost", action=verb, target="?")
+            self.app.notify(
+                f"{verb} did NOT run — the selected row was lost before the "
+                "decision was applied. Nothing was written; please retry.",
+                severity="error",
+                timeout=10,
+            )
             return
         from otaman_cli.console import decision
         from otaman_cli.console.identity import resolve_identity
@@ -707,9 +739,13 @@ class _DecisionActions:
             )
             return
 
+        # Captured HERE, while the human's selection is still the truth. Do not
+        # re-derive it inside the callback — see `_apply_decision` (gate 6.1 F2).
+        decided = target
+
         def _after(reason: str | None) -> None:
             if reason is not None:  # None = cancelled
-                self._apply_decision(verb, reason, delivery=delivery)
+                self._apply_decision(verb, reason, target=decided, delivery=delivery)
 
         label = "approve-auto" if delivery == "auto" else verb
         self.app.push_screen(ReasonModal(label), _after)
@@ -1482,10 +1518,26 @@ class ReasonModal(ModalScreen[str | None]):
     def on_mount(self) -> None:
         self.query_one("#reason-input", Input).focus()
 
+    def _journal(self, outcome: str) -> None:
+        """Record how this modal ended (gate 6.1 F2, requirement 2).
+
+        Diagnosing the F2 loss cost three round-trips with Roman precisely
+        because the journal could not distinguish "the human pressed Esc" from
+        "the callback was dropped" — both looked like a modal that opened and
+        produced nothing. Now a cancel says so, and a submit is always followed
+        immediately by an `action-intent`; a `modal-submitted` with no intent
+        after it means the chain broke, and says exactly where.
+        """
+        log = getattr(self.app, "session_log", None)
+        if log is not None:
+            log.event(outcome, verb=self._verb)
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._journal("modal-submitted")
         self.dismiss(event.value)
 
     def action_cancel(self) -> None:
+        self._journal("modal-cancelled")
         self.dismiss(None)
 
 
