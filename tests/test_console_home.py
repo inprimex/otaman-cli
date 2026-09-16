@@ -181,7 +181,10 @@ def test_home_renders_summary_off_thread(program):
         # They still dispatch and still land somewhere real, which is what this
         # test exists to guarantee; only the destination moved.
         ("decisions", "InboxScreen"),
-        ("lifecycle", "LifecycleScreen"),
+        # 3.1 — the lifecycle table became a LENS of Artifacts, so `l` lands on
+        # TreeScreen in the lifecycle lens. Still dispatches, still lands on a
+        # real screen; only the destination moved (D8 alias).
+        ("lifecycle", "TreeScreen"),
         ("review", "TreeScreen"),
     ],
 )

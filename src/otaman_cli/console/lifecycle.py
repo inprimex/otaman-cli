@@ -329,3 +329,59 @@ __all__ = [
     "list_lifecycle_states",
     "ratify_change",
 ]
+
+# ---------------------------------------------------------------------------
+# The lifecycle TABLE shape (console-ia-consolidation 3.1)
+#
+# Extracted so the standalone screen and the Artifacts lifecycle LENS render the
+# Roman-defined column set VERBATIM by sharing it, not by two copies agreeing.
+# That column set is a spec delta to change — a second copy is how it would
+# drift without anyone deciding to.
+
+LIFECYCLE_COLUMNS: tuple[str, ...] = (
+    "triage",
+    "change",
+    "stage",
+    "state",
+    "tasks",
+    "days",
+    "next actor",
+    "last touch",
+    "nudged",
+)
+
+TRIAGE_ABBR = {
+    "active": "active",
+    "archive-candidate": "arch-cand",
+    "paused-decision": "paused",
+    "absorbed": "absorbed",
+    "dormant": "dormant",
+}
+
+
+def lifecycle_row_cells(row) -> tuple[str, ...]:
+    """One change's nine cells, in :data:`LIFECYCLE_COLUMNS` order."""
+    name_cell = f"{row.name} [auto]" if row.delivery == "auto" else row.name
+    return (
+        TRIAGE_ABBR.get(row.triage, row.triage or "—"),
+        name_cell,
+        row.stage or "—",
+        row.state,
+        f"{row.tasks_done}/{row.tasks_total}",
+        row.age,
+        row.next_actor,
+        row.last_touch,
+        row.last_nudged or "—",
+    )
+
+
+def derive_lifecycle_rows(program):
+    """The lifecycle table's rows for *program* — the one derivation both the
+    standalone screen and the lens use."""
+    from otaman_cli.lifecycle import derive_change_table
+
+    active_dir, _ = program.bus_paths()
+    return derive_change_table(
+        changes_dir=_specs_changes_dir(program),
+        bus_active_dir=active_dir if active_dir.is_dir() else None,
+    )

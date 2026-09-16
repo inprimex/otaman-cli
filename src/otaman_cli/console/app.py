@@ -296,7 +296,15 @@ class HomeScreen(Screen):
         self._alias(InboxScreen(self.program), key="d", moved_to="Messages (m)")
 
     def action_lifecycle(self) -> None:
-        self.app.push_screen(LifecycleScreen(self.program))
+        # 3.1 — the lifecycle table is a LENS of Artifacts now; `l` lands there
+        # with the same columns. Alias, not removal (D8).
+        from otaman_cli.console.tree import LENS_LIFECYCLE
+
+        self._alias(
+            TreeScreen(self.program, lens=LENS_LIFECYCLE),
+            key="l",
+            moved_to="Artifacts (t) in the lifecycle lens — L cycles lenses",
+        )
 
     def action_review(self) -> None:
         # Spec review is an ACTION on an authored change now (2.2); `b` lands on
@@ -813,16 +821,25 @@ class TreeScreen(Screen):
         Binding("p", "toggle_panel", "Read panel", priority=True),
         # 2.2 — spec review is an ACTION on an authored change row, not a screen.
         Binding("v", "review", "Spec-approve (authored)", priority=True),
+        # 3.1 — one key cycles value → capability → lifecycle.
+        Binding("L", "cycle_lens", "Switch lens", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
         Binding("escape", "back", "Back", priority=True),
         Binding("q", "app.quit", "Quit", priority=True),
     ]
 
-    def __init__(self, program: Program, *, authored_only: bool = False) -> None:
+    def __init__(
+        self, program: Program, *, authored_only: bool = False, lens: str | None = None
+    ) -> None:
         super().__init__()
+        from otaman_cli.console.tree import LENS_VALUE
+
         self.program = program
         self._show_closed = False
         self._panel_open = False
+        # 3.1 — Artifacts is ONE door with three lenses over the same objects.
+        self._lens = lens or LENS_VALUE
+        self._rows: list = []  # lifecycle-lens rows
         # 2.2 — `b`'s new home: Artifacts filtered to authored changes, which is
         # what the standalone spec-review browser used to be a separate screen for.
         self._authored_only = authored_only
@@ -842,6 +859,11 @@ class TreeScreen(Screen):
             yield Tree("artifacts", id="artifact-tree")
             with VerticalScroll(id="tree-side"):
                 yield Static("", id="tree-side-body", markup=False)
+        # The lifecycle lens is a TABLE, not a tree — same door, same objects,
+        # different arrangement (D2). Both widgets exist; one is shown.
+        table = DataTable(id="artifact-lifecycle", zebra_stripes=True, cursor_type="row")
+        table.display = False
+        yield table
         yield Footer()
 
     def on_mount(self) -> None:
@@ -849,7 +871,35 @@ class TreeScreen(Screen):
         side = self.query_one("#tree-side")
         side.styles.width = "45%"
         side.display = False
+        # Columns come from the SHARED set (3.1) so the lens and the standalone
+        # screen cannot disagree about them.
+        from otaman_cli.console.lifecycle import LIFECYCLE_COLUMNS
+
+        self.query_one("#artifact-lifecycle", DataTable).add_columns(*LIFECYCLE_COLUMNS)
+        self._apply_lens()
         self._reload()
+
+    def action_cycle_lens(self) -> None:
+        """Cycle value → capability → lifecycle (3.1)."""
+        from otaman_cli.console.tree import next_lens
+
+        self._lens = next_lens(self._lens)
+        self._apply_lens()
+        self._reload()
+
+    def _apply_lens(self) -> None:
+        """Show the widget this lens renders into, and say which lens is active."""
+        from otaman_cli.console.tree import LENS_LABEL, LENS_LIFECYCLE
+
+        is_table = self._lens == LENS_LIFECYCLE
+        self.query_one("#artifact-lifecycle", DataTable).display = is_table
+        self.query_one("#tree-row").display = not is_table
+        label = LENS_LABEL.get(self._lens, self._lens)
+        self.query_one("#mode-banner", Static).update(
+            f"Artifacts · {self.program.name} — {label} lens\n"
+            "↑↓ move · enter open · L lens · v spec-approve · f closed · p read · "
+            "r refresh · esc back · q quit"
+        )
 
     def action_refresh(self) -> None:
         self._reload()
@@ -890,13 +940,34 @@ class TreeScreen(Screen):
         self.run_worker(self._load, thread=True, exclusive=True, group="tree")
 
     def _load(self) -> None:
-        from otaman_cli.console.tree import build_artifact_tree, tree_fallback_notice
+        from otaman_cli.console.tree import (
+            LENS_LIFECYCLE,
+            build_artifact_tree,
+            tree_fallback_notice,
+        )
 
-        roots = build_artifact_tree(self.program, show_closed=self._show_closed)
+        if self._lens == LENS_LIFECYCLE:
+            from otaman_cli.console.lifecycle import derive_lifecycle_rows
+
+            self.app.call_from_thread(self._paint_lifecycle, derive_lifecycle_rows(self.program))
+            return
+
+        roots = build_artifact_tree(self.program, show_closed=self._show_closed, lens=self._lens)
         if self._authored_only:
             roots = _authored_change_roots(self.program, roots)
         notice = tree_fallback_notice(self.program)
         self.app.call_from_thread(self._populate, roots, notice)
+
+    def _paint_lifecycle(self, rows: list) -> None:
+        """The lifecycle lens — the Roman-defined columns, rendered by the SAME
+        cell mapping the standalone screen uses (3.1)."""
+        from otaman_cli.console.lifecycle import lifecycle_row_cells
+
+        self._rows = rows
+        table = self.query_one("#artifact-lifecycle", DataTable)
+        table.clear()
+        for r in rows:
+            table.add_row(*lifecycle_row_cells(r))
 
     def _populate(self, roots, notice=None) -> None:
         notice_w = self.query_one("#tree-notice", Static)
@@ -932,7 +1003,9 @@ class TreeScreen(Screen):
             label.append(text, style=style or None)
         if width and label.cell_len > width:
             label.truncate(width, overflow="ellipsis")
-        if node.children:
+        # A reference is always a LEAF: it navigates on activation and never
+        # expands in place (D4), so it cannot grow a second copy of a subtree.
+        if node.children and node.kind != "reference":
             branch = parent.add(label, data=node, expand=True)
             for child in node.children:
                 self._add(branch, child, width)
@@ -976,6 +1049,22 @@ class TreeScreen(Screen):
 
         self.app.push_screen(ReasonModal("spec-approve"), _after)
 
+    def _navigate_to(self, kind: str, node_id: str) -> None:
+        """Open the referenced node's own view (D4: references navigate).
+
+        Deliberately opens the TARGET's detail rather than scrolling the tree to
+        it: the reference exists because the target lives under a different
+        parent, so "go there" is a view change, not a cursor move.
+        """
+        if not kind or not node_id:
+            return
+        if kind == "change":
+            self.app.push_screen(ChangeDetailScreen(self.program, node_id))
+        elif kind in ("outcome", "solution"):
+            self.app.push_screen(RegistryDetailScreen(self.program, kind, node_id))
+        else:
+            self.app.notify(f"{node_id} ({kind}) has no detail view yet.", timeout=5)
+
     def _cursor_node(self):
         """The highlighted tree row's data, or None — a seam mirroring
         LifecycleScreen's `_highlighted`, so actions are testable without
@@ -994,6 +1083,10 @@ class TreeScreen(Screen):
     def on_tree_node_selected(self, event) -> None:
         node = getattr(event.node, "data", None)
         if node is None:
+            return
+        # A reference NAVIGATES to its target (D4) rather than opening itself.
+        if node.kind == "reference":
+            self._navigate_to(node.ref_kind, node.ref_id)
             return
         if node.kind == "change":
             self.app.push_screen(ChangeDetailScreen(self.program, node.id))
@@ -1413,17 +1506,9 @@ class LifecycleScreen(Screen):
         Binding("q", "app.quit", "Quit", priority=True),
     ]
 
-    _COLUMNS = (
-        "triage",
-        "change",
-        "stage",
-        "state",
-        "tasks",
-        "days",
-        "next actor",
-        "last touch",
-        "nudged",
-    )
+    # The column set lives in console.lifecycle and is SHARED with the Artifacts
+    # lifecycle lens (3.1), so "verbatim" is structural rather than a promise.
+    from otaman_cli.console.lifecycle import LIFECYCLE_COLUMNS as _COLUMNS
 
     def __init__(self, program: Program) -> None:
         super().__init__()
@@ -1458,33 +1543,18 @@ class LifecycleScreen(Screen):
         self.run_worker(self._worker, thread=True, exclusive=True, group="lifecycle")
 
     def _worker(self) -> None:
-        from otaman_cli.console.lifecycle import _specs_changes_dir
-        from otaman_cli.lifecycle import derive_change_table
+        from otaman_cli.console.lifecycle import derive_lifecycle_rows
 
-        active_dir, _ = self.program.bus_paths()
-        rows = derive_change_table(
-            changes_dir=_specs_changes_dir(self.program),
-            bus_active_dir=active_dir if active_dir.is_dir() else None,
-        )
-        self.app.call_from_thread(self._paint, rows)
+        self.app.call_from_thread(self._paint, derive_lifecycle_rows(self.program))
 
     def _paint(self, rows: list) -> None:
         self._rows = rows
         table = self.query_one("#lifecycle-table", DataTable)
         table.clear()
+        from otaman_cli.console.lifecycle import lifecycle_row_cells
+
         for r in rows:
-            name_cell = f"{r.name} [auto]" if r.delivery == "auto" else r.name
-            table.add_row(
-                _TRIAGE_ABBR.get(r.triage, r.triage or "—"),
-                name_cell,
-                r.stage or "—",
-                r.state,
-                f"{r.tasks_done}/{r.tasks_total}",
-                r.age,
-                r.next_actor,
-                r.last_touch,
-                r.last_nudged or "—",
-            )
+            table.add_row(*lifecycle_row_cells(r))
         if not rows:
             self.query_one("#lifecycle-detail", Static).update("No changes found.")
 

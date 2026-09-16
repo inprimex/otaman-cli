@@ -47,6 +47,11 @@ class TreeNode:
     marker: str = ""  # e.g. ★ for the chosen solution
     pm_sync_id: str | None = None  # linked issue/ticket id (S10)
     children: list[TreeNode] = field(default_factory=list)
+    #: For ``kind == "reference"`` (D4): the node this line NAVIGATES to. A
+    #: reference never expands in place and never carries children — it is how a
+    #: second relation is shown without drawing the node twice.
+    ref_kind: str = ""
+    ref_id: str = ""
 
     _HUGE = 1 << 30  # "no clip" sentinel for the full label
 
@@ -71,6 +76,10 @@ class TreeNode:
         def st(style: str) -> str:
             return GRAY_STYLE if self.grayed else style
 
+        if self.kind == "reference":
+            # A reference LINE, not a node: prefixed so it reads as a pointer,
+            # and it never carries children to expand (D4).
+            return [("→ ", st("")), (self.id or self.title, st("italic"))]
         segs: list[tuple[str, str]] = [(self.id or self.title, st("bold"))]
         cols: list[tuple[str, str]] = []
         if self.kind == "outcome" and self.created:
@@ -111,6 +120,63 @@ class TreeNode:
         """The plain-text row with the title clipped to *max_title* (see
         :meth:`row_segments`)."""
         return "".join(t for t, _ in self.row_segments(max_title=max_title)).rstrip()
+
+
+#: The three arrangements of the SAME objects (console-ia-consolidation D2).
+#: Only the arrangement differs — a lens is not a filter and not a new dataset.
+LENS_VALUE = "value"  # outcomes → solutions → changes: why, and where is it?
+LENS_CAPABILITY = "capability"  # capability specs ← the changes that shaped them
+LENS_LIFECYCLE = "lifecycle"  # the flat change table: what moves, what is stuck?
+
+LENSES = (LENS_VALUE, LENS_CAPABILITY, LENS_LIFECYCLE)
+
+#: Human-facing names, used in the banner so the current lens is never guessed.
+LENS_LABEL = {
+    LENS_VALUE: "value",
+    LENS_CAPABILITY: "capability",
+    LENS_LIFECYCLE: "lifecycle",
+}
+
+
+def next_lens(current: str) -> str:
+    """The next lens in the cycle — one key toggles through all three (3.1)."""
+    try:
+        return LENSES[(LENSES.index(current) + 1) % len(LENSES)]
+    except ValueError:
+        return LENS_VALUE
+
+
+def dedupe_one_parent(roots: list[TreeNode]) -> list[TreeNode]:
+    """Enforce D4: a node appears exactly ONCE per lens, under one parent.
+
+    Walks depth-first and drops any node whose (kind, id) has already been drawn,
+    keeping the first — structural — occurrence. Reference lines are exempt:
+    they are the sanctioned way a second relation shows up, and they navigate
+    rather than expand, so they carry no children to double-count.
+
+    Why it matters concretely: change ↔ capability is many-to-many (measured: 6
+    capabilities on one change, 9 changes on one capability). Drawing a node
+    under every relation would make collapse state meaningless and every count
+    a lie — the same node collapsed in one place and expanded in another, summing
+    to more artifacts than exist.
+    """
+    seen: set[tuple[str, str]] = set()
+
+    def walk(nodes: list[TreeNode]) -> list[TreeNode]:
+        kept: list[TreeNode] = []
+        for n in nodes:
+            if n.kind == "reference":
+                kept.append(n)
+                continue
+            key = (n.kind, n.id)
+            if key in seen:
+                continue
+            seen.add(key)
+            n.children = walk(n.children)
+            kept.append(n)
+        return kept
+
+    return walk(list(roots))
 
 
 def _extract_outcome_id(raw: object) -> str | None:
@@ -250,7 +316,9 @@ def _change_node(program: Program, row, blocked: dict[str, str]) -> TreeNode:
     )
 
 
-def build_artifact_tree(program: Program, *, show_closed: bool = False) -> list[TreeNode]:
+def build_artifact_tree(
+    program: Program, *, show_closed: bool = False, lens: str = LENS_VALUE
+) -> list[TreeNode]:
     """The linked artifact tree roots. Outcome-first when registries are enabled;
     otherwise a flat changes tree. *show_closed* re-includes closed/absorbed
     items (hidden by default); dormant changes always sort last."""
@@ -332,11 +400,20 @@ def build_artifact_tree(program: Program, *, show_closed: bool = False) -> list[
     roots.sort(key=lambda n: (_priority_rank(n.priority), n.id))
     if orphans:
         roots.append(TreeNode(kind="group", id="(unlinked changes)", title="", children=orphans))
-    return roots
+    # D4 (3.3): enforced at the BUILDER, not asked of each caller — a node drawn
+    # twice makes counts lie and collapse state meaningless.
+    return dedupe_one_parent(roots)
 
 
 __all__ = [
+    "LENSES",
+    "LENS_CAPABILITY",
+    "LENS_LABEL",
+    "LENS_LIFECYCLE",
+    "LENS_VALUE",
     "TreeNode",
+    "dedupe_one_parent",
+    "next_lens",
     "build_artifact_tree",
     "registries_enabled",
     "tree_fallback_notice",
