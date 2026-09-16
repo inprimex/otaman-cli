@@ -36,6 +36,23 @@ _textual = pytest.mark.skipif(
 
 
 @pytest.fixture
+def log_dir(tmp_path):
+    """A per-test journal directory.
+
+    Two things made this necessary, both found when Windows CI failed while
+    ubuntu and macOS passed. `ConsoleLog.open` names its file
+    `<YYYYmmddTHHMMSS>.log` — SECOND precision — so two apps started in the
+    same second share one file, and `_events(app)` then read the previous
+    test's events: the cancel test saw a `modal-submitted` + `action-intent`
+    it never performed. The default directory is also the real
+    `~/.otaman/console-logs`, so the tests were writing into the user's home.
+    """
+    d = tmp_path / "console-logs"
+    d.mkdir()
+    return d
+
+
+@pytest.fixture
 def program(tmp_path):
     from otaman_cli.console.bus import Program
 
@@ -96,12 +113,12 @@ async def _open_messages(app, pilot, program):
 
 
 @_textual
-def test_approving_from_the_merged_list_actually_executes(program):
+def test_approving_from_the_merged_list_actually_executes(program, log_dir):
     """THE REGRESSION. Real keys the whole way: a -> reason -> Enter."""
     from otaman_cli.console.app import OtamanConsole
 
     async def go():
-        app = OtamanConsole([program], search_root=program.root)
+        app = OtamanConsole([program], search_root=program.root, log_dir=log_dir)
         async with app.run_test() as pilot:
             await pilot.pause()
             await _open_messages(app, pilot, program)
@@ -134,7 +151,7 @@ def test_approving_from_the_merged_list_actually_executes(program):
 
 
 @_textual
-def test_the_decision_survives_the_list_reloading_under_the_modal(program):
+def test_the_decision_survives_the_list_reloading_under_the_modal(program, log_dir):
     """The exact mechanism: dismissing the modal fires on_screen_resume ->
     _load(), which rebuilds the list and clears the highlight BEFORE the
     callback runs. The captured target must carry the decision through."""
@@ -143,7 +160,7 @@ def test_the_decision_survives_the_list_reloading_under_the_modal(program):
     from otaman_cli.console.app import OtamanConsole
 
     async def go():
-        app = OtamanConsole([program], search_root=program.root)
+        app = OtamanConsole([program], search_root=program.root, log_dir=log_dir)
         async with app.run_test() as pilot:
             await pilot.pause()
             screen = await _open_messages(app, pilot, program)
@@ -164,12 +181,12 @@ def test_the_decision_survives_the_list_reloading_under_the_modal(program):
 
 
 @_textual
-def test_cancelling_writes_modal_cancelled_and_nothing_else(program):
+def test_cancelling_writes_modal_cancelled_and_nothing_else(program, log_dir):
     """Requirement 2: 'user escaped' must never look like 'callback dropped'."""
     from otaman_cli.console.app import OtamanConsole
 
     async def go():
-        app = OtamanConsole([program], search_root=program.root)
+        app = OtamanConsole([program], search_root=program.root, log_dir=log_dir)
         async with app.run_test() as pilot:
             await pilot.pause()
             await _open_messages(app, pilot, program)
@@ -189,13 +206,13 @@ def test_cancelling_writes_modal_cancelled_and_nothing_else(program):
 
 
 @_textual
-def test_a_submitted_modal_is_immediately_followed_by_intent(program):
+def test_a_submitted_modal_is_immediately_followed_by_intent(program, log_dir):
     """Requirement 2, the other half: `modal-submitted` with no `action-intent`
     after it is the signature of a broken chain, and now says so."""
     from otaman_cli.console.app import OtamanConsole
 
     async def go():
-        app = OtamanConsole([program], search_root=program.root)
+        app = OtamanConsole([program], search_root=program.root, log_dir=log_dir)
         async with app.run_test() as pilot:
             await pilot.pause()
             await _open_messages(app, pilot, program)
