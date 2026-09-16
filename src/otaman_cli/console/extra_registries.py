@@ -93,9 +93,9 @@ def _entry_rows(path: Path) -> list[tuple[str, str]]:
     renders, just without a preview.
     """
     try:
-        import yaml
+        from otaman_cli.yaml_fast import load_file
 
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data = load_file(path)
     except Exception:  # noqa: BLE001 - unreadable/invalid → no preview
         return []
 

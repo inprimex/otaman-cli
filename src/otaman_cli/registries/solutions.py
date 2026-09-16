@@ -12,7 +12,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _SOLUTION_ID_RE = re.compile(r"^SOL-\d+-[a-z0-9-]+$")
@@ -183,5 +182,7 @@ class SolutionRegistry(BaseModel):
 
 def load_solutions(path: Path) -> SolutionRegistry:
     """Load and validate `solutions.yaml`."""
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    from otaman_cli.yaml_fast import load_file
+
+    raw = load_file(path, {}) or {}
     return SolutionRegistry.model_validate(raw)

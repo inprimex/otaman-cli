@@ -383,35 +383,81 @@ def _tasks_counts(text: str) -> tuple[int, int]:
     return done, done + todo
 
 
+#: (repo root, HEAD sha) -> {change name: last non-chore commit date}
+_TOUCH_CACHE: dict[tuple[str, str], dict[str, str]] = {}
+
+_DATE_LINE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _git(repo: Path, *args: str, timeout: int = 60):
+    import subprocess
+
+    try:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=timeout
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _last_touch_map(change_dir: Path) -> dict[str, str]:
+    """``{change name: last non-chore commit date}`` from ONE ``git log``.
+
+    This replaced one ``git log`` PER CHANGE. On the live specs repo that was
+    106 subprocess spawns costing ~3.0 s of a single artifacts render — the
+    largest remaining cost after the YAML fix. One batched log over the whole
+    changes dir answers every row in ~390 ms.
+
+    Keyed on HEAD, so it self-invalidates when a commit lands and needs no
+    manual clearing. Dates come only from committed history, so HEAD is the
+    whole of what the answer depends on.
+    """
+    top = _git(change_dir, "rev-parse", "--show-toplevel")
+    if top is None or top.returncode != 0 or not top.stdout.strip():
+        return {}
+    repo = Path(top.stdout.strip())
+    head = _git(repo, "rev-parse", "HEAD")
+    key = (str(repo), head.stdout.strip() if head and head.returncode == 0 else "")
+    if key in _TOUCH_CACHE:
+        return _TOUCH_CACHE[key]
+
+    log = _git(
+        repo, "log", "--format=%cs", "--invert-grep", "--grep=^chore", "--name-only", "--", "."
+    )
+    out: dict[str, str] = {}
+    if log is not None and log.returncode == 0:
+        date = ""
+        for raw in log.stdout.splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            if _DATE_LINE.match(line):
+                date = line
+                continue
+            # Newest commit wins: `git log` is newest-first, so the FIRST date
+            # seen for a directory is its last real touch. An archived change
+            # appears under both its pre- and post-archive path, so a lookup by
+            # either name resolves.
+            parts = line.split("/")
+            for i, seg in enumerate(parts[:-1]):
+                if seg == "changes":
+                    rest = parts[i + 1 :]
+                    name = rest[1] if rest and rest[0] == "archive" and len(rest) > 1 else rest[0]
+                    if name and date:
+                        out.setdefault(name, date)
+                    break
+    if len(_TOUCH_CACHE) >= 8:  # a session touches one or two repos
+        _TOUCH_CACHE.pop(next(iter(_TOUCH_CACHE)))
+    _TOUCH_CACHE[key] = out
+    return out
+
+
 def _last_real_touch(change_dir: Path) -> str:
     """Last NON-chore commit date (YYYY-MM-DD) touching the change dir, or '?'.
 
     Excludes ``chore(...)`` commits (the triage/tick passes) so the column shows
     real progress, not bookkeeping (D10)."""
-    import subprocess
-
-    try:
-        r = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(change_dir),
-                "log",
-                "-1",
-                "--format=%cs",
-                "--invert-grep",
-                "--grep=^chore",
-                "--",
-                ".",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        out = r.stdout.strip()
-        return out if r.returncode == 0 and out else "?"
-    except (OSError, subprocess.SubprocessError):
-        return "?"
+    return _last_touch_map(change_dir).get(change_dir.name, "?")
 
 
 def _last_nudged(bus_active_dir: Path | None, change: str) -> str:

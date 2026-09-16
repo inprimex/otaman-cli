@@ -40,54 +40,45 @@ class InboxMessage:
 
 
 def list_inbox_messages(program: Program) -> list[InboxMessage]:
-    """Active messages addressed to the human that are not decisions — newest first."""
-    import yaml
+    """Active messages addressed to the human that are not decisions — newest first.
 
-    from otaman_cli.console.bus import _QUEUE_TYPES, _frontmatter_head
+    Reads the bus through the SHARED index, and carries NO bodies: this list
+    full-read all ~727 matching files just to pull a subject line out of each,
+    the same waste the decision queue shed in 2.1. Subject comes from a bounded
+    head; the body is read on open by ``bus.read_body``.
+    """
+    from otaman_cli.console.bus import _QUEUE_TYPES, _subject_head
+    from otaman_cli.console.bus_index import active_entries
 
-    active_dir, acks_dir = program.bus_paths()
-    if not active_dir.is_dir():
-        return []
+    _, acks_dir = program.bus_paths()
     try:
         acked = {p.name for p in acks_dir.glob("*.human.ack")} if acks_dir.is_dir() else set()
     except OSError:
         acked = set()
 
     out: list[InboxMessage] = []
-    for f in sorted(active_dir.glob("*.md")):
-        fm_text = _frontmatter_head(f)
-        if fm_text is None or "human" not in fm_text:
+    for entry in active_entries(program):
+        f = entry.path
+        # Cheap tier first — only surviving rows get the authoritative parse.
+        if entry.tag("to") != "human":
             continue
-        try:
-            fm = yaml.safe_load(fm_text)
-        except yaml.YAMLError:
-            continue
-        if not isinstance(fm, dict) or fm.get("to") != "human":
-            continue
-        if fm.get("type") in _QUEUE_TYPES or fm.get("x-cc"):
+        if entry.tag("type") in _QUEUE_TYPES or entry.flag("x-cc"):
             continue  # decisions belong to the queue; CC copies aren't the primary
         if f"{f.stem}.human.ack" in acked:
             continue
-        try:
-            content = f.read_text(encoding="utf-8")
-        except OSError:
+        fm = entry.fm
+        if not fm:
             continue
-        body = content.split("---", 2)[-1] if content.count("---") >= 2 else ""
-        subject = ""
-        for line in body.splitlines():
-            if line.strip().startswith("## Subject:"):
-                subject = line.strip().replace("## Subject:", "").strip()
-                break
         out.append(
             InboxMessage(
                 stem=f.stem,
-                subject=subject or f.stem,
+                subject=_subject_head(f) or f.stem,
                 from_agent=str(fm.get("from", "?")),
                 timestamp=str(fm.get("timestamp", "")),
                 priority=str(fm.get("priority", "normal")),
                 msg_type=str(fm.get("type", "info")),
                 path=f,
-                body=body.strip(),
+                body="",  # lazy — see bus.read_body()
             )
         )
     # newest first (timestamp string is ISO-ish; lexical sort is chronological)

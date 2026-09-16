@@ -99,9 +99,9 @@ def _program_meta(platform_yaml: Path) -> dict | None:
     (5.1 finding #1); it rejects the "trust any platform.yaml" behavior.
     """
     try:
-        import yaml
+        from otaman_cli.yaml_fast import load_file
 
-        data = yaml.safe_load(platform_yaml.read_text(encoding="utf-8"))
+        data = load_file(platform_yaml)
     except Exception:  # noqa: BLE001 - unreadable/malformed → not a program
         return None
     if not isinstance(data, dict):
@@ -310,39 +310,34 @@ def list_human_queue(program: Program) -> list[Proposal]:
     under different names; decision rows are the ones whose ``msg_type`` is in
     :data:`_QUEUE_TYPES`, and they are what the action keys operate on.
 
-    Keeps the 5.1 perf shape (bounded frontmatter read, one ack-dir listing, full
-    read only for rows that survive filtering) — it now pays that cost once
-    instead of twice.
+    Reads the bus through the SHARED index (``bus_index.active_entries``), so
+    the frontmatter pass is paid once for all three listers and memoized across
+    renders — Home used to scan this directory three times. The old substring
+    pre-filter is gone with it: it existed only to dodge a parse that is now
+    cached, and it was the thing that once silently dropped the two live
+    agent-addressed outcome-proposals.
     """
-    import yaml
+    from otaman_cli.console.bus_index import active_entries
 
-    active_dir, acks_dir = program.bus_paths()
-    if not active_dir.is_dir():
-        return []
+    _, acks_dir = program.bus_paths()
     try:
         acked = {p.name for p in acks_dir.glob("*.human.ack")} if acks_dir.is_dir() else set()
     except OSError:
         acked = set()
 
     out: list[Proposal] = []
-    for f in sorted(active_dir.glob("*.md")):
-        fm_text = _frontmatter_head(f)
-        if fm_text is None:
-            continue
-        # Cheap substring pre-filter before any YAML parse (the 5.1 perf shape).
-        # It must admit BOTH clauses of the union below — an early
-        # `"human" not in fm_text` alone silently dropped the two live
-        # agent-addressed outcome-proposals, because their frontmatter never
-        # mentions the human at all.
-        if "human" not in fm_text and not any(t in fm_text for t in _QUEUE_TYPES):
-            continue
+    for entry in active_entries(program):
+        f = entry.path
         if f"{f.stem}.human.ack" in acked:
             continue
-        try:
-            fm = yaml.safe_load(fm_text)
-        except yaml.YAMLError:
+        # CHEAP tier decides what to skip; the authoritative parse below builds
+        # only the rows that survive (~735 of 5473 on the live bus).
+        if entry.tag("to") != "human" and entry.tag("type") not in _QUEUE_TYPES:
             continue
-        if not isinstance(fm, dict):
+        if entry.flag("x-cc"):
+            continue
+        fm = entry.fm
+        if not fm:
             continue
         # The UNION of what the two old listers surfaced, deliberately: a row
         # qualifies if it is addressed to the human OR it is a decision type.
@@ -393,18 +388,15 @@ def list_pending_proposals(program: Program) -> list[Proposal]:
     skipped so only the human's primary shows once. Malformed files are skipped,
     never crash the console.
 
-    Perf (5.1 finding #5 — ~3000-message active dirs): the hot loop reads only
-    a bounded frontmatter head (not the whole file), skips the ~99% of
-    messages that aren't spec-change-requests with a cheap substring test
-    BEFORE any YAML parse, and lists the ack dir ONCE into a set instead of a
-    stat per message. The full file is read only for the handful of genuine
-    pending proposals (for their subject + body). ~3000 files: 2.3s → <0.3s.
+    Perf: reads the bus through the SHARED index, so the frontmatter pass is
+    paid once for all three listers and memoized across renders. The ack dir is
+    still listed ONCE into a set rather than stat-ed per message, and the full
+    file is read only for the handful of genuine pending proposals (for their
+    subject + body).
     """
-    import yaml
+    from otaman_cli.console.bus_index import active_entries
 
-    active_dir, acks_dir = program.bus_paths()
-    if not active_dir.is_dir():
-        return []
+    _, acks_dir = program.bus_paths()
 
     # List acks once → a set membership test, not a filesystem stat per message.
     try:
@@ -413,21 +405,14 @@ def list_pending_proposals(program: Program) -> list[Proposal]:
         acked = set()
 
     out: list[Proposal] = []
-    for f in sorted(active_dir.glob("*.md")):
-        fm_text = _frontmatter_head(f)
-        if fm_text is None:
-            continue
-        # Cheap prefilter: skip the overwhelming majority without parsing YAML.
-        # fm_text is the frontmatter ONLY, so this can't false-match a body.
-        if not any(t in fm_text for t in _QUEUE_TYPES):
-            continue
+    for entry in active_entries(program):
+        f = entry.path
         if f"{f.stem}.human.ack" in acked:
             continue
-        try:
-            fm = yaml.safe_load(fm_text)
-        except yaml.YAMLError:
-            continue
-        if not isinstance(fm, dict) or fm.get("type") not in _QUEUE_TYPES:
+        if entry.tag("type") not in _QUEUE_TYPES:
+            continue  # cheap tier: skips ~99% without a YAML parse
+        fm = entry.fm
+        if fm.get("type") not in _QUEUE_TYPES:
             continue
         # Skip CC copies (outcome-proposal fans out to strategic agents) — the
         # human's primary is the one to act on; showing the CC copies would

@@ -12,7 +12,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from otaman_cli.registries.outcomes import (
@@ -166,7 +165,11 @@ def load_program_extensions(platform_yaml_path: Path) -> ProgramExtensions:
     Returns a default-populated `ProgramExtensions` if `program:` is absent
     (defaults match Appendix D.2 / D.8 conventions).
     """
-    raw = yaml.safe_load(platform_yaml_path.read_text(encoding="utf-8")) or {}
+    from otaman_cli.yaml_fast import load_file
+
+    # Memoized: `registries_enabled` alone re-parsed this file on every call,
+    # costing 0.8 s of a warm artifacts render.
+    raw = load_file(platform_yaml_path, {}) or {}
     program_block: dict[str, Any] = raw.get("program") or {}
     return ProgramExtensions.model_validate(program_block)
 
