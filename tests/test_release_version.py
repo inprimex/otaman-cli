@@ -61,15 +61,32 @@ def test_falls_through_an_empty_candidate(tmp_path):
     assert r.release == "v2"
 
 
-def test_stale_edition_version_field_is_NOT_read_as_the_release(tmp_path):
-    """`~/.otaman/edition.yaml` carries a `version:` written once at install and
-    never refreshed — it read 0.3.0 against a live v0.5.7 — and documents itself
-    as identity/UX only. Presenting that as the installed version would be worse
-    than the wrong-but-fresh package version, so only a `release:` key counts."""
+def test_edition_version_is_read_as_a_FALLBACK(tmp_path):
+    """CORRECTED (deploy-agent, 2026-09-16). This originally asserted the
+    opposite, on my premise that `edition.yaml`'s `version:` is "never
+    refreshed" — it read 0.3.0 against a live v0.5.7. That premise was wrong:
+    the field IS rewritten every bootstrap (five EE tenants all read 0.5.7
+    minutes after that roll); the 0.3.0 was the fleet DEV BOX, which releases are
+    never rolled to. Accurate for an old machine, not a broken mechanism.
+
+    So it is a legitimate fallback — a truthful answer on any upgraded tenant
+    today, rather than a blank until deploy's writer reaches them."""
     ed = tmp_path / "edition.yaml"
-    ed.write_text('edition: ee\nchannel: ee\nversion: "0.3.0"\n', encoding="utf-8")
-    r = resolve_release_version("0.4.0", candidates=[(ed, ("release",))])
-    assert r.resolved is False
+    ed.write_text('edition: ee\nchannel: ee\nversion: "0.5.7"\n', encoding="utf-8")
+    r = resolve_release_version("0.4.0", candidates=[(ed, ("release", "version"))])
+    assert r.resolved is True and r.release == "0.5.7"
+
+
+def test_release_yaml_wins_over_the_edition_fallback(tmp_path):
+    """Preference order matters: `release.yaml` carries the TAG (`v0.5.7`),
+    which is what canon says to quote; edition.yaml has only the bare form."""
+    rel, ed = tmp_path / "release.yaml", tmp_path / "edition.yaml"
+    rel.write_text("release: v0.5.7\n", encoding="utf-8")
+    ed.write_text('version: "0.5.7"\n', encoding="utf-8")
+    r = resolve_release_version(
+        "0.4.0", candidates=[(rel, ("release", "version")), (ed, ("release", "version"))]
+    )
+    assert r.release == "v0.5.7"  # the tag, not the bare version
 
 
 @pytest.mark.parametrize(
