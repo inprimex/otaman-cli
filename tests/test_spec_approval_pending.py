@@ -11,6 +11,28 @@ import subprocess
 import sys
 from pathlib import Path
 
+# generated-artifact-quality 1.1 — `propose` now REFUSES an SCR with unfilled
+# sections, so a bare title no longer files one. These tests are not about that
+# rule (they cover collision handling / the pending-queue enqueue / the help
+# footgun); they just needed an SCR to exist. They now file a decision-grade
+# one. The refusal itself is covered by tests/test_scr_template.py.
+_SCR = [
+    "--problem",
+    "an observed problem",
+    "--evidence",
+    "src/otaman_cli/main.py:1",
+    "--impact",
+    "one caller",
+    "--direction",
+    "a direction",
+    "--scope",
+    "n/a because nothing is excluded",
+    "--routing",
+    "otaman-cli",
+    "--workaround",
+    "n/a because none is needed",
+]
+
 
 def _root(tmp_path: Path) -> Path:
     (tmp_path / ".agents" / "bus" / "active" / "acks").mkdir(parents=True)
@@ -43,7 +65,7 @@ def _run(root: Path, *argv: str) -> subprocess.CompletedProcess:
 
 def test_propose_enqueues_spec_approval_pending(tmp_path):
     root = _root(tmp_path)
-    r = _run(root, "propose", "add pagination")
+    r = _run(root, "propose", "add pagination", *_SCR)
     assert r.returncode == 0, r.stderr + r.stdout
     active = root / ".agents" / "bus" / "active"
     sap = list(active.glob("*spec-approval-pending*.md"))
@@ -61,7 +83,7 @@ def test_propose_enqueues_spec_approval_pending(tmp_path):
 
 def test_check_surfaces_awaiting_approval(tmp_path):
     root = _root(tmp_path)
-    _run(root, "propose", "add pagination")
+    _run(root, "propose", "add pagination", *_SCR)
     r = _run(root, "check", "cli-agent")
     out = r.stdout + r.stderr
     assert "awaiting approval" in out.lower()

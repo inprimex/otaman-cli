@@ -45,6 +45,35 @@ def _parse_desc(args: list[str]) -> tuple[str, list[str]]:
     return desc, positional
 
 
+def _parse_sections(args: list[str]) -> tuple[dict[str, str], str | None, list[str]]:
+    """Pull `--<section>` values and `--evidence-level` out of *args*.
+
+    Every decision-grade section is fillable from the command line so the
+    refusal below is answerable in one invocation — a refusal you cannot
+    satisfy without hand-editing the file would just teach people to hand-edit
+    the file (generated-artifact-quality 1.1).
+    """
+    from otaman_cli.scr_template import SECTION_KEYS
+
+    sections: dict[str, str] = {}
+    level: str | None = None
+    rest: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        key = arg[2:] if arg.startswith("--") else ""
+        if key in SECTION_KEYS and i + 1 < len(args):
+            sections[key] = args[i + 1]
+            i += 2
+        elif key in ("evidence-level", "evidence_level") and i + 1 < len(args):
+            level = args[i + 1]
+            i += 2
+        else:
+            rest.append(arg)
+            i += 1
+    return sections, level, rest
+
+
 def cmd_propose(args: list[str]) -> int:
     """Create a spec-change-request on the bus for human approval."""
     if _help_requested(args):
@@ -52,6 +81,7 @@ def cmd_propose(args: list[str]) -> int:
         return 0
 
     desc, args = _parse_desc(args)
+    sections, evidence_level, args = _parse_sections(args)
 
     if not args:
         UI.error("Title required")
@@ -83,6 +113,33 @@ def cmd_propose(args: list[str]) -> int:
     active_dir.mkdir(parents=True, exist_ok=True)
     (active_dir / "acks").mkdir(exist_ok=True)
 
+    # ONE template, shared with the plugin's MCP propose path (1.1/1.2), and a
+    # REFUSAL for sections left unfilled. 54 of 119 SCRs ever filed (45%) carried
+    # TODO sections; the team-mode SCR was approved with three of four reading
+    # TODO and produced two day-one implementation blockers. A section that
+    # genuinely does not apply says `n/a because <reason>`, so the refusal never
+    # forces invention — it only forbids silence.
+    from otaman_cli.scr_template import render, validate
+
+    if desc and "problem" not in sections:
+        # `-d` predates the sections; treat it as the problem statement rather
+        # than dropping what the caller already typed.
+        sections["problem"] = desc
+    body = render(title, sections=sections, evidence_level=evidence_level)
+    ok, errors = validate(body, evidence_level=evidence_level)
+    if not ok:
+        UI.error("Refusing to propose — this SCR is not decision-grade yet:")
+        for err in errors:
+            UI.muted(f"  - {err}")
+        UI.muted("")
+        UI.muted("  Every section is answerable from what you already know:")
+        from otaman_cli.scr_template import SECTIONS
+
+        for section in SECTIONS:
+            UI.muted(f"    --{section.key:<11} {section.heading}")
+        UI.muted("  Optional: --evidence-level measured|reproduced|observed-once|inferred")
+        return 1
+
     content = f"""---
 id: {msg_id}
 from: {agent}
@@ -93,23 +150,7 @@ timestamp: {now_iso}
 status: pending
 ---
 
-## Subject: Spec change request: {title}
-
-### What needs to change
-{desc or "TODO: Describe the proposed spec change."}
-
-### Why this is needed
-TODO: What was discovered during implementation that triggered this.
-
-### Affected specs
-TODO: Which spec files/areas need updating.
-
-### Affected repos
-TODO: Which repos will need implementation changes after the spec updates.
-
-### Suggested spec changes
-TODO: Concrete suggestions for what the spec should say.
-"""
+{body}"""
 
     from otaman_cli.bus_write import BusMessageValidationError, write_message_exclusive
 

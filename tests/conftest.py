@@ -62,6 +62,7 @@ def _isolated_tenant_home(tmp_path, monkeypatch):
 
     import otaman_cli.connections.store as _conn_store
     import otaman_cli.console.identity as _console_identity
+    import otaman_cli.console.journal as _console_journal
     import otaman_cli.console.prefs as _console_prefs
     import otaman_cli.hitl.chat_fallback as _chat
     import otaman_cli.hitl.config as _config
@@ -95,6 +96,17 @@ def _isolated_tenant_home(tmp_path, monkeypatch):
     def _console_prefs_path(arg=None):
         return (arg or home) / ".otaman" / "console-prefs.json"
 
+    # The console SESSION JOURNAL was the one `~/.otaman` writer this fixture
+    # missed: `ConsoleLog.open` defaults to `~/.otaman/console-logs/`, so every
+    # in-process test that builds an `OtamanConsole` (ten files of them) wrote
+    # into the real home. It also names files `<YYYYmmddTHHMMSS>.log` at SECOND
+    # precision, so two apps started in the same second SHARE one file — which
+    # is how a cancel test read a `modal-submitted` it never performed and
+    # failed on Windows CI while ubuntu and macOS passed.
+    def _console_log_dir():
+        return home / ".otaman" / "console-logs"
+
+    monkeypatch.setattr(_console_journal, "_default_log_dir", _console_log_dir)
     monkeypatch.setattr(_console_identity, "tenant_roster_path", _tenant_roster_path)
     monkeypatch.setattr(_console_prefs, "console_prefs_path", _console_prefs_path)
     monkeypatch.setattr(_config, "hitl_config_path", _hitl_path)

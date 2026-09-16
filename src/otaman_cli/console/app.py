@@ -1579,9 +1579,29 @@ class ProposalScreen(_DecisionActions, Screen):
             id="proposal-title",
             markup=False,
         )
-        yield MarkdownViewer(
-            read_body(self.proposal), show_table_of_contents=False, id="proposal-body"
-        )
+        body = read_body(self.proposal)
+        # generated-artifact-quality 1.3 — completeness BEFORE the decision keys
+        # act, and only for the artifacts the standard governs. 54 of 119 SCRs
+        # carried TODO sections and the team-mode one was APPROVED with three of
+        # four reading TODO; the human could not see that without scrolling the
+        # body. This is a FACT line — sections filled, anchors present, the
+        # author's declared evidence level — never a score. A number would
+        # invite ranking SCRs by it, which is refused until an independent
+        # critic exists to produce one (the RESERVED-slot precedent, and the
+        # triage scorer that ranked rejected-cheap above recommended).
+        if self.proposal.msg_type == "spec-change-request":
+            from otaman_cli.scr_template import completeness, completeness_line
+
+            facts = completeness(body)
+            line = completeness_line(body)
+            if not facts["template"]:
+                marker = "·"  # legacy: a fact, not a fault
+            elif facts["unfilled"]:
+                marker = "⚠"
+            else:
+                marker = "✓"
+            yield Static(f"{marker} {line}", id="proposal-completeness", markup=False)
+        yield MarkdownViewer(body, show_table_of_contents=False, id="proposal-body")
         yield Footer()
 
     # The decide path lives in _DecisionActions, shared with the merged
