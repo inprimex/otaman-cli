@@ -305,6 +305,19 @@ class TestSetStatusCommand:
 # ---------------------------------------------------------------- task 1.9 (cmd_fleet_status)
 class TestFleetStatusCommand:
     def _plant(self, root: Path, agent: str, state: str, **fields):
+        # `updated_at` is FRESH by default (status-heartbeat 1.2). These
+        # fixtures mean "an agent in state X", and a hardcoded 2026-06-09 stamp
+        # now means "a session nobody has heard from in months" — which renders
+        # STALE, not working. `since` stays historical: that is legitimately
+        # when the state was entered. Staleness itself is covered by
+        # tests/test_status_staleness.py, and a test that wants a stale record
+        # passes `updated_at` explicitly.
+        _fresh = (
+            __import__("datetime")
+            .datetime.now(__import__("datetime").timezone.utc)
+            .isoformat(timespec="seconds")
+            .replace("+00:00", "Z")
+        )
         sdir = root / ".agents" / "status"
         sdir.mkdir(parents=True, exist_ok=True)
         body = {
@@ -315,7 +328,7 @@ class TestFleetStatusCommand:
             "outcome": None,
             "blocked_by": None,
             "since": "2026-06-09T10:00:00Z",
-            "updated_at": "2026-06-09T10:00:00Z",
+            "updated_at": _fresh,
             **fields,
         }
         (sdir / f"{agent}.yaml").write_text(yaml.safe_dump(body), encoding="utf-8")

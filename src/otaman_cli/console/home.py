@@ -165,9 +165,16 @@ def _fleet(program: Program) -> tuple[dict[str, int], bool]:
 
         if not is_agent_presence_enabled(program.root):
             return {}, False
+        from otaman_cli.status.staleness import render_state, ttl_seconds
+
+        ttl = ttl_seconds(program.root)
         counts: dict[str, int] = {}
         for r in get_backend(program.root).read_all():
-            key = r.state.value if hasattr(r.state, "value") else str(r.state)
+            # The RENDERED state, not the recorded one: a session nobody has
+            # heard from counts as STALE, never toward "working" (1.2). The
+            # fleet line is exactly where "4 working" read as true when none
+            # of them were.
+            key = render_state(r, ttl=ttl)
             counts[key] = counts.get(key, 0) + 1
         return counts, True
     except Exception:  # noqa: BLE001
