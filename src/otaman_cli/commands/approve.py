@@ -305,6 +305,8 @@ Use `/otaman:check` to track updates.
     ack_file.write_text("approved\n", encoding="utf-8")
     broadcast_file.write_text(broadcast, encoding="utf-8")
 
+    _terminate_blocked_entries(root, "spec-change-approved", broadcast)
+
     UI.header("Proposal Approved")
     UI.ok(f"Approved: {target['subject']}")
     UI.kv("From", UI.agent(target["fm"].get("from", "?")))
@@ -328,6 +330,38 @@ Use `/otaman:check` to track updates.
                 f'--change "{proposal_title}"'
             )
     return 0
+
+
+def _terminate_blocked_entries(root, msg_type: str, body: str) -> None:
+    """Fire the blocked-entry terminator for a decision written on THIS path.
+
+    blocked-entry-lifecycle 1.2. The terminator already existed — plugin's
+    ``auto_tombstone_blocked``, which matches on each entry's ``**Proposal**:``
+    ref — but it hung off the MCP ``otaman_send`` path ONLY, while a human
+    approves with ``otaman approve``, which writes its broadcast directly a few
+    lines above. So the approval landed and nothing ever cleared the entry: the
+    spec's acceptance scenario is explicitly about this write path.
+
+    plugin owns the matcher and the tombstone format (agreed split (a)); cli is
+    a second caller. It scans EVERY agent's blocked file, which is correct here:
+    the approver is the human, but the blocked entry belongs to whichever agent
+    proposed.
+
+    BEST-EFFORT, and the guard is not decoration: ``bus_server`` imports fastmcp
+    at module level, so on an install without it this import raises — and
+    ``otaman approve``'s job is writing the decision, which must never fail
+    because an MCP library is absent. A missed tombstone is recoverable
+    (``otaman blocked migrate``); a refused approval is not.
+    """
+    try:
+        from otaman_plugin.servers.bus_server import auto_tombstone_blocked
+
+        cleared = auto_tombstone_blocked(root, msg_type, body)
+    except Exception as exc:  # noqa: BLE001 - never block the decision
+        UI.muted(f"  (blocked-entry terminator unavailable: {type(exc).__name__})")
+        return
+    for entry in cleared or []:
+        UI.ok(f"Unblocked {entry.get('agent', '?')}: {entry.get('title', '?')}")
 
 
 def _perform_rejection(
@@ -389,6 +423,8 @@ The spec-change-request has been **rejected**.
     ack_file = acks_dir / f"{target['stem']}.human.ack"
     ack_file.write_text("rejected\n", encoding="utf-8")
     reject_file.write_text(reject_msg, encoding="utf-8")
+
+    _terminate_blocked_entries(root, "spec-change-rejected", reject_msg)
 
     UI.header("Proposal Rejected")
     UI.error(f"Rejected: {target['subject']}")
