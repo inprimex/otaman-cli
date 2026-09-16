@@ -184,17 +184,33 @@ class HomeScreen(Screen):
     Data loads off the UI thread; Home aggregates, never re-derives.
     """
 
+    #: The ADVERTISED top level is the budget (gate 6.1 F1). The surface-budget
+    #: requirement says the top level SHALL be Home, Artifacts, Messages and
+    #: Setup — and the presented strip IS the top level as far as a human is
+    #: concerned. After P0-P4 the strip still read "d Decisions · m Messages ·
+    #: t Artifact tree · l Lifecycle · b Spec review · a Agents · s Setup",
+    #: so from Roman's seat nothing had shrunk.
+    #:
+    #: D8 invokes JTBD-108's discipline, and that pattern is explicit: retired
+    #: entries become HIDDEN aliases. `d`/`l`/`b` therefore stay BOUND and keep
+    #: landing on their new homes with the one-line notice — behaviour
+    #: unchanged, advertisement gone (`show=False`).
+    #:
+    #: `a` (Agents) stays advertised deliberately: its door placement was never
+    #: ruled, spec-agent has put that question to Roman, and folding it here on
+    #: my own judgement would decide an open question by implementation.
     BINDINGS = [
-        Binding("d", "decisions", "Decisions", priority=True),
+        Binding("t", "tree", "Artifacts", priority=True),
         Binding("m", "messages", "Messages", priority=True),
-        Binding("t", "tree", "Artifact tree", priority=True),
-        Binding("l", "lifecycle", "Lifecycle", priority=True),
-        Binding("b", "review", "Spec review", priority=True),
-        Binding("a", "agents", "Agents", priority=True),
         Binding("s", "setup", "Setup", priority=True),
+        Binding("a", "agents", "Agents", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
         Binding("escape", "back", "Back", priority=True),
         Binding("q", "app.quit", "Quit", priority=True),
+        # Hidden aliases — bound, dispatching, and not in the strip.
+        Binding("d", "decisions", "Decisions", priority=True, show=False),
+        Binding("l", "lifecycle", "Lifecycle", priority=True, show=False),
+        Binding("b", "review", "Spec review", priority=True, show=False),
     ]
 
     def __init__(self, program: Program) -> None:
@@ -208,8 +224,7 @@ class HomeScreen(Screen):
         yield Static("", id="home-header", markup=False)
         yield _mode_banner(
             f"Home — orientation for {self.program.name}",
-            "d decisions · m messages · t tree · l lifecycle · b review · "
-            "a agents · s setup · r refresh · q quit",
+            "t artifacts · m messages · s setup · a agents · r refresh · q quit",
         )
         with VerticalScroll(id="home-scroll"):
             yield Static("Loading…", id="home-body", markup=False)
