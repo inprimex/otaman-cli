@@ -1721,13 +1721,30 @@ class OtamanConsole(App):
     }
     #identity-badge.verified { color: $success; }
     #identity-badge.unverified { color: $warning; }
+    /* console-ia-consolidation 1.2 — a visible band boundary. `#mode-banner` is
+       the plain-words header every screen yields (D9), and it had NO css rule at
+       all, so header text and screen content ran together as one wall. */
+    #mode-banner {
+        border-bottom: solid $accent;
+        padding: 0 1;
+        margin-bottom: 1;
+    }
     """
 
-    def __init__(self, programs: list[Program], *, search_root=None, log_dir=None) -> None:
+    def __init__(
+        self,
+        programs: list[Program],
+        *,
+        search_root=None,
+        log_dir=None,
+        initial_program: Program | None = None,
+    ) -> None:
         super().__init__()
         self._programs = programs
         self._search_root = search_root
         self._log_dir = log_dir
+        # console-ia-consolidation 1.1 — open straight into this program.
+        self._initial_program = initial_program
         # Per-session observability log (silent-approval-loss fix). Opened in
         # on_mount so a filesystem hiccup degrades a live app, not construction.
         self.session_log = None
@@ -1762,7 +1779,13 @@ class OtamanConsole(App):
                 self.theme = saved
             except Exception:  # noqa: BLE001 - unknown/removed theme → default
                 pass
+        # The picker is always the BASE screen even when we skip past it: it is
+        # Home's back-target, and popping the only screen in the stack raises.
+        # Pushing Home on top means the operator never interacts with the
+        # picker, while `escape` still lands somewhere sensible (1.1).
         self.push_screen(ProgramPickerScreen(self._programs))
+        if self._initial_program is not None:
+            self.push_screen(HomeScreen(self._initial_program))
 
     def push_screen(self, screen, *args, **kwargs):
         # Journal every screen transition into the session log (spec-agent
