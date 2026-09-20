@@ -35,9 +35,10 @@ def program(tmp_path):
         "  processes:\n"
         "    outcomes: {enabled: true}\n"
         "    solutions: {enabled: false}\n"
-        "skills:\n"
-        "  profile: sw-default\n"
-        "  extra: [refactor, review]\n"
+        # `skills` nests with the other processes — the location the
+        # resolver reads. It used to sit at the top level, where nothing
+        # activated it (cofounder-agent 20260919T232423).
+        "    skills: {profile: sw-default, extra: [refactor, review]}\n"
         "human-roster:\n"
         "  - {name: roman, roles: [cto, approver]}\n",
         encoding="utf-8",

@@ -31,6 +31,19 @@ from otaman_cli.console.tree import TreeNode
 #: Process keys that own a place in the value spine — never sibling roots.
 SPINE_PROCESSES = frozenset({"outcomes", "solutions", "personas"})
 
+#: Process keys that are CONFIG BLOCKS, not registries of entries.
+#:
+#: `program.processes.skills` carries `{profile, extra}` for the skill-pack
+#: resolver — there is no `skills.yaml` of rows behind it, so rendering it as a
+#: registry root produced a phantom "skills — enabled · registry home unset"
+#: line on every wizard-generated program.
+#:
+#: The collision is real and NOT settled here: "per-project skills" is also one
+#: of the four dispatched REGISTRIES (console-ia-review §5), so the same key
+#: would mean two different things. Excluding it keeps the console honest until
+#: spec-agent and plugin-agent rule on the naming; reversing this is one line.
+NON_REGISTRY_PROCESSES = frozenset({"skills"})
+
 #: How many entries a collapsed root lists before it says how many it withheld.
 #: Never a silent truncation: a root that shows 50 of 300 says so on its last
 #: line, because a capped list that reads as complete is worse than a long one.
@@ -140,7 +153,7 @@ def discover(program: Program) -> list[ExtraRegistry]:
     extras = getattr(procs, "model_extra", None) or {}
     out: list[ExtraRegistry] = []
     for key, cfg in extras.items():
-        if key in SPINE_PROCESSES or not _enabled(cfg):
+        if key in SPINE_PROCESSES or key in NON_REGISTRY_PROCESSES or not _enabled(cfg):
             continue
         path = _configured_path(program, key, cfg)
         exists = bool(path and path.is_file())
@@ -195,6 +208,7 @@ def registry_roots(program: Program) -> list[TreeNode]:
 
 __all__ = [
     "MAX_ENTRIES",
+    "NON_REGISTRY_PROCESSES",
     "SPINE_PROCESSES",
     "ExtraRegistry",
     "discover",

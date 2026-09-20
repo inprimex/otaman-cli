@@ -328,7 +328,15 @@ class HomeScreen(Screen):
         lines.append("SETUP STATS")
         lines.append(f"  team: {summary.team_humans} humans · {summary.team_agents} agents")
         lines.append(f"  connections: {summary.connections}   secrets: {summary.secrets}")
-        lines.append(f"  skills: {summary.skills}")
+        skills_line = f"  skills: {summary.skills}"
+        if getattr(summary, "legacy_skills", 0):
+            # Names the fix, because a count of 0 next to a populated-looking
+            # platform.yaml is exactly what sends someone hunting.
+            skills_line += (
+                f"   ({summary.legacy_skills} declared under the retired top-level "
+                "`skills:` — inert; move to program.processes.skills)"
+            )
+        lines.append(skills_line)
         # feature-usage score: RESERVED — an undefined number is never displayed.
         return "\n".join(lines)
 

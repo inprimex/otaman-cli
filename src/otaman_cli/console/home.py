@@ -94,6 +94,8 @@ class HomeSummary:
     connections: int = 0
     secrets: int = 0
     skills: int = 0
+    #: Declared under the retired top-level `skills:` key and therefore INERT.
+    legacy_skills: int = 0
     policy: str = "warn"
     process_level: str | None = None  # human-set spec_policy.process.level (D7)
 
@@ -283,12 +285,24 @@ def build_home_summary(program: Program) -> HomeSummary:
     except Exception:  # noqa: BLE001
         secrets = 0
 
-    sk = cfg.get("skills") or {}
-    skills = (
-        (len(sk.get("extra") or []) + (1 if sk.get("profile") else 0))
-        if isinstance(sk, dict)
-        else 0
-    )
+    # Count the EFFECTIVE location — `program.processes.skills`, which is what
+    # the resolver reads. This counted the TOP-LEVEL `skills` key, which nothing
+    # activates, so Home showed a cheerful non-zero count for skills that never
+    # loaded — the reported part "most likely to burn an hour of someone's
+    # debugging" (cofounder-agent 20260919T232423).
+    def _count(block) -> int:
+        if not isinstance(block, dict):
+            return 0
+        return len(block.get("extra") or []) + (1 if block.get("profile") else 0)
+
+    program_block = cfg.get("program")
+    nested = (program_block or {}).get("processes") if isinstance(program_block, dict) else None
+    nested = nested.get("skills") if isinstance(nested, dict) else None
+    skills = _count(nested)
+    # A legacy top-level key that is NOT mirrored nested is inert. Say so rather
+    # than counting it (a lie) or ignoring it (a silent zero the author cannot
+    # explain): `otaman init` wrote this shape before the fix.
+    legacy_skills = 0 if nested else _count(cfg.get("skills"))
 
     policy = "warn"
     process_level = None
@@ -329,6 +343,7 @@ def build_home_summary(program: Program) -> HomeSummary:
         connections=connections,
         secrets=secrets,
         skills=skills,
+        legacy_skills=legacy_skills,
         policy=policy,
         process_level=process_level,
     )
