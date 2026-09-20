@@ -46,15 +46,22 @@ class PollingEventSource:
     behind this same interface.
     """
 
-    def __init__(self, program: Program, *, interval: float = 2.0) -> None:
+    def __init__(self, program: Program, *, interval: float = 2.0, lister=None) -> None:
         self.program = program
         self.interval = interval
+        # WHAT the provider watches must match what the screen SHOWS. This was
+        # fixed to the decision-only lister because its only consumer showed
+        # decisions. The merged Messages surface (2.1) shows the human's whole
+        # queue, so a new plain message would never have tripped a refresh —
+        # the surface would sit confidently out of date on exactly the rows it
+        # was merged to carry.
+        self._lister = lister or list_pending_proposals
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._last: tuple[str, ...] | None = None
 
     def snapshot(self) -> list[Proposal]:
-        return list_pending_proposals(self.program)
+        return self._lister(self.program)
 
     def _stems(self) -> tuple[str, ...]:
         return tuple(p.stem for p in self.snapshot())
@@ -94,10 +101,14 @@ class PollingEventSource:
             self._thread = None
 
 
-def make_event_source(program: Program) -> EventSource:
+def make_event_source(program: Program, *, lister=None) -> EventSource:
     """The default provider for Iteration 1 (polling). Swap here (or via config)
-    when fswatch/NATS providers land — no console change needed."""
-    return PollingEventSource(program)
+    when fswatch/NATS providers land — no console change needed.
+
+    *lister* lets a caller watch the set IT renders; it defaults to the pending
+    decisions for backwards compatibility.
+    """
+    return PollingEventSource(program, lister=lister)
 
 
 __all__ = ["EventSource", "PollingEventSource", "make_event_source"]
