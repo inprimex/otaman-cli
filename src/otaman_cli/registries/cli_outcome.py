@@ -497,11 +497,25 @@ def cmd_choose(args: dict[str, Any]) -> int:
         return _bail(f"Cannot choose a discarded solution: {args['solution']}")
 
     status = outcome.get("status", "Backlog")
+    # Read the PREVIOUS choice before overwriting it (cofounder-agent
+    # 20260919T232356). The transition recorded only `note: chose <SOL>`, so a
+    # re-choose left two entries each naming only their own target — a reader
+    # could not tell what the previous choice was except by inferring from
+    # order. The action stays `choose`, which is what makes the decision
+    # queryable; the old/new pair is what makes it auditable. Both, not either.
+    previous = outcome.get("chosen-solution")
     outcome["chosen-solution"] = args["solution"]
     outcome["updated"] = bus_messages.utc_now_iso()[:10]
     append_transition(
         outcome,
-        make_transition(actor=actor, action="choose", note=f"chose {args['solution']}"),
+        make_transition(
+            actor=actor,
+            action="choose",
+            field="chosen-solution",
+            old=previous,
+            new=args["solution"],
+            note=f"chose {args['solution']}",
+        ),
     )
     rc = _save(path, raw)
     if rc != 0:
