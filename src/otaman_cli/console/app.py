@@ -1640,7 +1640,7 @@ class ProposalScreen(_DecisionActions, Screen):
         # critic exists to produce one (the RESERVED-slot precedent, and the
         # triage scorer that ranked rejected-cheap above recommended).
         if self.proposal.msg_type == "spec-change-request":
-            from otaman_cli.scr_template import completeness, completeness_line
+            from otaman_core.scr_template import completeness, completeness_line
 
             facts = completeness(body)
             line = completeness_line(body)

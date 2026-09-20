@@ -151,7 +151,7 @@ def cmd_send(args: list[str]) -> int:
     # diverged to begin with. Narrower than the propose-path check on purpose:
     # a legacy-shaped body with real content passes (see `is_hollow`).
     if ns.msg_type == "spec-change-request":
-        from otaman_cli.scr_template import SECTIONS, is_hollow
+        from otaman_core.scr_template import SECTIONS, is_hollow
 
         hollow, why = is_hollow(ns.body or "")
         if hollow:

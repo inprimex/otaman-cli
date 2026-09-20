@@ -53,7 +53,7 @@ def _parse_sections(args: list[str]) -> tuple[dict[str, str], str | None, list[s
     satisfy without hand-editing the file would just teach people to hand-edit
     the file (generated-artifact-quality 1.1).
     """
-    from otaman_cli.scr_template import SECTION_KEYS
+    from otaman_core.scr_template import SECTION_KEYS
 
     sections: dict[str, str] = {}
     level: str | None = None
@@ -119,7 +119,7 @@ def cmd_propose(args: list[str]) -> int:
     # TODO and produced two day-one implementation blockers. A section that
     # genuinely does not apply says `n/a because <reason>`, so the refusal never
     # forces invention — it only forbids silence.
-    from otaman_cli.scr_template import render, validate
+    from otaman_core.scr_template import render, validate
 
     if desc and "problem" not in sections:
         # `-d` predates the sections; treat it as the problem statement rather
@@ -133,7 +133,7 @@ def cmd_propose(args: list[str]) -> int:
             UI.muted(f"  - {err}")
         UI.muted("")
         UI.muted("  Every section is answerable from what you already know:")
-        from otaman_cli.scr_template import SECTIONS
+        from otaman_core.scr_template import SECTIONS
 
         for section in SECTIONS:
             UI.muted(f"    --{section.key:<11} {section.heading}")
