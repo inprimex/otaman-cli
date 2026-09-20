@@ -175,7 +175,20 @@ class Outcome(BaseModel):
                 current = OutcomeStatus(t.to)
                 continue
             if t.action == "promote":
-                if current is None or t.from_ is None or t.to is None:
+                # Each condition reports ITSELF. These three were collapsed into
+                # one message naming only two of them — and not the one that
+                # actually fires on real data. cofounder-agent lost an
+                # investigation to it (20260920T111813): `from` and `to` were
+                # both present and correct; the trip was `current is None`,
+                # because `current` is only ever set by a preceding `create`
+                # and the 2026-09-10 migration never synthesised one. The error
+                # sent them looking at the two fields that were fine.
+                if current is None:
+                    raise ValueError(
+                        f"outcome {self.id}: transition[{i}] action=promote has no established "
+                        "prior status — the transition log has no `create` entry to start from"
+                    )
+                if t.from_ is None or t.to is None:
                     raise ValueError(
                         f"outcome {self.id}: transition[{i}] action=promote requires from+to"
                     )
