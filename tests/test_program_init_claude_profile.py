@@ -328,6 +328,10 @@ def test_wizard_omits_processes_block_when_none_opted_in(tmp_path):
     write_platform_yaml(answers, output)
     doc = _y.safe_load(output.read_text(encoding="utf-8"))
 
-    # processes is either absent, or program has no processes key
+    # No REGISTRY process is written. `skills` is a process too and nests here
+    # now (cofounder-agent 20260919T232423), so the block may exist carrying
+    # only that — what must not appear is a registry nobody opted into.
     program = doc.get("program") or {}
-    assert "processes" not in program
+    processes = program.get("processes") or {}
+    assert set(processes) <= {"skills"}, processes
+    assert "skills" not in doc  # and never at the top level

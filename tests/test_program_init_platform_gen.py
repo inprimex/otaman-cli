@@ -60,8 +60,13 @@ class TestBuildPlatformYaml:
         assert doc["releases"] == ["MVP", "post-MVP"]
 
     def test_skills(self):
+        # `skills` moved from a TOP-LEVEL key to `program.processes.skills` — the
+        # location the resolver actually reads (cofounder-agent 20260919T232423).
+        # The old location silently activated nothing; see
+        # tests/test_skills_key_location.py.
         doc = _build_platform_yaml(_BASE_ANSWERS)
-        assert doc["skills"]["profile"] == "software-development-default"
+        assert doc["program"]["processes"]["skills"]["profile"] == "software-development-default"
+        assert "skills" not in doc
 
     def test_repos_includes_business(self):
         doc = _build_platform_yaml(_BASE_ANSWERS)

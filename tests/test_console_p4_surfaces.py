@@ -72,7 +72,9 @@ def test_the_root_is_collapsed_not_closed(tmp_path, monkeypatch):
 
 
 def test_a_disabled_process_gets_no_root(tmp_path, monkeypatch):
-    p = _program(tmp_path, {"skills": {"enabled": False}}, monkeypatch, {"skills.yaml": {"s": []}})
+    p = _program(
+        tmp_path, {"glossary": {"enabled": False}}, monkeypatch, {"glossary.yaml": {"s": []}}
+    )
     assert registry_roots(p) == []
 
 
@@ -132,7 +134,10 @@ def test_a_custom_path_is_honoured(tmp_path, monkeypatch):
 
 def test_a_top_level_list_registry_reads(tmp_path, monkeypatch):
     p = _program(
-        tmp_path, {"skills": {"enabled": True}}, monkeypatch, {"skills.yaml": [{"name": "python"}]}
+        tmp_path,
+        {"glossary": {"enabled": True}},
+        monkeypatch,
+        {"glossary.yaml": [{"name": "python"}]},
     )
     (root,) = registry_roots(p)
     assert root.children[0].id == "python"
@@ -316,3 +321,46 @@ def test_a_real_slug_still_registers(tmp_path, monkeypatch):
     assert cmd_blocked(["waiting-on-core-api"]) == 0
     text = (root / ".agents" / "blocked" / "cli-agent.md").read_text(encoding="utf-8")
     assert "waiting-on-core-api" in text
+
+
+def test_a_config_process_is_not_a_registry_root(tmp_path, monkeypatch):
+    """`program.processes.skills` carries {profile, extra} for the skill-pack
+    resolver — there is no skills.yaml of rows behind it. Rendering it as a
+    registry produced a phantom "skills — enabled · registry home unset" root
+    on every wizard-generated program, once the wizard started writing the key
+    where the resolver reads it (cofounder-agent 20260919T232423).
+
+    The collision is NOT settled here: "per-project skills" is also one of the
+    four dispatched registries, so the same key would mean two things. Excluded
+    until spec-agent and plugin-agent rule.
+    """
+    from otaman_cli.console.extra_registries import NON_REGISTRY_PROCESSES
+
+    assert "skills" in NON_REGISTRY_PROCESSES
+    p = _program(
+        tmp_path,
+        {"skills": {"profile": "tech-startup-cofounder", "extra": ["risk-reviewer"]}},
+        monkeypatch,
+    )
+    assert registry_roots(p) == []
+
+
+def test_a_wizard_generated_program_grows_no_phantom_root(tmp_path, monkeypatch):
+    """End-to-end against the real generator, since that is the path that
+    introduced the phantom."""
+    from otaman_cli.onboard.program_init.platform_gen import _build_platform_yaml
+    from otaman_cli.yaml_fast import clear_cache
+
+    root = tmp_path / "wizard"
+    root.mkdir()
+    doc = _build_platform_yaml(
+        {
+            "program_name": "demo",
+            "primary_repo": ".",
+            "skill_profile": "tech-startup-cofounder",
+            "extra_skills": [],
+        }
+    )
+    root.joinpath("platform.yaml").write_text(yaml.dump(doc), encoding="utf-8")
+    clear_cache()
+    assert registry_roots(bus.Program(name="d", root=root)) == []

@@ -118,10 +118,22 @@ def _build_platform_yaml(answers: dict[str, Any]) -> dict[str, Any]:
 
     doc["releases"] = releases
 
-    doc["skills"] = {
-        "profile": skill_profile,
-        "extra": extra_skills,
-    }
+    # `skills` is a PROCESS and nests under `program.processes` like the rest —
+    # the comment above says exactly that, and platform-schema.yaml rejects
+    # unknown top-level keys. It was written at the TOP level while the resolver
+    # reads `program.processes.skills` (plugin `skill_packs.resolve_active_skills`),
+    # so a wizard skill-profile answer resolved to no pack and activated nothing,
+    # silently (cofounder-agent report 20260919T232423). Nothing reconciled them.
+    if skill_profile or extra_skills:
+        program_block = doc.setdefault("program", {})
+        if not isinstance(program_block, dict):
+            program_block = {}
+            doc["program"] = program_block
+        processes_block = program_block.setdefault("processes", {})
+        if not isinstance(processes_block, dict):
+            processes_block = {}
+            program_block["processes"] = processes_block
+        processes_block["skills"] = {"profile": skill_profile, "extra": extra_skills}
 
     # Single-repo case (cwd is itself a git repo): wizard's primary_repo == ".";
     # use a generic main-agent owner and program-name (not -specs suffix).
