@@ -143,6 +143,26 @@ def cmd_send(args: list[str]) -> int:
         )
         return 2
 
+    # generated-artifact-quality 1.1, second entrance. The refusal lives on
+    # `otaman propose`, but `otaman send --type spec-change-request` writes a
+    # body directly and sailed past it — a TODO-bodied SCR landed on the bus
+    # with exit 0. plugin-agent found the identical hole on the MCP side and is
+    # closing both of theirs; closing one door per transport is how the two
+    # diverged to begin with. Narrower than the propose-path check on purpose:
+    # a legacy-shaped body with real content passes (see `is_hollow`).
+    if ns.msg_type == "spec-change-request":
+        from otaman_cli.scr_template import SECTIONS, is_hollow
+
+        hollow, why = is_hollow(ns.body or "")
+        if hollow:
+            UI.error(f"Refusing to send a hollow spec-change-request — {why}.")
+            UI.muted("  An SCR is a decision request, not a research assignment.")
+            UI.muted("  Answer each section, or write 'n/a because <reason>':")
+            for section in SECTIONS:
+                UI.muted(f"    ### {section.heading}")
+            UI.muted("  Or use `otaman propose`, which builds the template for you.")
+            return 2
+
     # outcome-proposal-routing task 3.1 — validate message type against the
     # registry.  Unknown types are rejected outright (typo guard); the
     # spec-listed types are accepted.

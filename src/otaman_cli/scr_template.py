@@ -224,6 +224,38 @@ def validate(body: str, *, evidence_level: str | None = None) -> tuple[bool, lis
     return (not errors), errors
 
 
+def is_hollow(body: str) -> tuple[bool, str]:
+    """``(hollow, why)`` — is this SCR body empty of decision content?
+
+    Applied at the `otaman send` door, which writes an arbitrary body and so
+    cannot simply be re-rendered from the template. plugin-agent found the same
+    second entrance on their side (`otaman_send(msg_type='spec-change-request')`
+    bypasses `otaman_propose` entirely); closing one door and not the other is
+    how the two transports diverged in the first place.
+
+    Deliberately NARROWER than :func:`validate`, which the propose path uses.
+    A LEGACY-shaped body carrying real content passes: every SCR filed before
+    the template uses the old five headings, and refusing those at a shared
+    fleet door would break senders over a format change rather than over
+    hollowness. What is refused is the thing the standard is actually about —
+    a body that ANSWERS NOTHING.
+    """
+    if has_template(body):
+        unfilled = unfilled_sections(body)
+        if unfilled:
+            return True, "unfilled section(s): " + ", ".join(unfilled)
+        return False, ""
+    # Not the template: refuse only if no line carries substance.
+    for line in body.splitlines():
+        text = line.strip()
+        if not text or text.startswith("#") or text.startswith("## Subject:"):
+            continue
+        if _PLACEHOLDER_RE.match(text) or _OPENS_NA_RE.match(text):
+            continue
+        return False, ""
+    return True, "every line is a placeholder — the request answers nothing"
+
+
 def completeness(body: str) -> dict:
     """The FACT line inputs for the console approve view (1.3).
 
@@ -284,6 +316,7 @@ __all__ = [
     "completeness_line",
     "declared_evidence_level",
     "has_template",
+    "is_hollow",
     "render",
     "unfilled_sections",
     "validate",
