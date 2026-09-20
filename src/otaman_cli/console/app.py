@@ -807,9 +807,18 @@ class InboxScreen(_DecisionActions, Screen):
         Binding("q", "app.quit", "Quit", priority=True),
     ]
 
-    def __init__(self, program: Program) -> None:
+    def __init__(self, program: Program, *, event_source=None) -> None:
         super().__init__()
         self.program = program
+        # LIVE refresh. The event-source interface (polling now; fswatch/NATS
+        # later, with no console rework) was wired only to PendingListScreen —
+        # the screen 2.1 replaced with this one — and the wiring did not come
+        # across. Measured: with Messages open, a decision landing on the bus
+        # stayed invisible until the human pressed `r`. On the surface Roman
+        # watches for things that need him, that is the surface being wrong
+        # rather than merely stale.
+        self._source = event_source
+        self._own_source = event_source is None
 
     def compose(self) -> ComposeResult:
         yield _header()
@@ -825,6 +834,24 @@ class InboxScreen(_DecisionActions, Screen):
     def action_refresh(self) -> None:
         invalidate_read_caches()
         self._load()
+
+    def on_mount(self) -> None:
+        if self._source is None:
+            from otaman_cli.console.bus import list_human_queue
+            from otaman_cli.console.events import make_event_source
+
+            # Watch the SAME set this screen renders — the merged queue, not
+            # just the decisions in it.
+            self._source = make_event_source(self.program, lister=list_human_queue)
+        # The provider owns its trigger and calls back when the pending set may
+        # have moved; marshal onto the UI thread, then reuse the SAME load path.
+        self._source.start(lambda: self.app.call_from_thread(self._load))
+
+    def on_unmount(self) -> None:
+        # Only stop a source we created — an injected one belongs to the caller
+        # (that is what makes the screen testable without a real poll thread).
+        if self._source is not None and self._own_source:
+            self._source.stop()
 
     def on_screen_resume(self) -> None:
         # SINGLE load path (fires on push AND on return) — loading also from
