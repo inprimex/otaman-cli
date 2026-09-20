@@ -306,3 +306,131 @@ def test_only_one_template_source_remains_in_this_repo():
     src = inspect.getsource(propose_team)
     assert "### Why this is needed" not in src  # the old inline copy is gone
     assert "from otaman_cli.scr_template import" in src
+
+
+# ---------------------------------------------------------------------------
+# the SECOND entrance: `otaman send --type spec-change-request`
+
+
+def _send_root():
+    root = pathlib.Path(tempfile.mkdtemp()) / "meta"
+    (root / ".agents" / "bus" / "active" / "acks").mkdir(parents=True)
+    (root / "platform.yaml").write_text("project: d\nversion: '1.0'\nrepos: []\n", encoding="utf-8")
+    return root
+
+
+def _wire_send(monkeypatch, root):
+    import otaman_cli.commands.bus_messaging as BM
+
+    active = root / ".agents" / "bus" / "active"
+    monkeypatch.setattr(BM, "find_project_root", lambda: root)
+    monkeypatch.setattr(BM, "resolve_agent_identity", lambda r, explicit=None: "cli-agent")
+    monkeypatch.setattr(BM, "_resolve_bus_paths", lambda r: (active, active / "acks"))
+    return BM, active
+
+
+def test_send_refuses_a_hollow_scr(monkeypatch, capsys):
+    """plugin-agent found the identical hole on the MCP side: the refusal lived
+    on `propose`, and `send --type spec-change-request` wrote a TODO body
+    straight to the bus with exit 0."""
+    root = _send_root()
+    BM, active = _wire_send(monkeypatch, root)
+    rc = BM.cmd_send(
+        [
+            "human",
+            "--type",
+            "spec-change-request",
+            "--subject",
+            "hollow",
+            "--body",
+            "### What needs to change\nTODO: fill later\n",
+        ]
+    )
+    assert rc == 2
+    assert "hollow spec-change-request" in capsys.readouterr().out
+    assert list(active.glob("*.md")) == []
+
+
+def test_send_allows_a_legacy_body_with_real_content(monkeypatch):
+    """NARROWER than the propose-path rule on purpose: every SCR filed before
+    the template uses the old five headings, and refusing those at a shared
+    fleet door would break senders over a format change, not over hollowness."""
+    root = _send_root()
+    BM, active = _wire_send(monkeypatch, root)
+    rc = BM.cmd_send(
+        [
+            "human",
+            "--type",
+            "spec-change-request",
+            "--subject",
+            "real",
+            "--body",
+            "### What needs to change\nThe ack verb cannot disambiguate a prefix stem.\n",
+        ]
+    )
+    assert rc == 0
+    assert len(list(active.glob("*.md"))) == 1
+
+
+def test_send_allows_a_fully_filled_template_body(monkeypatch):
+    root = _send_root()
+    BM, active = _wire_send(monkeypatch, root)
+    rc = BM.cmd_send(
+        [
+            "human",
+            "--type",
+            "spec-change-request",
+            "--subject",
+            "filled",
+            "--body",
+            render("t", sections=FULL),
+        ]
+    )
+    assert rc == 0
+    assert len(list(active.glob("*.md"))) == 1
+
+
+def test_send_refuses_a_template_body_with_unfilled_sections(monkeypatch):
+    root = _send_root()
+    BM, active = _wire_send(monkeypatch, root)
+    rc = BM.cmd_send(
+        [
+            "human",
+            "--type",
+            "spec-change-request",
+            "--subject",
+            "partial",
+            "--body",
+            render("t", sections={"problem": "x"}),
+        ]
+    )
+    assert rc == 2
+    assert list(active.glob("*.md")) == []
+
+
+def test_send_of_other_types_is_untouched(monkeypatch):
+    """The rule is about SCRs. An info message may legitimately be terse."""
+    root = _send_root()
+    BM, active = _wire_send(monkeypatch, root)
+    assert BM.cmd_send(["human", "--type", "info", "--subject", "fyi", "--body", "TODO"]) == 0
+    assert len(list(active.glob("*.md"))) == 1
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["", "TODO\n", "### Heading only\n", "n/a\n", "### A\nTODO: x\n### B\n???\n"],
+)
+def test_bodies_that_answer_nothing_are_hollow(body):
+    from otaman_cli.scr_template import is_hollow
+
+    assert is_hollow(body)[0] is True
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["Real content.\n", "### What needs to change\nA measured problem.\n"],
+)
+def test_bodies_with_substance_are_not_hollow(body):
+    from otaman_cli.scr_template import is_hollow
+
+    assert is_hollow(body)[0] is False
