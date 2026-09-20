@@ -536,6 +536,19 @@ def cmd_read(args: list[str]) -> int:
     return 0
 
 
+def _ack_is_resolved(acks_dir, stem: str, agent: str) -> bool:
+    """Has *agent* already acked *stem* as `resolved`?
+
+    Used only to break a disambiguation tie: a message this agent already
+    closed is not the one they are trying to close now.
+    """
+    ack = acks_dir / f"{stem}.{agent}.ack"
+    try:
+        return ack.is_file() and ack.read_text(encoding="utf-8").strip() == "resolved"
+    except OSError:
+        return False
+
+
 def cmd_ack(args: list[str]) -> int:
     """Acknowledge a bus message for the current agent."""
     from otaman_cli import acting_guard
@@ -593,6 +606,18 @@ def cmd_ack(args: list[str]) -> int:
             if pattern in f.stem or pattern == f.stem:
                 matches.append(f)
 
+    # EXACT beats prefix (cpo-agent bug report 20260917T095503). Matching is
+    # substring-based, so a stem that is a proper PREFIX of another — e.g.
+    # `...-outcome-estimates-ready` vs `...-outcome-estimates-ready-2` — matched
+    # both and was refused as ambiguous forever. The full stem IS the answer;
+    # it just also occurs inside its neighbour. Acking the other one does not
+    # help either: acks are SIDECAR files, so both messages stay in active/ and
+    # the collision is permanent. The message became unackable through the CLI,
+    # and hand-editing the bus is exactly how ack bookkeeping gets corrupted.
+    exact = [f for f in matches if f.stem == pattern]
+    if exact:
+        matches = exact
+
     # Token-based fallback: split input by dashes and glob between tokens.
     # Handles the "logical reconstruction" stem form
     # (e.g. "20260426T15164601-tasks-gitlab-cicd-pipeline" when the real
@@ -643,6 +668,15 @@ def cmd_ack(args: list[str]) -> int:
             UI.muted(f"  ... and {len(matches) - 5} more")
         UI.muted("  Acks are per-agent; each recipient acks its own copy.")
         return 1
+
+    if len(mine) > 1:
+        # A candidate this agent already RESOLVED cannot be what they meant —
+        # drop it and see whether the ambiguity dissolves. Only `resolved`
+        # counts: `read` is a deliberate "seen, still open" state, and a
+        # read->resolved follow-up by the same pattern must still work.
+        unresolved = [f for f in mine if not _ack_is_resolved(acks_dir, f.stem, agent)]
+        if len(unresolved) == 1:
+            mine = unresolved
 
     if len(mine) > 1:
         UI.error(f"Ambiguous stem '{pattern}'. Matches:")
