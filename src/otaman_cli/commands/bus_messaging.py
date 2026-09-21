@@ -151,14 +151,17 @@ def cmd_send(args: list[str]) -> int:
     # diverged to begin with. Narrower than the propose-path check on purpose:
     # a legacy-shaped body with real content passes (see `is_hollow`).
     if ns.msg_type == "spec-change-request":
-        from otaman_core.scr_template import SECTIONS, is_hollow
+        from otaman_cli.scr_gate import scr_template
 
-        hollow, why = is_hollow(ns.body or "")
+        template = scr_template()
+        # No template (a core predating it) → no gate. A hollow SCR getting
+        # through is worse than nothing; `send` refusing outright is worse still.
+        hollow, why = template.is_hollow(ns.body or "") if template else (False, "")
         if hollow:
             UI.error(f"Refusing to send a hollow spec-change-request — {why}.")
             UI.muted("  An SCR is a decision request, not a research assignment.")
             UI.muted("  Answer each section, or write 'n/a because <reason>':")
-            for section in SECTIONS:
+            for section in template.SECTIONS:
                 UI.muted(f"    ### {section.heading}")
             UI.muted("  Or use `otaman propose`, which builds the template for you.")
             return 2

@@ -216,16 +216,26 @@ def test_send_of_other_types_is_untouched(monkeypatch):
 # one source, and the deprecated shim
 
 
-def test_both_cli_doors_import_from_core():
-    """propose and send must enforce the SAME rule from the SAME place."""
+def test_both_cli_doors_resolve_the_same_source():
+    """propose and send must enforce the SAME rule from the SAME place.
+
+    They now reach it through `scr_gate`, which attribute-probes core and
+    returns None on an install predating the module — so neither door imports
+    it bare any more (see tests/test_scr_gate_degradation.py for why). The
+    intent is unchanged: one source, both doors.
+    """
     import inspect
 
     from otaman_cli.commands import bus_messaging, propose_team
+    from otaman_cli.scr_gate import scr_template
 
     for module in (propose_team, bus_messaging):
         src = inspect.getsource(module)
-        assert "from otaman_core.scr_template import" in src, module.__name__
+        assert "scr_gate" in src, module.__name__
         assert "from otaman_cli.scr_template import" not in src, module.__name__
+
+    # and the gate resolves to core, not to a cli copy
+    assert scr_template().__name__ == "otaman_core.scr_template"
 
 
 def test_the_cli_module_re_exports_the_core_one():

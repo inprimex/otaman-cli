@@ -1640,17 +1640,25 @@ class ProposalScreen(_DecisionActions, Screen):
         # critic exists to produce one (the RESERVED-slot precedent, and the
         # triage scorer that ranked rejected-cheap above recommended).
         if self.proposal.msg_type == "spec-change-request":
-            from otaman_core.scr_template import completeness, completeness_line
+            from otaman_cli.scr_gate import scr_template
 
-            facts = completeness(body)
-            line = completeness_line(body)
-            if not facts["template"]:
-                marker = "·"  # legacy: a fact, not a fault
-            elif facts["unfilled"]:
-                marker = "⚠"
-            else:
-                marker = "✓"
-            yield Static(f"{marker} {line}", id="proposal-completeness", markup=False)
+            template = scr_template()
+            if template is not None:
+                facts = template.completeness(body)
+                if not facts["template"]:
+                    marker = "·"  # legacy: a fact, not a fault
+                elif facts["unfilled"]:
+                    marker = "⚠"
+                else:
+                    marker = "✓"
+                yield Static(
+                    f"{marker} {template.completeness_line(body)}",
+                    id="proposal-completeness",
+                    markup=False,
+                )
+            # No shared template on this install → say NOTHING. An empty
+            # completeness line reads as "measured, and it is blank", which is
+            # a claim; absence of the line is the honest rendering of absence.
         yield MarkdownViewer(body, show_table_of_contents=False, id="proposal-body")
         yield Footer()
 
