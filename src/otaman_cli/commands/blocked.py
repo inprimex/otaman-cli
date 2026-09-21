@@ -130,7 +130,13 @@ def cmd_blocked(args: list[str]) -> int:
             return 1
         from datetime import datetime, timezone
 
-        from otaman_cli.blocked_entries import KIND_DEPENDENCY, render_entry
+        from otaman_cli.blocked_gate import REMEDY, blocked_entries
+
+        mod = blocked_entries()
+        if mod is None:
+            UI.error(REMEDY)
+            return 1
+        KIND_DEPENDENCY, render_entry = mod.KIND_DEPENDENCY, mod.render_entry
 
         now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
         by = blocked_by or "human"
@@ -260,7 +266,13 @@ def _cmd_blocked_migrate(root: Path, *, apply: bool) -> int:
     """
     from datetime import datetime, timezone
 
-    from otaman_cli.blocked_entries import parse_entries, tombstone
+    from otaman_cli.blocked_gate import REMEDY, blocked_entries
+
+    mod = blocked_entries()
+    if mod is None:
+        UI.error(REMEDY)
+        return 1
+    parse_entries, tombstone = mod.parse_entries, mod.tombstone
 
     blocked_dir = root / ".agents" / "blocked"
     if not blocked_dir.is_dir():
@@ -305,10 +317,10 @@ def _cmd_blocked_migrate(root: Path, *, apply: bool) -> int:
             sweepable.append(e)
         for e in live:
             if e not in sweepable:
-                triage.append((agent_name, e.title))
+                triage.append((agent_name, e.display_title))
         if not sweepable:
             continue
-        swept.extend((agent_name, e.title, reasons[e.ref]) for e in sweepable)
+        swept.extend((agent_name, e.display_title, reasons[e.ref]) for e in sweepable)
         if apply:
             updated = text
             for entry in sweepable:
