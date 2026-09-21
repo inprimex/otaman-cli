@@ -217,8 +217,13 @@ def test_outcome_first_links_and_priority_sort(program, monkeypatch):
     monkeypatch.setattr(tree, "_blocked_map", lambda program: {})
 
     roots = tree.build_artifact_tree(program)
-    # P0 outcome sorts before P1; unlinked group is last
-    assert [r.id for r in roots] == ["JTBD-2", "JTBD-1", "(unlinked changes)"]
+    # P0 outcome sorts before P1; unlinked group is last. Its label now carries
+    # the count, because the group opens COLLAPSED (canon's "children windowed
+    # to a small scrollable set") and a collapsed group that does not say how
+    # much it hides is a worse row than an open one.
+    ids = [r.id for r in roots]
+    assert ids[:2] == ["JTBD-2", "JTBD-1"]
+    assert ids[2].startswith("(unlinked changes")
     jtbd1 = next(r for r in roots if r.id == "JTBD-1")
     kinds = {c.kind for c in jtbd1.children}
     assert "solution" in kinds and "change" in kinds

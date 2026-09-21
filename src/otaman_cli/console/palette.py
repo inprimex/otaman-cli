@@ -34,8 +34,15 @@ STATUS_STYLE = {
     "Backlog": "cyan",
 }
 
-#: grayed rows (decided-out sibling solutions, closed items shown under `f`).
-GRAY_STYLE = "grey42"
+#: Grayed rows (decided-out sibling solutions, closed items shown under `f`).
+#:
+#: `dim` rather than a fixed grey. `grey42` is #6c6c6c REGARDLESS of theme, and
+#: on Roman's terminal those rows read as blank lines — he reported closed
+#: solutions "rendering as empty". They were never empty: the text was there,
+#: styled into the background. `dim` is relative to the theme's own foreground,
+#: so it de-emphasises without betting on the background colour, and it is the
+#: idiom this palette already uses for `Retired`.
+GRAY_STYLE = "dim"
 
 
 def _canon(value: object) -> str:

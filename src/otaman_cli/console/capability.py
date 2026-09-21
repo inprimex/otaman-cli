@@ -117,6 +117,11 @@ def build_capability_tree(program) -> list[TreeNode]:
             id=cap.name,
             title=f"{count} requirement{'s' if count != 1 else ''}"
             + (f" · {len(open_deltas)} open delta" if open_deltas else ""),
+            # Collapsed for the same reason as the value spine: every shaping
+            # change under every capability was on screen at open (225 rows).
+            # The root already SAYS how many requirements and open deltas it
+            # has, so the count is readable without expanding.
+            collapsed=True,
         )
         # Reference lines, not children (D4): a change's structural home is the
         # value spine. Open deltas first — they are the live part.

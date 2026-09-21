@@ -390,6 +390,12 @@ def build_artifact_tree(
             priority=o_priority,
             created=str(getattr(outcome, "created", "") or ""),
             closed=closed,
+            # COLLAPSED by default: canon says "children windowed to a small
+            # scrollable set" (interactive-human-console spec.md:209). Every
+            # solution under every outcome was expanded on open — 188 rows on
+            # the live program, which is the opposite of windowed. Right-arrow
+            # expands the one you want.
+            collapsed=True,
         )
         chosen = getattr(outcome, "chosen_solution", None)
         if solutions is not None:
@@ -433,7 +439,18 @@ def build_artifact_tree(
     )
     roots.sort(key=lambda n: (_priority_rank(n.priority), n.id))
     if orphans:
-        roots.append(TreeNode(kind="group", id="(unlinked changes)", title="", children=orphans))
+        # Collapsed like the rest: this group held 59 changes on the live
+        # program, all on screen at open. Its label carries the count so the
+        # reader knows what is inside without expanding it.
+        roots.append(
+            TreeNode(
+                kind="group",
+                id=f"(unlinked changes — {len(orphans)})",
+                title="",
+                children=orphans,
+                collapsed=True,
+            )
+        )
     # D4 (3.3): enforced at the BUILDER, not asked of each caller — a node drawn
     # twice makes counts lie and collapse state meaningless.
     return dedupe_one_parent(roots) + _extra_registry_roots(program)
