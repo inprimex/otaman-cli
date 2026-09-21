@@ -88,7 +88,20 @@ def rank_solutions(
     solutions: list[dict[str, Any]],
     impact_weights: dict[str, float] | None = None,
 ) -> list[TriageResult]:
-    """Return solutions ranked best-first per Appendix G.
+    """Return **this outcome's** solutions ranked best-first per Appendix G.
+
+    Candidates are scoped to *outcome* by `outcome-id`. Appendix G is explicit:
+    "The triage score ranks solutions for a single outcome. It does NOT compare
+    solutions across different outcomes." This scored the WHOLE register against
+    whichever outcome was being evaluated, so the global winner was recommended
+    for everything — measured on the live registry, one Tiny 1-day solution won
+    for all 85 outcomes with 48 candidates each, and belonged to none of them.
+    A bad recommendation can ride all the way to a CEO-hat accept-cost.
+
+    Scoped HERE rather than at the caller: this function already takes the
+    outcome and claims Appendix G, so a caller-side filter would leave the same
+    trap for `recommend()` and every future caller. `recommend`'s own docstring
+    already said "sibling solutions", which is what it should always have meant.
 
     Discarded solutions are excluded. Solutions without an effort-days
     value are also excluded (their score is undefined).
@@ -102,8 +115,11 @@ def rank_solutions(
     priority = outcome.get("priority", "P3")
     p_rank = PRIORITY_RANK.get(priority, 0)
 
+    outcome_id = outcome.get("id")
     results: list[TriageResult] = []
     for s in solutions:
+        if outcome_id is not None and s.get("outcome-id") != outcome_id:
+            continue  # another outcome's candidate — not comparable (Appendix G)
         if s.get("status") == "Discarded":
             continue
         score = compute_triage_score(outcome, s, weights)
