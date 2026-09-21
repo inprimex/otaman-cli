@@ -67,8 +67,17 @@ def _error(transitions) -> str:
     return str(exc.value)
 
 
-def test_a_migrated_outcome_says_it_has_no_create_entry():
-    """THE DEFECT: this reported "requires from+to" while both were present."""
+def test_a_migrated_outcome_now_promotes_instead_of_erroring():
+    """SUPERSEDED, deliberately. This asserted the improved ERROR message for a
+    migrated outcome — the fix that made "requires from+to" stop naming the
+    wrong cause. outcome-transition-start-rule then ruled that this case is not
+    an error at all: the declared `status` is the source of truth, so the walk
+    derives its start and the promote succeeds.
+
+    The diagnosis work was not wasted — it is what made the real condition
+    legible enough to rule on. The assertion is inverted rather than deleted so
+    the history stays readable.
+    """
     promote = {
         "action": "promote",
         "from": "Backlog",
@@ -76,12 +85,10 @@ def test_a_migrated_outcome_says_it_has_no_create_entry():
         "at": "2026-09-20T00:00:00Z",
         "by": "roman",
     }
-    message = _error([MIGRATED, promote])
-    assert "no established prior status" in message
-    assert "`create`" in message
+    assert _validate([MIGRATED, promote], status="Approved") is not None
 
 
-def test_the_misleading_message_is_gone_for_that_case():
+def test_no_error_at_all_for_that_case():
     promote = {
         "action": "promote",
         "from": "Backlog",
@@ -89,7 +96,8 @@ def test_the_misleading_message_is_gone_for_that_case():
         "at": "2026-09-20T00:00:00Z",
         "by": "roman",
     }
-    assert "requires from+to" not in _error([MIGRATED, promote])
+    # there is no error to inspect any more — the case validates
+    assert _validate([MIGRATED, promote], status="Approved") is not None
 
 
 def test_a_genuinely_missing_field_still_says_from_to():
