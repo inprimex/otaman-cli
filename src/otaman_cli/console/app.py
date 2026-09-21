@@ -33,7 +33,6 @@ from otaman_cli.console.bus import (
     Program,
     Proposal,
     discover_programs,
-    list_pending_proposals,
     read_body,
 )
 
@@ -819,6 +818,10 @@ class InboxScreen(_DecisionActions, Screen):
         # rather than merely stale.
         self._source = event_source
         self._own_source = event_source is None
+        # Session cache of the rendered queue: back-navigation paints from this
+        # instantly; only the mount-time load and the event source re-scan.
+        # None = not loaded yet (distinct from "loaded, and empty").
+        self._cache = None
 
     def compose(self) -> ComposeResult:
         yield _header()
@@ -833,7 +836,7 @@ class InboxScreen(_DecisionActions, Screen):
 
     def action_refresh(self) -> None:
         invalidate_read_caches()
-        self._load()
+        self._load(show_loading=not self._cache)
 
     def on_mount(self) -> None:
         if self._source is None:
@@ -854,16 +857,43 @@ class InboxScreen(_DecisionActions, Screen):
             self._source.stop()
 
     def on_screen_resume(self) -> None:
-        # SINGLE load path (fires on push AND on return) — loading also from
-        # on_mount double-populates the list (the #99 ArtifactBrowser race).
-        self._load()
+        # Back from a message or a decision: paint the CACHED list synchronously
+        # (no rescan), then reconcile in the background so a just-decided row
+        # drops off. Measured on the live bus: 762 rows cost ~500 ms to re-derive
+        # even with the memoized reads, and this is the console's most-walked
+        # path — list to message and back.
+        if self._cache is not None:
+            self._paint(self._cache)
+        self._load(show_loading=self._cache is None)
 
-    def _load(self) -> None:
+    def _load(self, *, show_loading: bool = False) -> None:
+        """(Re)scan the bus OFF the UI thread, updating the cache.
+
+        The scan ran INLINE here, so opening Messages or returning to it froze
+        the console for the length of a full queue derivation — ~1 s cold on the
+        live bus. Both the off-thread scan and the session cache existed on the
+        screen 2.1 replaced and did not come across; `TreeScreen` keeps the same
+        shape, so this restores the house pattern rather than inventing one.
+        """
+        if show_loading:
+            lv = self.query_one("#inbox-list", ListView)
+            lv.clear()
+            lv.append(ListItem(Label("Loading messages…")))
+        self.run_worker(self._load_worker, thread=True, exclusive=True, group="inbox")
+
+    def _load_worker(self) -> None:
         from otaman_cli.console.bus import list_human_queue
 
+        rows = list_human_queue(self.program)  # bus scan, off the UI thread
+        self.app.call_from_thread(self._apply, rows)
+
+    def _apply(self, rows) -> None:
+        self._cache = rows
+        self._paint(rows)
+
+    def _paint(self, rows) -> None:
         lv = self.query_one("#inbox-list", ListView)
         lv.clear()
-        rows = list_human_queue(self.program)
         if rows:
             decisions = sum(1 for r in rows if r.is_decision)
             for r in rows:
@@ -1436,112 +1466,6 @@ class InboxMessageScreen(Screen):
 
     def action_back(self) -> None:
         self.app.pop_screen()
-
-
-class PendingListScreen(Screen):
-    """Pending spec-change-requests for the picked program."""
-
-    BINDINGS = [
-        Binding("escape", "back", "Back", priority=True),
-        Binding("r", "refresh", "Refresh", priority=True),
-        Binding("l", "lifecycle", "Lifecycle", priority=True),
-        Binding("b", "browse", "Spec review", priority=True),
-        Binding("q", "app.quit", "Quit", priority=True),
-    ]
-
-    def action_lifecycle(self) -> None:
-        self.app.push_screen(LifecycleScreen(self.program))
-
-    def action_browse(self) -> None:
-        self.app.push_screen(ArtifactBrowserScreen(self.program))
-
-    def __init__(self, program: Program, *, event_source=None) -> None:
-        super().__init__()
-        self.program = program
-        # Injectable per task 1.3: the console consumes changes through ONE
-        # event-source interface (polling in I1; fswatch/NATS later) with no
-        # console rework. Tests pass a fake source.
-        self._source = event_source
-        self._own_source = event_source is None
-        # Session cache of the pending list (5.1 finding #5): navigation renders
-        # from this instantly; only the mount-time load and the polling source's
-        # incremental refresh ever re-scan the bus. None = not loaded yet.
-        self._cache: list[Proposal] | None = None
-
-    def compose(self) -> ComposeResult:
-        yield _header()
-        yield _identity_badge_widget(self.program.root)
-        yield _mode_banner(
-            f"Proposals — pending SCRs & outcome-proposals · {self.program.name}",
-            "enter open · l lifecycle · b spec review · r refresh · esc back · q quit",
-        )
-        yield ListView(id="pending-list")
-        yield Footer()
-
-    def on_mount(self) -> None:
-        # First load: paint a loading row, then scan off the UI thread (5.1
-        # finding #2.4). Subsequent navigation renders from cache (finding #5).
-        self._refresh(show_loading=True)
-        if self._source is None:
-            from otaman_cli.console.events import make_event_source
-
-            self._source = make_event_source(self.program)
-        # The polling source drives INCREMENTAL refresh: when the pending set
-        # moves it re-scans off-thread and updates the cache — navigation never
-        # triggers a scan (finding #5). Marshal the callback onto the UI thread.
-        self._source.start(lambda: self.app.call_from_thread(self._refresh))
-
-    def on_unmount(self) -> None:
-        if self._source is not None and self._own_source:
-            self._source.stop()
-
-    def on_screen_resume(self) -> None:
-        # Back from a ProposalScreen: render the cached list INSTANTLY (no
-        # rescan — finding #5, back-navigation used to re-pay the full scan),
-        # then reconcile in the background so a just-decided proposal drops off.
-        self._paint(self._cache or [])
-        self._refresh(show_loading=False)
-
-    def _refresh(self, *, show_loading: bool = False) -> None:
-        """(Re)scan the bus off the UI thread, updating the cache.
-
-        Shows a loading row only on the very first load (empty cache); a
-        background reconcile repaints in place without a blank flash.
-        """
-        if show_loading and not self._cache:
-            lv = self.query_one("#pending-list", ListView)
-            lv.clear()
-            lv.append(ListItem(Label("Loading pending proposals…")))
-        self.run_worker(self._load_worker, thread=True, exclusive=True, group="load")
-
-    def _load_worker(self) -> None:
-        proposals = list_pending_proposals(self.program)  # bus scan, off the UI thread
-        self.app.call_from_thread(self._apply, proposals)
-
-    def _apply(self, proposals: list[Proposal]) -> None:
-        self._cache = proposals
-        self._paint(proposals)
-
-    def _paint(self, proposals: list[Proposal]) -> None:
-        lv = self.query_one("#pending-list", ListView)
-        lv.clear()
-        if proposals:
-            for p in proposals:
-                lv.append(_ProposalItem(p))
-        else:
-            lv.append(ListItem(Label("No pending proposals.")))
-
-    def action_back(self) -> None:
-        self.app.pop_screen()
-
-    def action_refresh(self) -> None:
-        invalidate_read_caches()
-        self._refresh(show_loading=not self._cache)
-
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        proposal = getattr(event.item, "proposal", None)
-        if proposal is not None:
-            self.app.push_screen(ProposalScreen(self.program, proposal))
 
 
 class ReasonModal(ModalScreen[str | None]):
@@ -2360,7 +2284,6 @@ __all__ = [
     "InboxMessageScreen",
     "InboxScreen",
     "OtamanConsole",
-    "PendingListScreen",
     "ProgramPickerScreen",
     "ProposalScreen",
     "ReasonModal",

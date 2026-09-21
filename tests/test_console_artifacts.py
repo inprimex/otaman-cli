@@ -243,9 +243,9 @@ def test_every_screen_has_a_mode_banner(program):
 
     from otaman_cli.console.app import (
         ArtifactBrowserScreen,
+        InboxScreen,
         LifecycleScreen,
         OtamanConsole,
-        PendingListScreen,
     )
 
     async def go():
@@ -254,7 +254,7 @@ def test_every_screen_has_a_mode_banner(program):
             await pilot.pause()  # picker
             assert app.screen.query_one("#mode-banner", Static)
             for screen in (
-                PendingListScreen(program),
+                InboxScreen(program),
                 LifecycleScreen(program),
                 ArtifactBrowserScreen(program),
             ):
@@ -269,19 +269,7 @@ def test_every_screen_has_a_mode_banner(program):
     asyncio.run(go())
 
 
-@_textual
-def test_pending_list_opens_browser_via_binding(program):
-    from otaman_cli.console.app import ArtifactBrowserScreen, OtamanConsole, PendingListScreen
-
-    async def go():
-        app = OtamanConsole([program], search_root=program.root)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            app.push_screen(PendingListScreen(program))
-            await pilot.pause()
-            await app.screen.run_action("browse")
-            await pilot.pause()
-            assert isinstance(app.screen, ArtifactBrowserScreen)
-            await app.action_quit()
-
-    asyncio.run(go())
+# NOTE: test_pending_list_opens_browser_via_binding deleted with PendingListScreen.
+# `l` (lifecycle) and `b` (spec review) were bindings on THAT screen; since
+# console-ia 2.1 they live on Home as hidden aliases, and gate 6.1 F1 tests
+# that they still dispatch (tests/test_console_gate61_f1.py).

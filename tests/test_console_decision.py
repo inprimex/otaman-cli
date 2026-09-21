@@ -208,13 +208,13 @@ def test_approve_unresolved_human_proceeds_unchanged(tmp_path, monkeypatch):
 def test_proposal_screen_approve_flow(program, monkeypatch):
     monkeypatch.setenv("OTAMAN_HUMAN", "roman")
     proposal = _stage(program)
-    from otaman_cli.console.app import OtamanConsole, PendingListScreen, ProposalScreen
+    from otaman_cli.console.app import InboxScreen, OtamanConsole, ProposalScreen
 
     async def go():
         app = OtamanConsole([program], search_root=program.root)
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.push_screen(PendingListScreen(program))
+            app.push_screen(InboxScreen(program))
             await pilot.pause()
             app.push_screen(ProposalScreen(program, proposal))
             await pilot.pause()

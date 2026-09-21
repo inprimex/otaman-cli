@@ -186,21 +186,7 @@ def test_lifecycle_screen_table_lists_changes(tmp_path):
     asyncio.run(go())
 
 
-@_textual
-def test_pending_list_opens_lifecycle_via_binding(tmp_path):
-    program = _program(tmp_path)
-    _change(program, "wip-change", ticks=[False])
-    from otaman_cli.console.app import LifecycleScreen, OtamanConsole, PendingListScreen
-
-    async def go():
-        app = OtamanConsole([program], search_root=program.root)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            app.push_screen(PendingListScreen(program))
-            await pilot.pause()
-            await app.screen.run_action("lifecycle")
-            await pilot.pause()
-            assert isinstance(app.screen, LifecycleScreen)
-            await app.action_quit()
-
-    asyncio.run(go())
+# NOTE: test_pending_list_opens_lifecycle_via_binding deleted with PendingListScreen.
+# `l` (lifecycle) and `b` (spec review) were bindings on THAT screen; since
+# console-ia 2.1 they live on Home as hidden aliases, and gate 6.1 F1 tests
+# that they still dispatch (tests/test_console_gate61_f1.py).
