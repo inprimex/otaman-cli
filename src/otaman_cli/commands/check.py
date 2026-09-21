@@ -310,7 +310,12 @@ def cmd_check(args: list[str]) -> int:
     # Show blocked tasks (blocked-entry-lifecycle 1.4)
     blocked_file = root / ".agents" / "blocked" / f"{agent}.md"
     if blocked_file.exists():
-        from otaman_cli.blocked_entries import parse_entries, stale_reason
+        from otaman_cli.blocked_gate import blocked_entries
+
+        mod = blocked_entries()
+        if mod is None:
+            return  # `check` must still run; the blocked section is omitted
+        parse_entries, stale_reason = mod.parse_entries, mod.stale_reason
 
         # Parsing (and tombstone recognition) via the ONE parser — this used to
         # be a bespoke `<!--.*?-->` strip plus a `\n## Blocked: ` split, one of
@@ -343,19 +348,19 @@ def cmd_check(args: list[str]) -> int:
                     for m in messages
                 )
                 if has_approval and has_spec_change:
-                    UI.ok(f"READY TO RESUME: {entry.title}")
+                    UI.ok(f"READY TO RESUME: {entry.display_title}")
                     UI.ok("Specs updated — read them and continue implementation")
                 elif has_approval:
-                    UI.bullet(f"{entry.title} — approved, waiting for spec commit...")
+                    UI.bullet(f"{entry.display_title} — approved, waiting for spec commit...")
                 elif has_rejection:
-                    UI.error(f"REJECTED: {entry.title} — read rejection reason and adapt")
+                    UI.error(f"REJECTED: {entry.display_title} — read rejection reason and adapt")
                 else:
-                    UI.bullet(f"{entry.title} — waiting for human approval")
+                    UI.bullet(f"{entry.display_title} — waiting for human approval")
                 if stem:
                     UI.muted(f"Proposal: {stem}")
 
             for entry, reason in stale:
-                UI.bullet(f"[stale] {entry.title}")
+                UI.bullet(f"[stale] {entry.display_title}")
                 UI.muted(f"  {reason}")
             if stale:
                 UI.muted("  Stale entries are reported, never auto-removed — clear with")

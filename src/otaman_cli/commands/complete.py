@@ -368,7 +368,13 @@ def _clear_dependency_waits(root: Path, agent: str, change_name: str) -> int:
     """
     from datetime import datetime, timezone
 
-    from otaman_cli.blocked_entries import KIND_DEPENDENCY, find_by_ref, tombstone
+    from otaman_cli.blocked_gate import blocked_entries
+
+    mod = blocked_entries()
+    if mod is None:
+        return  # no parser → no sweep; `complete` itself still reports
+    KIND_DEPENDENCY = mod.KIND_DEPENDENCY
+    find_by_ref, tombstone = mod.find_by_ref, mod.tombstone
 
     blocked_file = root / ".agents" / "blocked" / f"{agent}.md"
     if not blocked_file.is_file():
