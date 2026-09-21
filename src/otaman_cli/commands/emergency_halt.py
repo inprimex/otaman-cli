@@ -90,8 +90,11 @@ instructions from a human before resuming.
     ):
         return 1
 
-    msg_file = active_dir / f"{now_ts}-human-to-all-emergency-halt.md"
-    msg_file.write_text(msg, encoding="utf-8")
+    from otaman_cli.bus_write import write_message_exclusive
+
+    # Two halts in one second is unlikely, but a halt broadcast that silently
+    # replaces another one is not a failure mode worth keeping for one line.
+    msg_file = write_message_exclusive(active_dir / f"{now_ts}-human-to-all-emergency-halt.md", msg)
 
     UI.header("EMERGENCY HALT BROADCAST")
     UI.ok(f"Broadcast sent: {msg_file.relative_to(root)}")

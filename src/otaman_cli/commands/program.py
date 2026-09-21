@@ -209,8 +209,10 @@ def _broadcast_transition(
             f"Program `{program}` lifecycle: {from_state} → {to_state}\n\n"
             f"- actor: {by}\n- reason: {reason or '(none)'}\n"
         )
-        (active_dir / f"{ts}-human-to-all-lifecycle-change-{program}-{to_state}.md").write_text(
-            msg, encoding="utf-8"
+        from otaman_cli.bus_write import write_message_exclusive
+
+        write_message_exclusive(
+            active_dir / f"{ts}-human-to-all-lifecycle-change-{program}-{to_state}.md", msg
         )
     except Exception:  # noqa: BLE001 - transition already recorded; broadcast is best-effort
         UI.warn("lifecycle-change broadcast could not be written (transition already recorded).")

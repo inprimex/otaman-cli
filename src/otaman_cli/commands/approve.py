@@ -258,7 +258,11 @@ def _perform_approval(
     from otaman_cli.safety import record_privileged_confirmation
 
     slug = re.sub(r"[^a-z0-9]+", "-", target["subject"].lower()).strip("-")[:30]
-    broadcast_file = active_dir / f"{now_ts}-human-to-all-spec-change-approved.md"
+    # The slug is already the discriminator in this message's `id:` (below).
+    # Leaving it out of the FILENAME meant two approvals in the same second
+    # wrote two different message ids to the same path, and one was lost —
+    # a human clearing a batch of SCRs in the console does exactly that.
+    broadcast_file = active_dir / f"{now_ts}-human-to-all-{slug}-spec-change-approved.md"
     comment_section = f"\n### Human comments\n{comment}\n" if comment else ""
 
     broadcast = f"""---
@@ -302,8 +306,12 @@ Use `/otaman:check` to track updates.
         return 1
 
     ack_file = acks_dir / f"{target['stem']}.human.ack"
+    # The ack is idempotent (same content every time) — overwriting loses
+    # nothing, so it deliberately stays a plain write per bus_write's doctrine.
     ack_file.write_text("approved\n", encoding="utf-8")
-    broadcast_file.write_text(broadcast, encoding="utf-8")
+    from otaman_cli.bus_write import write_message_exclusive
+
+    broadcast_file = write_message_exclusive(broadcast_file, broadcast)
 
     _terminate_blocked_entries(root, "spec-change-approved", broadcast)
 
@@ -382,7 +390,8 @@ def _perform_rejection(
     from otaman_cli.safety import record_privileged_confirmation
 
     proposer = target["fm"].get("from", "all")
-    reject_file = active_dir / f"{now_ts}-human-to-{proposer}-spec-change-rejected.md"
+    reject_slug = re.sub(r"[^a-z0-9]+", "-", str(target["subject"]).lower()).strip("-")[:30]
+    reject_file = active_dir / f"{now_ts}-human-to-{proposer}-{reject_slug}-spec-change-rejected.md"
     reason = comment or "No reason provided."
 
     reject_msg = f"""---
@@ -421,8 +430,10 @@ The spec-change-request has been **rejected**.
         return 1
 
     ack_file = acks_dir / f"{target['stem']}.human.ack"
-    ack_file.write_text("rejected\n", encoding="utf-8")
-    reject_file.write_text(reject_msg, encoding="utf-8")
+    ack_file.write_text("rejected\n", encoding="utf-8")  # idempotent, see above
+    from otaman_cli.bus_write import write_message_exclusive
+
+    reject_file = write_message_exclusive(reject_file, reject_msg)
 
     _terminate_blocked_entries(root, "spec-change-rejected", reject_msg)
 
@@ -642,8 +653,12 @@ A spec-change was approved via the INSECURE chat fallback
 audit, not cryptographic proof of humanness. If you did not perform this
 confirmation, review ~/.otaman/hitl-chat-audit.log and rotate trust.
 """
-    (active_dir / f"{now_ts}-hitl-audit-to-human-chat-approval-notice.md").write_text(
-        notice, encoding="utf-8"
+    # An audit notice that silently overwrites another audit notice is the one
+    # message on this path that must never be lost.
+    from otaman_cli.bus_write import write_message_exclusive
+
+    write_message_exclusive(
+        active_dir / f"{now_ts}-hitl-audit-to-human-chat-approval-notice.md", notice
     )
 
 
