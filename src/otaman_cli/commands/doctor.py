@@ -1015,6 +1015,88 @@ def _print_solution_disposition_report(result: dict) -> None:
     print("  expected members here; anything else needs a solution or a disposition.")
 
 
+def _check_retired_skills_key(root: Path) -> dict:
+    """Activation config sitting in a retired location (skill-activation-config-split).
+
+    WARN, never a failure. The key has moved twice and both old homes are INERT
+    — a wizard answer parked in either one activates nothing, silently. That is
+    a misconfiguration to point at, not a broken program, and failing on it
+    would make doctor red for a file that merely predates the move.
+    """
+    try:
+        from otaman_cli.yaml_fast import load_file
+
+        cfg = load_file(root / "platform.yaml", {}) or {}
+    except Exception:  # noqa: BLE001
+        return {"check": "retired_skills_key", "applicable": False}
+    if not isinstance(cfg, dict):
+        return {"check": "retired_skills_key", "applicable": False}
+
+    program = cfg.get("program") if isinstance(cfg.get("program"), dict) else {}
+    effective = program.get("skills") if isinstance(program.get("skills"), dict) else None
+
+    def _has_config(block) -> bool:
+        return isinstance(block, dict) and bool(block.get("profile") or block.get("extra"))
+
+    processes = program.get("processes")
+    in_slot = processes.get("skills") if isinstance(processes, dict) else None
+    # A real registry at that key carries a `path:` — only a CONFIG-shaped block
+    # is a stray.
+    stray_slot = in_slot if isinstance(in_slot, dict) and not in_slot.get("path") else None
+
+    # The two retired homes are NOT equivalent, and saying so matters: the
+    # resolver still READS `program.processes.skills` during plugin's D1
+    # compatibility window (measured: 8 skills still activate from it), while
+    # the top-level key was never read by anything. Calling a working config
+    # "inert" would send its author chasing a problem they do not have.
+    retired = []
+    if _has_config(cfg.get("skills")):
+        retired.append(("top-level `skills:`", "never read — activates nothing", True))
+    if _has_config(stray_slot):
+        retired.append(
+            (
+                "`program.processes.skills`",
+                "still read during the compatibility window, then refused; "
+                "that slot belongs to the skills REGISTRY",
+                False,
+            )
+        )
+    return {
+        "check": "retired_skills_key",
+        "applicable": True,
+        "status": "warn" if retired and not effective else "ok",
+        "effective": bool(effective),
+        "retired": retired,
+    }
+
+
+def _print_retired_skills_key_report(result: dict) -> None:
+    if not result.get("applicable"):
+        return
+    retired = result.get("retired") or []
+    if not retired:
+        return
+    print()
+    UI.header("Skill activation config")
+    plural = "copy" if len(retired) == 1 else "copies"
+    if result.get("effective"):
+        print(
+            f"  {UI.badge('OK', C.GREEN)}  program.skills is set; "
+            f"{len(retired)} retired {plural} also present (harmless)"
+        )
+        return
+    dead = all(is_dead for _, _, is_dead in retired)
+    state = "INERT" if dead else "on borrowed time"
+    print(f"  {UI.badge('WARN', C.YELLOW)}  activation config is in a retired location — {state}")
+    for where, why, _ in retired:
+        UI.bullet(f"{where} — {why}")
+    print("  Move it to `program.skills`:")
+    print("    program:")
+    print("      skills:")
+    print("        profile: <your-profile>")
+    print("        extra: []")
+
+
 def _check_stale_presence(root: Path) -> dict:
     """Working/waiting status records nobody has heard from (status-heartbeat 1.2).
 
@@ -1443,6 +1525,9 @@ def cmd_doctor(args: list[str]) -> int:
 
     # status-heartbeat 1.2 — WARN only, deliberately outside the exit code.
     _print_stale_presence_report(_check_stale_presence(root))
+
+    # skill-activation-config-split 1.2 — same shape: report, never fail.
+    _print_retired_skills_key_report(_check_retired_skills_key(root))
 
     enfmap = _check_enforcement_map(root)
     _print_enforcement_map_report(enfmap)

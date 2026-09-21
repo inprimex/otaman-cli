@@ -45,7 +45,7 @@ class TestPrefill:
             out,
         )
         doc = yaml.safe_load(out.read_text())
-        assert doc["program"]["processes"]["skills"]["profile"] == "tech-startup-cofounder"
+        assert doc["program"]["skills"]["profile"] == "tech-startup-cofounder"
 
     # 4.4 (b)
     def test_other_domains_do_not_set_tech_startup_profile(self, tmp_path: Path):
@@ -62,8 +62,8 @@ class TestPrefill:
             out,
         )
         doc = yaml.safe_load(out.read_text())
-        assert doc["program"]["processes"]["skills"]["profile"] != "tech-startup-cofounder"
-        assert doc["program"]["processes"]["skills"]["profile"] == "fintech-default"
+        assert doc["program"]["skills"]["profile"] != "tech-startup-cofounder"
+        assert doc["program"]["skills"]["profile"] == "fintech-default"
 
     def test_healthcare_domain_does_not_get_tech_startup_profile(self):
         assert _recommend_skill_profile({"domains": ["healthcare"]}) == "healthcare-default"
@@ -189,6 +189,6 @@ class TestEndToEndPrefill:
             out,
         )
         doc = yaml.safe_load(out.read_text())
-        assert doc["program"]["processes"]["skills"]["profile"] == "tech-startup-cofounder"
+        assert doc["program"]["skills"]["profile"] == "tech-startup-cofounder"
         # domain preserved in output
         assert doc.get("domains") == ["tech-startup"]

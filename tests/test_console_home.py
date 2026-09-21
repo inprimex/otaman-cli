@@ -32,13 +32,10 @@ def program(tmp_path):
         "  - {name: a, path: ., owner: cli-agent}\n"
         "  - {name: b, path: ../b, owner: core-agent}\n"
         "program:\n"
+        "  skills: {profile: sw-default, extra: [refactor, review]}\n"
         "  processes:\n"
         "    outcomes: {enabled: true}\n"
         "    solutions: {enabled: false}\n"
-        # `skills` nests with the other processes — the location the
-        # resolver reads. It used to sit at the top level, where nothing
-        # activated it (cofounder-agent 20260919T232423).
-        "    skills: {profile: sw-default, extra: [refactor, review]}\n"
         "human-roster:\n"
         "  - {name: roman, roles: [cto, approver]}\n",
         encoding="utf-8",

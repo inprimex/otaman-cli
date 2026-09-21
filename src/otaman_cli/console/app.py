@@ -331,9 +331,12 @@ class HomeScreen(Screen):
         if getattr(summary, "legacy_skills", 0):
             # Names the fix, because a count of 0 next to a populated-looking
             # platform.yaml is exactly what sends someone hunting.
+            # Names the CURRENT destination. This said `program.processes.skills`
+            # — right for one release, wrong after the config/registry split —
+            # and a remedy that points at a retired location is worse than none.
             skills_line += (
-                f"   ({summary.legacy_skills} declared under the retired top-level "
-                "`skills:` — inert; move to program.processes.skills)"
+                f"   ({summary.legacy_skills} declared in a retired location "
+                "— inert; move to program.skills)"
             )
         lines.append(skills_line)
         # feature-usage score: RESERVED — an undefined number is never displayed.

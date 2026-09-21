@@ -285,24 +285,33 @@ def build_home_summary(program: Program) -> HomeSummary:
     except Exception:  # noqa: BLE001
         secrets = 0
 
-    # Count the EFFECTIVE location — `program.processes.skills`, which is what
-    # the resolver reads. This counted the TOP-LEVEL `skills` key, which nothing
-    # activates, so Home showed a cheerful non-zero count for skills that never
-    # loaded — the reported part "most likely to burn an hour of someone's
-    # debugging" (cofounder-agent 20260919T232423).
+    # Count the EFFECTIVE location — `program.skills`, which is what the
+    # resolver reads (skill-activation-config-split).
+    #
+    # This key has moved twice, and BOTH retired homes are inert, so Home names
+    # whichever one still holds content rather than showing a bare zero the
+    # author cannot explain. A count sourced from a key with no effect is the
+    # reported "part most likely to burn an hour of someone's debugging".
     def _count(block) -> int:
         if not isinstance(block, dict):
             return 0
         return len(block.get("extra") or []) + (1 if block.get("profile") else 0)
 
-    program_block = cfg.get("program")
-    nested = (program_block or {}).get("processes") if isinstance(program_block, dict) else None
-    nested = nested.get("skills") if isinstance(nested, dict) else None
-    skills = _count(nested)
-    # A legacy top-level key that is NOT mirrored nested is inert. Say so rather
-    # than counting it (a lie) or ignoring it (a silent zero the author cannot
-    # explain): `otaman init` wrote this shape before the fix.
-    legacy_skills = 0 if nested else _count(cfg.get("skills"))
+    program_block = cfg.get("program") if isinstance(cfg.get("program"), dict) else {}
+    skills = _count(program_block.get("skills"))
+    if skills:
+        legacy_skills = 0
+    else:
+        # retired #1: the original top-level `skills:` (pre-#170 wizard output)
+        # retired #2: config left in the REGISTRY slot (#170's window, v0.5.9)
+        # NOT `processes` — that name holds the enabled-process LIST in this
+        # function, and shadowing it made `processes_enabled` None.
+        process_block = program_block.get("processes")
+        in_slot = process_block.get("skills") if isinstance(process_block, dict) else None
+        # only a CONFIG-shaped block counts as a stray — a real registry there
+        # carries a `path:` and is not activation config at all
+        stray = in_slot if isinstance(in_slot, dict) and not in_slot.get("path") else None
+        legacy_skills = _count(cfg.get("skills")) or _count(stray)
 
     policy = "warn"
     process_level = None

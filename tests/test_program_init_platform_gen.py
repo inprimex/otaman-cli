@@ -65,7 +65,7 @@ class TestBuildPlatformYaml:
         # The old location silently activated nothing; see
         # tests/test_skills_key_location.py.
         doc = _build_platform_yaml(_BASE_ANSWERS)
-        assert doc["program"]["processes"]["skills"]["profile"] == "software-development-default"
+        assert doc["program"]["skills"]["profile"] == "software-development-default"
         assert "skills" not in doc
 
     def test_repos_includes_business(self):

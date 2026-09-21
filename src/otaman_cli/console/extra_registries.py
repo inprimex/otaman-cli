@@ -31,18 +31,16 @@ from otaman_cli.console.tree import TreeNode
 #: Process keys that own a place in the value spine — never sibling roots.
 SPINE_PROCESSES = frozenset({"outcomes", "solutions", "personas"})
 
-#: Process keys that are CONFIG BLOCKS, not registries of entries.
+
+#: Keys whose registry form REQUIRES an explicit `path:` before it renders.
 #:
-#: `program.processes.skills` carries `{profile, extra}` for the skill-pack
-#: resolver — there is no `skills.yaml` of rows behind it, so rendering it as a
-#: registry root produced a phantom "skills — enabled · registry home unset"
-#: line on every wizard-generated program.
-#:
-#: The collision is real and NOT settled here: "per-project skills" is also one
-#: of the four dispatched REGISTRIES (console-ia-review §5), so the same key
-#: would mean two different things. Excluding it keeps the console honest until
-#: spec-agent and plugin-agent rule on the naming; reversing this is one line.
-NON_REGISTRY_PROCESSES = frozenset({"skills"})
+#: `skills` is the one key that briefly held activation config
+#: (`{profile, extra}`) in the registry slot, so a bare `program.processes.skills`
+#: may still be a leftover switch rather than a registry of rows. Demanding the
+#: path distinguishes them by SHAPE rather than by a hardcoded suppression list
+#: — the list was a holding action while the naming was open, and the ruling
+#: closed it: config moved to `program.skills`, this slot is the registry's.
+_PATH_REQUIRED = frozenset({"skills"})
 
 #: How many entries a collapsed root lists before it says how many it withheld.
 #: Never a silent truncation: a root that shows 50 of 300 says so on its last
@@ -153,7 +151,14 @@ def discover(program: Program) -> list[ExtraRegistry]:
     extras = getattr(procs, "model_extra", None) or {}
     out: list[ExtraRegistry] = []
     for key, cfg in extras.items():
-        if key in SPINE_PROCESSES or key in NON_REGISTRY_PROCESSES or not _enabled(cfg):
+        if key in SPINE_PROCESSES or not _enabled(cfg):
+            continue
+        if key in _PATH_REQUIRED and not (isinstance(cfg, dict) and cfg.get("path")):
+            # A REGISTRY here carries a `path:` to its rows. Activation config
+            # briefly lived at this key (#170) and would otherwise render as a
+            # phantom root; requiring the path tells the two apart without a
+            # suppression list, which is what skill-activation-config-split 1.3
+            # asked for. The config now lives at `program.skills`.
             continue
         path = _configured_path(program, key, cfg)
         exists = bool(path and path.is_file())
@@ -208,7 +213,6 @@ def registry_roots(program: Program) -> list[TreeNode]:
 
 __all__ = [
     "MAX_ENTRIES",
-    "NON_REGISTRY_PROCESSES",
     "SPINE_PROCESSES",
     "ExtraRegistry",
     "discover",
