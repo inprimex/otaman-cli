@@ -122,6 +122,8 @@ def test_inbox_enter_opens_read_view(program):
             await pilot.pause()
             app.push_screen(InboxScreen(program))
             await pilot.pause()
+            await app.workers.wait_for_complete()  # the list loads OFF the UI
+            await pilot.pause()  # thread now (#177)
             lv = app.screen.query_one("#inbox-list", ListView)
             assert len(lv.children) == 1
             lv.focus()

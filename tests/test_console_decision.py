@@ -216,6 +216,8 @@ def test_proposal_screen_approve_flow(program, monkeypatch):
             await pilot.pause()
             app.push_screen(InboxScreen(program))
             await pilot.pause()
+            await app.workers.wait_for_complete()  # the list loads OFF the UI
+            await pilot.pause()  # thread now (#177)
             app.push_screen(ProposalScreen(program, proposal))
             await pilot.pause()
             assert isinstance(app.screen, ProposalScreen)

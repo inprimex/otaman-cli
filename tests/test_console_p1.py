@@ -169,6 +169,8 @@ def test_messages_screen_lists_both_kinds(program):
             await pilot.pause()
             app.push_screen(InboxScreen(program))
             await pilot.pause()
+            await app.workers.wait_for_complete()  # the list loads OFF the UI
+            await pilot.pause()  # thread now (#177)
             lv = app.screen.query_one("#inbox-list", ListView)
             assert len(lv.children) == 2
             await app.action_quit()
@@ -223,6 +225,8 @@ def test_a_plain_row_refuses_the_decision_keys_by_name(program):
             await pilot.pause()
             app.push_screen(InboxScreen(program))
             await pilot.pause()
+            await app.workers.wait_for_complete()  # the list loads OFF the UI
+            await pilot.pause()  # thread now (#177)
             app.screen.query_one("#inbox-list", ListView).index = 0
             await pilot.pause()
             type(app).notify = lambda self, msg, **kw: notes.append(str(msg))

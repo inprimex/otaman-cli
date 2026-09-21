@@ -1032,6 +1032,13 @@ class TreeScreen(Screen):
         from otaman_cli.console.lifecycle import LIFECYCLE_COLUMNS
 
         self.query_one("#artifact-lifecycle", DataTable).add_columns(*LIFECYCLE_COLUMNS)
+        # Enter opens the detail and does NOT toggle (defect 4). Textual's own
+        # docstring: "If `auto_expand` is True use of this action on a non-leaf
+        # node will cause both an expand/collapse event to occur, as well as a
+        # selected event." Our banner and canon both say arrows move/expand/
+        # collapse and Enter opens — the default contradicted the contract we
+        # advertise.
+        self.query_one("#artifact-tree", Tree).auto_expand = False
         self._apply_lens()
         self._reload()
 
@@ -1048,8 +1055,15 @@ class TreeScreen(Screen):
         from otaman_cli.console.tree import LENS_LABEL, LENS_LIFECYCLE
 
         is_table = self._lens == LENS_LIFECYCLE
-        self.query_one("#artifact-lifecycle", DataTable).display = is_table
+        table = self.query_one("#artifact-lifecycle", DataTable)
+        table.display = is_table
         self.query_one("#tree-row").display = not is_table
+        # FOCUS follows the lens (defects 1 + 2). Hiding the focused widget drops
+        # focus and nothing restored it, so after one visit to the lifecycle lens
+        # the keyboard was dead on EVERY lens until the human clicked — and with
+        # nothing focused Textual draws no cursor, which is why the selected row
+        # only appeared after a mouse click. Both of Roman's reports, one cause.
+        (table if is_table else self.query_one("#artifact-tree", Tree)).focus()
         label = LENS_LABEL.get(self._lens, self._lens)
         self.query_one("#mode-banner", Static).update(
             f"Artifacts · {self.program.name} — {label} lens\n"
