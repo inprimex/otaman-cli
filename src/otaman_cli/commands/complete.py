@@ -12,7 +12,6 @@ side of that read/write pair) moves here.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from otaman_core.identity import resolve_enforcement_identity
@@ -255,12 +254,20 @@ def cmd_complete(args: list[str]) -> int:
     else:
         recipient = "spec-agent"
 
-    slug = re.sub(r"[^a-z0-9]+", "-", change_name.lower()).strip("-")[:30]
+    from otaman_cli.bus_stem_gate import bus_stem
+
+    _stem = bus_stem()
+    slug = _stem.slugify(change_name, max_len=30)
     msg_id = f"{now_ts}-complete-{slug}"
     # Change name in the stem: without it, completing two changes in the same
     # second (a scripted sweep, an agent finishing a batch) puts both on the
     # identical path. See the notify-change loss of 2026-09-21.
-    filename = f"{now_ts}-{agent}-to-{recipient.replace('/', '-')}-{change_name}-task-complete.md"
+    filename = _stem.build_filename(
+        timestamp=now_ts,
+        sender=agent,
+        recipient=recipient,
+        slug=f"{change_name}-task-complete",
+    )
 
     task_label = "all tasks" if mark_all else f"tasks {tasks_spec}"
 
@@ -323,8 +330,11 @@ status: pending
     # Step 2b: Fanout to spec_owner if set and different from primary recipient
     spec_owner = _read_spec_owner(root, change_name)
     if spec_owner and spec_owner != recipient:
-        fanout_filename = (
-            f"{now_ts}-{agent}-to-{spec_owner.replace('/', '-')}-{change_name}-task-complete.md"
+        fanout_filename = _stem.build_filename(
+            timestamp=now_ts,
+            sender=agent,
+            recipient=spec_owner,
+            slug=f"{change_name}-task-complete",
         )
         fanout_content = content.replace(f"\nto: {recipient}\n", f"\nto: {spec_owner}\n", 1)
         try:

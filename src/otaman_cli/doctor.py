@@ -915,7 +915,9 @@ def check_privileged_provenance(project_root: Path) -> dict[str, Any]:
             keys = [f.stem] + ([id_m.group(1)] if id_m and id_m.group(1) != f.stem else [])
             if any(verify_confirmation(message_id=k, content_hash=digest) for k in keys):
                 continue
-            stamp = f.stem.split("-", 1)[0]
+            from otaman_cli.bus_stem_gate import bus_stem
+
+            stamp = bus_stem().timestamp_of(f.stem)
             if stamp < _PROVENANCE_CUTOFF:
                 grandfathered += 1
                 continue

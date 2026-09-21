@@ -216,9 +216,13 @@ def emit_human_decision(
     from otaman_core.confirmations import append_confirmation, hash_message
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    filename = (
-        f"{ts}-human-to-{payload.to_agent.replace('/', '-')}-human-decision-"
-        f"{payload.in_reply_to[:30]}.md"
+    from otaman_cli.bus_stem_gate import bus_stem
+
+    filename = bus_stem().build_filename(
+        timestamp=ts,
+        sender="human",
+        recipient=payload.to_agent,
+        slug=f"human-decision-{payload.in_reply_to[:30]}",
     )
     content = payload.render()
     id_match = _re.search(r"^id:\s*(\S+)", content, _re.MULTILINE)

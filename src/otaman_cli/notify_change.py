@@ -320,7 +320,14 @@ def notify_change(project_root: Path, change_name: str) -> tuple[int, dict[str, 
         # what `bus_write` exists for: this writer already imported that
         # module's validator while bypassing its collision-safe allocation,
         # which is precisely the gap that let a fixed bug class reappear here.
-        msg_filename = f"{msg_ts}-{specs_root.name}-to-{recipient}-{change_name}-spec-change.md"
+        from otaman_cli.bus_stem_gate import bus_stem
+
+        msg_filename = bus_stem().build_filename(
+            timestamp=msg_ts,
+            sender=specs_root.name,
+            recipient=recipient,
+            slug=f"{change_name}-spec-change",
+        )
         from otaman_cli.bus_write import BusMessageValidationError, write_message_exclusive
 
         try:

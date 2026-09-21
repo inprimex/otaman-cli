@@ -255,14 +255,21 @@ def _perform_approval(
     """
     import yaml
 
+    from otaman_cli.bus_stem_gate import bus_stem
     from otaman_cli.safety import record_privileged_confirmation
 
-    slug = re.sub(r"[^a-z0-9]+", "-", target["subject"].lower()).strip("-")[:30]
+    _stem = bus_stem()
+    slug = _stem.slugify(target["subject"], max_len=30)
     # The slug is already the discriminator in this message's `id:` (below).
     # Leaving it out of the FILENAME meant two approvals in the same second
     # wrote two different message ids to the same path, and one was lost —
     # a human clearing a batch of SCRs in the console does exactly that.
-    broadcast_file = active_dir / f"{now_ts}-human-to-all-{slug}-spec-change-approved.md"
+    broadcast_file = active_dir / _stem.build_filename(
+        timestamp=now_ts,
+        sender="human",
+        recipient="all",
+        slug=f"{slug}-spec-change-approved",
+    )
     comment_section = f"\n### Human comments\n{comment}\n" if comment else ""
 
     broadcast = f"""---
@@ -390,8 +397,16 @@ def _perform_rejection(
     from otaman_cli.safety import record_privileged_confirmation
 
     proposer = target["fm"].get("from", "all")
-    reject_slug = re.sub(r"[^a-z0-9]+", "-", str(target["subject"]).lower()).strip("-")[:30]
-    reject_file = active_dir / f"{now_ts}-human-to-{proposer}-{reject_slug}-spec-change-rejected.md"
+    from otaman_cli.bus_stem_gate import bus_stem
+
+    _stem = bus_stem()
+    reject_slug = _stem.slugify(str(target["subject"]), max_len=30)
+    reject_file = active_dir / _stem.build_filename(
+        timestamp=now_ts,
+        sender="human",
+        recipient=proposer,
+        slug=f"{reject_slug}-spec-change-rejected",
+    )
     reason = comment or "No reason provided."
 
     reject_msg = f"""---
@@ -655,10 +670,18 @@ confirmation, review ~/.otaman/hitl-chat-audit.log and rotate trust.
 """
     # An audit notice that silently overwrites another audit notice is the one
     # message on this path that must never be lost.
+    from otaman_cli.bus_stem_gate import bus_stem
     from otaman_cli.bus_write import write_message_exclusive
 
     write_message_exclusive(
-        active_dir / f"{now_ts}-hitl-audit-to-human-chat-approval-notice.md", notice
+        active_dir
+        / bus_stem().build_filename(
+            timestamp=now_ts,
+            sender="hitl-audit",
+            recipient="human",
+            slug="chat-approval-notice",
+        ),
+        notice,
     )
 
 

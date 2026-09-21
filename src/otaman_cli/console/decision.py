@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import contextlib
 import io
-import re
 from datetime import datetime, timezone
 
 from otaman_cli.console.bus import Program, Proposal
@@ -55,7 +54,10 @@ def _approver_refusal(program: Program) -> str | None:
 
 
 def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:30] or "item"
+    """The shared slugifier at this site's cap (shared-logic-single-home 1.3)."""
+    from otaman_cli.bus_stem_gate import bus_stem
+
+    return bus_stem().slugify(text, max_len=30)
 
 
 def _write_audit(
@@ -73,7 +75,14 @@ def _write_audit(
     (ack) — a values-free record, not a privileged spec-change signal."""
     active_dir, acks_dir = program.bus_paths()
     now_iso, now_ts = _now()
-    stem = f"{now_ts}-human-to-all-console-{verb}-{_slug(proposal.subject)}"
+    from otaman_cli.bus_stem_gate import bus_stem
+
+    stem = bus_stem().build_stem(
+        timestamp=now_ts,
+        sender="human",
+        recipient="all",
+        slug=f"console-{verb}-{_slug(proposal.subject)}",
+    )
     reason_section = f"\n### Reason\n{reason}\n" if reason else ""
     content = (
         # `announce`: the non-privileged fleet-broadcast type (bwsv ruling) — a

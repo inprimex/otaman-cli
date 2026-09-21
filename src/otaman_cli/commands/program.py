@@ -209,10 +209,18 @@ def _broadcast_transition(
             f"Program `{program}` lifecycle: {from_state} → {to_state}\n\n"
             f"- actor: {by}\n- reason: {reason or '(none)'}\n"
         )
+        from otaman_cli.bus_stem_gate import bus_stem
         from otaman_cli.bus_write import write_message_exclusive
 
         write_message_exclusive(
-            active_dir / f"{ts}-human-to-all-lifecycle-change-{program}-{to_state}.md", msg
+            active_dir
+            / bus_stem().build_filename(
+                timestamp=ts,
+                sender="human",
+                recipient="all",
+                slug=f"lifecycle-change-{program}-{to_state}",
+            ),
+            msg,
         )
     except Exception:  # noqa: BLE001 - transition already recorded; broadcast is best-effort
         UI.warn("lifecycle-change broadcast could not be written (transition already recorded).")

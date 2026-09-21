@@ -304,14 +304,17 @@ def cmd_send(args: list[str]) -> int:
     now = datetime.now(timezone.utc)
     ts = now.strftime("%Y%m%dT%H%M%S")
     ts_iso = now.isoformat()
-    slug = re.sub(r"[^a-z0-9]+", "-", ns.subject.lower())[:40].strip("-")
+    from otaman_cli.bus_stem_gate import bus_stem
+
+    _stem_api = bus_stem()
+    slug = _stem_api.slugify(ns.subject, max_len=40)
     # B2: the message id must equal the unique filename stem. The old
     # `{ts}-{agent[:8]}` was second-resolution AND truncated, so distinct
     # messages collided (agent-pmeets-{infra,worker,…} all → 'agent-pm') and
     # `otaman ack` — which keys on the id — matched the wrong file. The
     # route-carrying stem is unique per recipient+subject; a same-second
     # same-route collision gets a suffix on write, patched into the id below.
-    filename_stem = f"{ts}-{agent}-to-{to_agent}-{slug}"
+    filename_stem = _stem_api.build_stem(timestamp=ts, sender=agent, recipient=to_agent, slug=slug)
     filename = f"{filename_stem}.md"
 
     # cli-send-cc-fanout-parity (tasks 1.1-1.5) — compute the effective CC

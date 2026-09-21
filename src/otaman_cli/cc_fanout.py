@@ -175,7 +175,11 @@ def cc_copy_filename(
     primary ``to:``) so each recipient's inbox glob picks up its copy.
     """
     safe_cc = cc_recipient.replace("/", "-")
-    return f"{timestamp}-{from_agent}-to-{safe_cc}-{slug}.md"
+    from otaman_cli.bus_stem_gate import bus_stem
+
+    return bus_stem().build_filename(
+        timestamp=timestamp, sender=from_agent, recipient=safe_cc, slug=slug
+    )
 
 
 __all__ = [

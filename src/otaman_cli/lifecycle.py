@@ -53,7 +53,10 @@ class LifecycleRow:
 
 
 def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    """The shared slugifier, uncapped at this site (shared-logic-single-home 1.3)."""
+    from otaman_cli.bus_stem_gate import bus_stem
+
+    return bus_stem().slugify(text)
 
 
 def _delta_secs(ts_iso: str, now: datetime) -> int | None:
@@ -111,8 +114,9 @@ def _compact_ts(stem: str) -> str:
 
     This is the form that ``.openspec.yaml`` ``approved_by`` notes and
     ``dispositions.yaml`` ``approval`` stems cite an approval broadcast by."""
-    m = re.match(r"^(\d{8}T\d{6})", stem)
-    return m.group(1) if m else ""
+    from otaman_cli.bus_stem_gate import bus_stem
+
+    return bus_stem().timestamp_of(stem)
 
 
 def _approved_titles(bus_active_dir: Path) -> list[tuple[str, str, str]]:
@@ -550,7 +554,11 @@ def send_nudge(program, row: ChangeRow, *, note: str = "") -> tuple[bool, str]:
     now = datetime.now(timezone.utc)
     iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     ts = now.strftime("%Y%m%dT%H%M%S")
-    stem = f"{ts}-human-to-{target}-nudge-{row.name}"[:120]
+    from otaman_cli.bus_stem_gate import bus_stem
+
+    stem = bus_stem().build_stem(
+        timestamp=ts, sender="human", recipient=target, slug=f"nudge-{row.name}"
+    )[:120]
     note_section = f"\nNote: {note}\n" if note.strip() else ""
     content = (
         f"---\nid: {stem}\nfrom: human\nto: {target}\npriority: normal\ntype: info\n"

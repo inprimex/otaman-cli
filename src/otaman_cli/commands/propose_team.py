@@ -110,7 +110,11 @@ def cmd_propose(args: list[str]) -> int:
 
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40]
     msg_id = f"{now_ts}-scr-{slug}"
-    filename = f"{now_ts}-{agent}-to-human-spec-change-request.md"
+    from otaman_cli.bus_stem_gate import bus_stem
+
+    filename = bus_stem().build_filename(
+        timestamp=now_ts, sender=agent, recipient="human", slug="spec-change-request"
+    )
 
     active_dir, _ = _resolve_bus_paths(root)
     active_dir.mkdir(parents=True, exist_ok=True)
@@ -195,7 +199,9 @@ status: pending
     # spec-gate-hardening 1.4 — enqueue a spec-approval-pending item for the human
     # so this SCR sits in their triage queue, and the proposing agent can surface
     # it in `otaman check` (its id == the filename stem; core validates the type).
-    sap_stem = f"{now_ts}-{agent}-to-human-spec-approval-pending"
+    sap_stem = bus_stem().build_stem(
+        timestamp=now_ts, sender=agent, recipient="human", slug="spec-approval-pending"
+    )
     sap_content = (
         f"---\nid: {sap_stem}\nfrom: {agent}\nto: human\npriority: normal\n"
         f"type: spec-approval-pending\ntimestamp: {now_iso}\nstatus: pending\n---\n\n"
