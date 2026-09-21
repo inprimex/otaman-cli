@@ -19,10 +19,49 @@ create-exclusive write (so anything that still contends is suffixed, not lost).
 
 from __future__ import annotations
 
+import textwrap
 from pathlib import Path
 
 from otaman_cli.notify_change import notify_change
-from tests.test_notify_change import _stage_change, _stage_workspace
+
+# Staged locally rather than imported from test_notify_change. `tests` is not a
+# package and pytest's pythonpath does not include the repo root, so a
+# `from tests.… import` resolves only where the repo root happens to be on
+# sys.path — it passed here and failed collection on all three CI runners.
+# Reaching into another test module's underscore helpers was the wrong coupling
+# regardless.
+
+
+def _stage_workspace(tmp_path: Path) -> tuple[Path, Path]:
+    """A minimal otaman project plus its sibling specs repo."""
+    project = tmp_path / "myorg"
+    specs = tmp_path / "myorg-specs"
+    project.mkdir()
+    (specs / "openspec" / "changes").mkdir(parents=True)
+    (project / ".agents" / "bus" / "active" / "acks").mkdir(parents=True)
+    (project / ".agents" / "current-agent").write_text("cli-agent", encoding="utf-8")
+    (project / "platform.yaml").write_text(
+        textwrap.dedent("""
+            project: myorg
+            version: '1.0'
+            specs:
+              path: ../myorg-specs
+            repos:
+              - {name: otaman-cli, path: ../otaman-cli, owner: cli-agent}
+              - {name: otaman-core, path: ../otaman-core, owner: core-agent}
+              - {name: otaman-plugin, path: ../otaman-plugin, owner: plugin-agent}
+        """).lstrip(),
+        encoding="utf-8",
+    )
+    return project, specs
+
+
+def _stage_change(specs: Path, change_name: str, tasks_md_body: str | None = None) -> Path:
+    change_dir = specs / "openspec" / "changes" / change_name
+    change_dir.mkdir(parents=True, exist_ok=True)
+    if tasks_md_body is not None:
+        (change_dir / "tasks.md").write_text(tasks_md_body, encoding="utf-8")
+    return change_dir
 
 
 def _bus(project: Path) -> Path:
