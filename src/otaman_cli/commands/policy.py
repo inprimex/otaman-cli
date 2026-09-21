@@ -908,10 +908,23 @@ def _cmd_check_changelog(
     Inputs are explicit so CI and humans get identical answers: paths come from
     ``--paths``/``--paths-from``/stdin or a git diff against ``--base``, and the
     exemption marker is read from ``--pr-body``/``--pr-body-file``. The decision
-    itself lives in :mod:`otaman_cli.changelog_fragment` — pure and unit-tested,
-    not a regex hidden in a workflow.
+    itself lives in :mod:`otaman_core.changelog_fragment` — pure, unit-tested and
+    shared, not a regex hidden in a workflow. It is the SAME function the
+    core-invokable sibling gate calls (``python -m otaman_core.changelog_fragment
+    --check``), which is what makes the two give identical verdicts; the only way
+    they diverge is a repo that overrides the fragment rules in its own policy,
+    since the core gate deliberately uses the shipped standard rules.
+
+    On a core too old to carry the evaluators this REFUSES rather than degrading
+    to "no gate": exiting 0 without evaluating would report a green merge check
+    that never ran, and a false green on a merge gate is worse than a red one.
     """
-    from otaman_cli.changelog_fragment import evaluate, resolve_fragment_config
+    from otaman_cli.changelog_gate import REMEDY, changelog_fragment
+
+    core = changelog_fragment()
+    if core is None:
+        return _bail(f"cannot check changelog fragments — {REMEDY}", code=2)
+    evaluate, resolve_fragment_config = core.evaluate, core.resolve_fragment_config
 
     root, config = _load_context()
     if root is None:

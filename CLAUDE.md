@@ -20,6 +20,26 @@ management, bus operations, and runner/bridge clients.
   commands get a module there, not a `main.py` branch.
 - All changes go through PRs against `main` with clear commit messages.
 
+## Changelog fragments
+
+Every shipped-code PR carries a customer-facing fragment in `changelog.d/` —
+see `changelog.d/README.md` for the format. CI blocks a PR without one via
+`python -m otaman_core.changelog_fragment --check`, the same core-invokable gate
+every sibling repo wires; `otaman policy check-changelog` gives humans the
+identical verdict locally.
+
+When a `fragments-consumed` signal arrives on the bus after a release cut, clear
+this repo's consumed fragments by the manifest the signal names:
+
+```
+otaman release clear-fragments <manifest-or-release-record>
+```
+
+Never empty `changelog.d/` by hand or by glob. The command deletes only the
+manifest-named files, checks each one's content hash first, and keeps anything
+edited since the cut — that text was never released, so it belongs to the next
+one.
+
 ## AI assistants
 
 Follow `CONTRIBUTING.md` and keep CI green. Repo-local operational

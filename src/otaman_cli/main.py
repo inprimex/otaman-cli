@@ -641,6 +641,7 @@ def cmd_help() -> int:
   {C.GREEN}program{C.RESET} <action> [...]        Program lifecycle: status / limit / suspend / resume / archive / unarchive
   {C.GREEN}acting-lock{C.RESET} <run|probe> [...]   Acting-session lock: run a command holding it, or probe the holder
   {C.GREEN}policy{C.RESET} <action> [...]         Policy engine: list packs / show effective policy / validate
+  {C.GREEN}release{C.RESET} clear-fragments <m>   Clear changelog fragments a release cut consumed (by manifest)
   {C.GREEN}outcome{C.RESET} <action> [...]        Program outcome registry (JTBD); actions: add, list, show, history, promote, demote, retire, request-estimate, accept-cost, reject-cost
   {C.GREEN}solution{C.RESET} <action> [...]       Program solution registry; actions: add, list, show, history, propose, promote-to-complete, discard
   {C.GREEN}persona{C.RESET} <action> [...]        Program persona registry; actions: add, list, show, retire
