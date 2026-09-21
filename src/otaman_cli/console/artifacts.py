@@ -182,7 +182,14 @@ def request_changes(program: Program, change_name: str, comments: str) -> tuple[
         return False, "request-changes needs a comment"
     active, _ = program.bus_paths()
     iso, ts = _now()
-    stem = f"{ts}-human-to-spec-agent-review-request-{change_name}"[:120]
+    from otaman_cli.bus_stem_gate import bus_stem
+
+    stem = bus_stem().build_stem(
+        timestamp=ts,
+        sender="human",
+        recipient="spec-agent",
+        slug=f"review-request-{change_name}",
+    )[:120]
     content = (
         f"---\nid: {stem}\nfrom: human\nto: spec-agent\npriority: normal\ntype: review-request\n"
         f"timestamp: {iso}\nstatus: pending\n---\n\n"
@@ -207,7 +214,14 @@ def _broadcast(
 
     active, _ = program.bus_paths()
     iso, ts = _now()
-    stem = f"{ts}-human-to-all-spec-approved-{change_name}"[:120]
+    from otaman_cli.bus_stem_gate import bus_stem
+
+    stem = bus_stem().build_stem(
+        timestamp=ts,
+        sender="human",
+        recipient="all",
+        slug=f"spec-approved-{change_name}",
+    )[:120]
     reason_section = f"\n### Reason\n{reason}\n" if reason else ""
     if not committed:
         commit_note = (

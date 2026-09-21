@@ -10,7 +10,6 @@ no check.
 
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 
 from otaman_cli.commands import CommandSpec, register
@@ -58,7 +57,9 @@ def cmd_emergency_halt(args: list[str]) -> int:
     now = datetime.now(timezone.utc)
     now_ts = now.strftime("%Y%m%dT%H%M%S")
     now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    slug = re.sub(r"[^a-z0-9]+", "-", reason.lower()).strip("-")[:30]
+    from otaman_cli.bus_stem_gate import bus_stem
+
+    slug = bus_stem().slugify(reason, max_len=30)
 
     msg = f"""---
 id: {now_ts}-emergency-halt-{slug}
@@ -94,7 +95,13 @@ instructions from a human before resuming.
 
     # Two halts in one second is unlikely, but a halt broadcast that silently
     # replaces another one is not a failure mode worth keeping for one line.
-    msg_file = write_message_exclusive(active_dir / f"{now_ts}-human-to-all-emergency-halt.md", msg)
+    msg_file = write_message_exclusive(
+        active_dir
+        / bus_stem().build_filename(
+            timestamp=now_ts, sender="human", recipient="all", slug="emergency-halt"
+        ),
+        msg,
+    )
 
     UI.header("EMERGENCY HALT BROADCAST")
     UI.ok(f"Broadcast sent: {msg_file.relative_to(root)}")

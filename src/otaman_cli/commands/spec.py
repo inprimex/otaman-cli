@@ -588,10 +588,11 @@ def dispatch_gate_check(
 def _violation_slug(violation: str) -> str:
     """A kebab-case slug for a gate violation (the leading phrase before any
     parenthetical), for the ``x-gate-waived`` stamp."""
-    import re as _re
 
     head = violation.split("(", 1)[0]
-    slug = _re.sub(r"[^a-z0-9]+", "-", head.lower()).strip("-")
+    from otaman_cli.bus_stem_gate import bus_stem
+
+    slug = bus_stem().slugify(head)
     return slug[:64] or "gate-waived"
 
 

@@ -221,7 +221,10 @@ def emit(
     recipient = msg.get("to", "unknown").replace("/", "-")
     msg_type = msg["type"]
 
-    filename = f"{ts}-{sender}-to-{recipient}-{msg_type}.md"
+    from otaman_cli.bus_stem_gate import bus_stem
+
+    _stem = bus_stem().build_stem(timestamp=ts, sender=sender, recipient=recipient, slug=msg_type)
+    filename = f"{_stem}.md"
     path = bus_active_dir / filename
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -229,7 +232,7 @@ def emit(
     # matching the existing otaman bus message convention.
     payload = msg.get("payload", {})
     frontmatter = {
-        "id": f"{ts}-{sender}-to-{recipient}-{msg_type}",
+        "id": _stem,
         "from": sender,
         "to": recipient,
         "priority": "normal",
