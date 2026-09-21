@@ -61,8 +61,20 @@ def _run_cli(root: Path, *args: str) -> subprocess.CompletedProcess:
 class TestGlobMatch:
     def test_double_star_matches_subtree(self):
         assert _glob_matches("apps/web/src/App.tsx", "apps/web/**")
-        assert _glob_matches("apps/web/", "apps/web/**")  # trailing slash
         assert not _glob_matches("apps/api/foo.js", "apps/web/**")
+
+    def test_double_star_does_not_own_the_directory_itself(self):
+        """Changed by the owner-paths ruling (core #71, adopted in 1.4).
+
+        The local matcher let `apps/web/**` own `apps/web` itself. The ruled
+        semantics separate the two: `<dir>/**` owns strictly INSIDE the
+        directory, and a BARE `<dir>` owns the directory and its subtree. That
+        is self-consistent — each spelling means one thing — but it is a real
+        change, so it is pinned rather than left to be rediscovered.
+        """
+        assert not _glob_matches("apps/web/", "apps/web/**")
+        assert not _glob_matches("apps/web", "apps/web/**")
+        assert _glob_matches("apps/web", "apps/web")  # the bare spelling does
 
     def test_single_star_does_not_cross_slash(self):
         assert _glob_matches("apps/web", "apps/*")
@@ -77,9 +89,22 @@ class TestGlobMatch:
         assert _glob_matches("file.test.ts", "file.test.ts")
         assert not _glob_matches("filextest.ts", "file.test.ts")
 
-    def test_exact_match_no_wildcards(self):
+    def test_bare_name_owns_its_subtree(self):
+        """Changed by the owner-paths ruling (core #71, adopted in 1.4).
+
+        This asserted the OPPOSITE: the local matcher anchored both ends, so
+        `apps/web` owned only itself and a bare directory owned nothing inside
+        it. The ruling is that a bare directory means `<dir>/**`.
+
+        Adopting it widened ownership in six of 99 differential cases, all this
+        one shape. Live impact at adoption: none — no repo in the program
+        declares any owner-paths pattern — but that will not stay true.
+        """
         assert _glob_matches("apps/web", "apps/web")
-        assert not _glob_matches("apps/web/x", "apps/web")
+        assert _glob_matches("apps/web/x", "apps/web")
+        assert _glob_matches("apps/web/deep/nested.py", "apps/web")
+        # …and still nothing at another depth.
+        assert not _glob_matches("other/apps/web/x", "apps/web")
 
 
 # ---------------------------------------------------------------- task 2.1

@@ -80,6 +80,12 @@ def cmd_check(args: list[str]) -> int:
     # message no one knows exists). Collect and warn instead.
     unparseable: list[str] = []
 
+    # Resolved once, outside the loop: `otaman check` iterates the whole active
+    # dir, and the gate's probe is not worth repeating per message.
+    from otaman_cli.frontmatter_gate import frontmatter
+
+    _fm_api = frontmatter()
+
     for f in sorted(active_dir.glob("*.md")):
         try:
             content = f.read_text(encoding="utf-8")
@@ -143,7 +149,7 @@ def cmd_check(args: list[str]) -> int:
                     "response_deadline": fm.get("response-deadline"),
                     "reply_to": fm.get("reply-to"),
                     # bus-cc-routing task 2.2 — `x-cc: true` marks a CC copy
-                    "is_cc": bool(fm.get("x-cc")),
+                    "is_cc": _fm_api.is_cc_copy(fm),
                 }
             )
         except (OSError, yaml.YAMLError):
