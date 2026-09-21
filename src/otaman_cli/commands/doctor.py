@@ -259,6 +259,9 @@ def _check_repo_materialization(root: Path) -> tuple[int, list[dict]]:
             a for a in (".otaman", "CLAUDE.local.md") if not (repo_dir / a).is_file()
         ]
         if missing_artifacts:
+            # Checked FIRST, deliberately: a bare directory was never checked
+            # out, and `sync-repos` is the fix. Reporting "not a git repo" for
+            # it would send the reader chasing `git init` instead.
             results.append(
                 {
                     "name": name,
@@ -267,9 +270,46 @@ def _check_repo_materialization(root: Path) -> tuple[int, list[dict]]:
                     "missing": missing_artifacts,
                 }
             )
+            continue
+
+        # A directory carrying both markers is indistinguishable from a real
+        # checkout, which is how four of five haulops repos sat unversioned for
+        # three weeks while doctor printed OK for each (deploy-agent
+        # 20260921T191148). One of them had taken ~36K of agent work by then.
+        if _version_controlled(repo_dir):
+            entry: dict = {"name": name, "path": rel, "status": "ok"}
         else:
-            results.append({"name": name, "path": rel, "status": "ok"})
+            any_fail = True
+            entry = {"name": name, "path": rel, "status": "not-a-git-repo"}
+
+        # Advisory, never a verdict: a local-only repo is a legitimate choice,
+        # but without a remote there is no clone, no push, and no recovery on
+        # another machine — and `sync-repos` can never help it.
+        if not (repo.get("remote") or "").strip():
+            entry["no_remote"] = True
+        results.append(entry)
     return (1 if any_fail else 0), results
+
+
+def _version_controlled(repo_dir: Path) -> bool:
+    """Is *repo_dir* under git — itself, or via an ancestor checkout?
+
+    `.git` is accepted as a FILE as well as a directory: worktrees and
+    submodules spell it `gitdir: …`, and an `is_dir()` test would report every
+    worktree-based checkout as unversioned.
+
+    The ancestor walk exists so a repo nested inside a parent checkout is not
+    flagged. Its work genuinely is under version control — by the parent — and
+    the thing being detected here is unprotected work, not a missing `.git` in
+    one exact location.
+    """
+    try:
+        for candidate in (repo_dir, *repo_dir.parents):
+            if (candidate / ".git").exists():
+                return True
+    except OSError:  # noqa: BLE001 - unreadable path → let the other checks speak
+        return True
+    return False
 
 
 def _print_repo_materialization_report(results: list[dict]) -> None:
@@ -295,6 +335,12 @@ def _print_repo_materialization_report(results: list[dict]) -> None:
             missing = ", ".join(r.get("missing", []))
             print(f"  {UI.badge('WARN', C.YELLOW)}  {name}  present but missing: {missing}")
             print(f"        fix: {hint}")
+        elif status == "not-a-git-repo":
+            print(f"  {UI.badge('FAIL', C.RED)}  {name}  not a git repository: {path}")
+            print("        work dispatched here has no history and no recovery")
+            print(f"        fix: git init {path}  (then commit, and set a remote)")
+        if r.get("no_remote") and status in {"ok", "not-a-git-repo"}:
+            print(f"        note: no remote declared — no push, no recovery, {hint} cannot help")
 
 
 def _check_roster_sync(root: Path) -> tuple[int, list[dict]]:

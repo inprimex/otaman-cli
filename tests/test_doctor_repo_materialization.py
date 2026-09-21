@@ -32,6 +32,11 @@ def _materialized_repo(root: Path, rel: str) -> Path:
     repo.mkdir(parents=True)
     (repo / ".otaman").write_text("../meta\nagent: x\n", encoding="utf-8")
     (repo / "CLAUDE.local.md").write_text("rules\n", encoding="utf-8")
+    # A materialized repo is a CHECKOUT. This fixture used to stage only the two
+    # markers, which is precisely the state deploy-agent found on four haulops
+    # repos and doctor called OK (20260921T191148) — so the old fixture asserted
+    # the bug was correct behaviour. See test_doctor_repo_not_a_git_repo.py.
+    (repo / ".git").mkdir()
     return repo
 
 
