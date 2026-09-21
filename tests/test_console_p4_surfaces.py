@@ -324,19 +324,13 @@ def test_a_real_slug_still_registers(tmp_path, monkeypatch):
 
 
 def test_a_config_process_is_not_a_registry_root(tmp_path, monkeypatch):
-    """`program.processes.skills` carries {profile, extra} for the skill-pack
-    resolver — there is no skills.yaml of rows behind it. Rendering it as a
-    registry produced a phantom "skills — enabled · registry home unset" root
-    on every wizard-generated program, once the wizard started writing the key
-    where the resolver reads it (cofounder-agent 20260919T232423).
-
-    The collision is NOT settled here: "per-project skills" is also one of the
-    four dispatched registries, so the same key would mean two things. Excluded
-    until spec-agent and plugin-agent rule.
+    """SUPERSEDED in shape, not in intent. This asserted a hardcoded
+    `NON_REGISTRY_PROCESSES` list, which was a holding action while the
+    config-vs-registry naming was open. skill-activation-config-split closed it:
+    config moved to `program.skills`, and a root at the registry slot now needs
+    a real `path:` — shape rather than a name list. The thing that must stay
+    true is unchanged: leftover CONFIG grows no phantom root.
     """
-    from otaman_cli.console.extra_registries import NON_REGISTRY_PROCESSES
-
-    assert "skills" in NON_REGISTRY_PROCESSES
     p = _program(
         tmp_path,
         {"skills": {"profile": "tech-startup-cofounder", "extra": ["risk-reviewer"]}},
