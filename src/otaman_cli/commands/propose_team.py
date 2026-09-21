@@ -53,7 +53,10 @@ def _parse_sections(args: list[str]) -> tuple[dict[str, str], str | None, list[s
     satisfy without hand-editing the file would just teach people to hand-edit
     the file (generated-artifact-quality 1.1).
     """
-    from otaman_core.scr_template import SECTION_KEYS
+    from otaman_cli.scr_gate import scr_template
+
+    template = scr_template()
+    section_keys = template.SECTION_KEYS if template else ()
 
     sections: dict[str, str] = {}
     level: str | None = None
@@ -62,7 +65,7 @@ def _parse_sections(args: list[str]) -> tuple[dict[str, str], str | None, list[s
     while i < len(args):
         arg = args[i]
         key = arg[2:] if arg.startswith("--") else ""
-        if key in SECTION_KEYS and i + 1 < len(args):
+        if key in section_keys and i + 1 < len(args):
             sections[key] = args[i + 1]
             i += 2
         elif key in ("evidence-level", "evidence_level") and i + 1 < len(args):
@@ -119,23 +122,31 @@ def cmd_propose(args: list[str]) -> int:
     # TODO and produced two day-one implementation blockers. A section that
     # genuinely does not apply says `n/a because <reason>`, so the refusal never
     # forces invention — it only forbids silence.
-    from otaman_core.scr_template import render, validate
+    from otaman_cli.scr_gate import scr_template
+
+    template = scr_template()
 
     if desc and "problem" not in sections:
         # `-d` predates the sections; treat it as the problem statement rather
         # than dropping what the caller already typed.
         sections["problem"] = desc
-    body = render(title, sections=sections, evidence_level=evidence_level)
-    ok, errors = validate(body, evidence_level=evidence_level)
+    if template is None:
+        # An install whose core predates the shared template. Losing the gate is
+        # recoverable; losing `propose` is not, and it would fail exactly when
+        # someone is trying to report a problem. So: no template, no refusal —
+        # fall back to the description as the body rather than refusing to file.
+        body = f"## Subject: Spec change request: {title}\n\n{desc or ''}\n"
+        ok, errors = True, []
+    else:
+        body = template.render(title, sections=sections, evidence_level=evidence_level)
+        ok, errors = template.validate(body, evidence_level=evidence_level)
     if not ok:
         UI.error("Refusing to propose — this SCR is not decision-grade yet:")
         for err in errors:
             UI.muted(f"  - {err}")
         UI.muted("")
         UI.muted("  Every section is answerable from what you already know:")
-        from otaman_core.scr_template import SECTIONS
-
-        for section in SECTIONS:
+        for section in template.SECTIONS:
             UI.muted(f"    --{section.key:<11} {section.heading}")
         UI.muted("  Optional: --evidence-level measured|reproduced|observed-once|inferred")
         return 1
