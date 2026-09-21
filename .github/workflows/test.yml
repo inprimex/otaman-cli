@@ -27,6 +27,53 @@ jobs:
       - name: ruff format --check
         run: ruff format --check .
 
+  # release-notes-sibling-coverage 2.1 — the merge-time changelog gate.
+  #
+  # This is the ONE identical line every sibling repo wires (amended delta, SCR
+  # 20260921T152814): core-invokable, so repos that cannot install or import
+  # otaman-cli run the same check. `otaman policy check-changelog` is the
+  # human-facing wrapper over this exact evaluator, not a second implementation.
+  #
+  # Its own job, not a matrix step: the verdict is a pure function of the diff,
+  # so running it three times per PR would only buy three identical answers.
+  changelog:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout otaman-cli
+        uses: actions/checkout@v7
+        with:
+          path: workspace/otaman-cli
+          # The gate diffs base...HEAD. actions/checkout defaults to depth 1,
+          # which leaves no merge-base to diff against and fails the gate with
+          # a usage error rather than a verdict.
+          fetch-depth: 0
+
+      - name: Checkout otaman-core (hosts the gate)
+        uses: actions/checkout@v7
+        with:
+          repository: inprimex/otaman-core
+          path: workspace/otaman-core
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Changelog fragment gate
+        working-directory: workspace/otaman-cli
+        env:
+          PYTHONPATH: ${{ github.workspace }}/workspace/otaman-core/src
+          # Via env, never interpolated into the script: a PR body is
+          # attacker-controllable text, and ${{ }} is substituted before the
+          # shell parses the line, so a body containing backticks would run.
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s' "$PR_BODY" > /tmp/pr-body.txt
+          python -m otaman_core.changelog_fragment --check \
+            --base "origin/${{ github.base_ref }}" \
+            --pr "${{ github.event.number }}" \
+            --pr-body-file /tmp/pr-body.txt
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -120,15 +167,23 @@ jobs:
   # skipped dependency makes ci-ok FAIL (not skip) — a skipped required
   # check would otherwise let a broken PR through.
   ci-ok:
-    needs: [lint, test]
+    needs: [lint, changelog, test]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Verify required jobs passed
         run: |
-          echo "lint=${{ needs.lint.result }} test=${{ needs.test.result }}"
+          echo "lint=${{ needs.lint.result }} changelog=${{ needs.changelog.result }} test=${{ needs.test.result }}"
           if [ "${{ needs.lint.result }}" != "success" ] || [ "${{ needs.test.result }}" != "success" ]; then
             echo "::error::A required job did not succeed."
+            exit 1
+          fi
+          # `changelog` is pull_request-only, so on a push to main it reports
+          # `skipped` — that is a correct outcome, not a missing check. Anything
+          # else (failure, cancelled) must block: a merge gate that does not
+          # reach ci-ok is a gate nobody has to pass.
+          if [ "${{ needs.changelog.result }}" != "success" ] && [ "${{ needs.changelog.result }}" != "skipped" ]; then
+            echo "::error::The changelog-fragment gate did not succeed."
             exit 1
           fi
           echo "All required jobs passed."
