@@ -175,23 +175,25 @@ class Outcome(BaseModel):
                 current = OutcomeStatus(t.to)
                 continue
             if t.action == "promote":
-                # Each condition reports ITSELF. These three were collapsed into
-                # one message naming only two of them — and not the one that
-                # actually fires on real data. cofounder-agent lost an
-                # investigation to it (20260920T111813): `from` and `to` were
-                # both present and correct; the trip was `current is None`,
-                # because `current` is only ever set by a preceding `create`
-                # and the 2026-09-10 migration never synthesised one. The error
-                # sent them looking at the two fields that were fine.
-                if current is None:
-                    raise ValueError(
-                        f"outcome {self.id}: transition[{i}] action=promote has no established "
-                        "prior status — the transition log has no `create` entry to start from"
-                    )
+                # A log with no `create` is the NORMAL shape, not a broken one:
+                # the 2026-09-10 CANON migration rewrote legacy transitions as
+                # update-field entries and synthesised none, so 74 of 74
+                # pre-existing outcomes had no starting point and promote /
+                # demote / retire had never once succeeded against real data.
+                #
+                # outcome-transition-start-rule: the declared `status` is the
+                # source of truth and the log is an AUDIT TRAIL, so the walk
+                # adopts the recorded `from` rather than refusing — and no
+                # synthetic `create` is ever written for an event that did not
+                # happen. The end-of-walk check still cross-references the
+                # derived final state against `status`, so adopting a start
+                # point cannot launder an inconsistent chain.
                 if t.from_ is None or t.to is None:
                     raise ValueError(
                         f"outcome {self.id}: transition[{i}] action=promote requires from+to"
                     )
+                if current is None:
+                    current = OutcomeStatus(t.from_)  # derived start (no create)
                 expected = promote_target(OutcomeStatus(t.from_))
                 if expected is None or OutcomeStatus(t.to) != expected:
                     raise ValueError(
@@ -203,6 +205,8 @@ class Outcome(BaseModel):
                     raise ValueError(
                         f"outcome {self.id}: transition[{i}] action=demote requires from+to"
                     )
+                if current is None:
+                    current = OutcomeStatus(t.from_)  # derived start (no create)
                 expected = demote_target(OutcomeStatus(t.from_))
                 if expected is None or OutcomeStatus(t.to) != expected:
                     raise ValueError(
