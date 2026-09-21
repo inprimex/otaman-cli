@@ -42,9 +42,9 @@ def test_prefs_load_tolerates_missing_and_corrupt(tmp_path):
 
 @_textual
 def test_key_bindings_are_priority():
-    from otaman_cli.console.app import PendingListScreen, ProgramPickerScreen
+    from otaman_cli.console.app import InboxScreen, ProgramPickerScreen
 
-    for screen in (ProgramPickerScreen, PendingListScreen):
+    for screen in (ProgramPickerScreen, InboxScreen):
         q = [b for b in screen.BINDINGS if b.key == "q"]
         assert q and q[0].priority is True  # plain q fires over a focused widget
 
@@ -86,20 +86,20 @@ def test_header_has_no_stray_glyph():
 @_textual
 def test_async_load_shows_loading_then_fills(tmp_path, monkeypatch):
     program = _program(tmp_path, monkeypatch)
-    from otaman_cli.console.app import OtamanConsole, PendingListScreen, _ProposalItem
+    from otaman_cli.console.app import InboxScreen, OtamanConsole, _ProposalItem
 
     async def go():
         app = OtamanConsole([program], search_root=program.root)
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.push_screen(PendingListScreen(program))
+            app.push_screen(InboxScreen(program))
             await pilot.pause()
             # Paint-then-fill: the list is populated by a thread worker (off the
             # UI thread) so it fills after the scan rather than blocking first
             # paint; waiting for the worker then shows the proposal.
             await app.workers.wait_for_complete()
             await pilot.pause()
-            lv = app.screen.query_one("#pending-list")
+            lv = app.screen.query_one("#inbox-list")
             assert len([c for c in lv.children if isinstance(c, _ProposalItem)]) == 1
             await app.action_quit()
 
@@ -114,18 +114,18 @@ def test_back_navigation_renders_from_cache_instantly(tmp_path, monkeypatch):
     # after on_screen_resume() (with no await in between), it came from the
     # cache, not a rescan.
     program = _program(tmp_path, monkeypatch)
-    from otaman_cli.console.app import OtamanConsole, PendingListScreen, _ProposalItem
+    from otaman_cli.console.app import InboxScreen, OtamanConsole, _ProposalItem
 
     async def go():
         app = OtamanConsole([program], search_root=program.root)
         async with app.run_test() as pilot:
             await pilot.pause()
-            screen = PendingListScreen(program)
+            screen = InboxScreen(program)
             app.push_screen(screen)
             await pilot.pause()
             await app.workers.wait_for_complete()  # first load fills the cache
             await pilot.pause()
-            lv = screen.query_one("#pending-list")
+            lv = screen.query_one("#inbox-list")
             assert len([c for c in lv.children if isinstance(c, _ProposalItem)]) == 1
             assert screen._cache is not None and len(screen._cache) == 1  # cache filled
 
@@ -178,7 +178,7 @@ def test_identity_badge_persists_and_reflects_verification(tmp_path, monkeypatch
     # Roman's request (deploy 2.1): a persistent top-right badge that shows,
     # before the human acts, whether their approvals will stamp VERIFIED.
     program = _program_with_roster(tmp_path)
-    from otaman_cli.console.app import OtamanConsole, PendingListScreen
+    from otaman_cli.console.app import InboxScreen, OtamanConsole
 
     def badge(app):
         w = app.screen.query_one("#identity-badge")
@@ -192,19 +192,19 @@ def test_identity_badge_persists_and_reflects_verification(tmp_path, monkeypatch
             text, classes = badge(app)  # picker screen
             assert text == "✓ Verified(roman)" and "verified" in classes
 
-            app.push_screen(PendingListScreen(program))
+            app.push_screen(InboxScreen(program))
             await pilot.pause()
             text, classes = badge(app)  # program screen — still verified
             assert text == "✓ Verified(roman)" and "verified" in classes
 
             monkeypatch.setenv("OTAMAN_HUMAN", "Ada Lovelace")  # name-format mismatch
-            app.push_screen(PendingListScreen(program))
+            app.push_screen(InboxScreen(program))
             await pilot.pause()
             text, classes = badge(app)
             assert text == "⚠ Unverified(Ada Lovelace)" and "unverified" in classes
 
             monkeypatch.delenv("OTAMAN_HUMAN", raising=False)
-            app.push_screen(PendingListScreen(program))
+            app.push_screen(InboxScreen(program))
             await pilot.pause()
             text, classes = badge(app)
             assert text == "⚠ Unverified(none)" and "unverified" in classes

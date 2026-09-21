@@ -143,7 +143,7 @@ def test_make_event_source_is_polling(program):
 
 
 @_textual
-def test_pending_screen_starts_and_stops_source(program, monkeypatch):
+def test_messages_screen_starts_and_stops_source(program, monkeypatch):
     class _Fake:
         def __init__(self):
             self.on_change = None
@@ -159,15 +159,16 @@ def test_pending_screen_starts_and_stops_source(program, monkeypatch):
             self.stopped = True
 
     fake = _Fake()
-    monkeypatch.setattr("otaman_cli.console.events.make_event_source", lambda program: fake)
+    # InboxScreen passes `lister=` so the source watches what the screen renders
+    monkeypatch.setattr("otaman_cli.console.events.make_event_source", lambda program, **kw: fake)
 
-    from otaman_cli.console.app import OtamanConsole, PendingListScreen
+    from otaman_cli.console.app import InboxScreen, OtamanConsole
 
     async def go():
         app = OtamanConsole([program], search_root=program.root)
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.push_screen(PendingListScreen(program))
+            app.push_screen(InboxScreen(program))
             await pilot.pause()
             assert callable(fake.on_change)  # screen wired the source
             await app.action_quit()

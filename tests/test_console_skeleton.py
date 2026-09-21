@@ -288,7 +288,7 @@ def test_picker_mounts_and_lists_programs(ws):
 def test_selecting_program_shows_pending_list(ws):
     prog_root = _make_program(ws / "p", "p")
     _stage_proposal(prog_root, "20260101T000000-a-to-human-spec-change-request", subject="widget")
-    from otaman_cli.console.app import OtamanConsole, PendingListScreen, _ProposalItem
+    from otaman_cli.console.app import InboxScreen, OtamanConsole, _ProposalItem
 
     progs = bus.discover_programs(ws)
 
@@ -296,12 +296,12 @@ def test_selecting_program_shows_pending_list(ws):
         app = OtamanConsole(progs, search_root=ws)
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.push_screen(PendingListScreen(progs[0]))
+            app.push_screen(InboxScreen(progs[0]))
             await pilot.pause()
-            assert isinstance(app.screen, PendingListScreen)
+            assert isinstance(app.screen, InboxScreen)
             await app.workers.wait_for_complete()  # paint-then-fill async load
             await pilot.pause()
-            lv = app.screen.query_one("#pending-list")
+            lv = app.screen.query_one("#inbox-list")
             items = [c for c in lv.children if isinstance(c, _ProposalItem)]
             assert len(items) == 1
             await app.action_quit()
@@ -312,7 +312,7 @@ def test_selecting_program_shows_pending_list(ws):
 @pytestmark_textual
 def test_empty_program_shows_no_pending(ws):
     _make_program(ws / "p", "p")
-    from otaman_cli.console.app import OtamanConsole, PendingListScreen, _ProposalItem
+    from otaman_cli.console.app import InboxScreen, OtamanConsole, _ProposalItem
 
     progs = bus.discover_programs(ws)
 
@@ -320,11 +320,11 @@ def test_empty_program_shows_no_pending(ws):
         app = OtamanConsole(progs, search_root=ws)
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.push_screen(PendingListScreen(progs[0]))
+            app.push_screen(InboxScreen(progs[0]))
             await pilot.pause()
             await app.workers.wait_for_complete()
             await pilot.pause()
-            lv = app.screen.query_one("#pending-list")
+            lv = app.screen.query_one("#inbox-list")
             assert not [c for c in lv.children if isinstance(c, _ProposalItem)]
             await app.action_quit()
 
