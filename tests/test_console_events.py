@@ -170,6 +170,8 @@ def test_messages_screen_starts_and_stops_source(program, monkeypatch):
             await pilot.pause()
             app.push_screen(InboxScreen(program))
             await pilot.pause()
+            await app.workers.wait_for_complete()  # the list loads OFF the UI
+            await pilot.pause()  # thread now (#177)
             assert callable(fake.on_change)  # screen wired the source
             await app.action_quit()
 

@@ -94,6 +94,8 @@ def test_async_load_shows_loading_then_fills(tmp_path, monkeypatch):
             await pilot.pause()
             app.push_screen(InboxScreen(program))
             await pilot.pause()
+            await app.workers.wait_for_complete()  # the list loads OFF the UI
+            await pilot.pause()  # thread now (#177)
             # Paint-then-fill: the list is populated by a thread worker (off the
             # UI thread) so it fills after the scan rather than blocking first
             # paint; waiting for the worker then shows the proposal.
@@ -194,18 +196,24 @@ def test_identity_badge_persists_and_reflects_verification(tmp_path, monkeypatch
 
             app.push_screen(InboxScreen(program))
             await pilot.pause()
+            await app.workers.wait_for_complete()  # the list loads OFF the UI
+            await pilot.pause()  # thread now (#177)
             text, classes = badge(app)  # program screen — still verified
             assert text == "✓ Verified(roman)" and "verified" in classes
 
             monkeypatch.setenv("OTAMAN_HUMAN", "Ada Lovelace")  # name-format mismatch
             app.push_screen(InboxScreen(program))
             await pilot.pause()
+            await app.workers.wait_for_complete()  # the list loads OFF the UI
+            await pilot.pause()  # thread now (#177)
             text, classes = badge(app)
             assert text == "⚠ Unverified(Ada Lovelace)" and "unverified" in classes
 
             monkeypatch.delenv("OTAMAN_HUMAN", raising=False)
             app.push_screen(InboxScreen(program))
             await pilot.pause()
+            await app.workers.wait_for_complete()  # the list loads OFF the UI
+            await pilot.pause()  # thread now (#177)
             text, classes = badge(app)
             assert text == "⚠ Unverified(none)" and "unverified" in classes
             await app.action_quit()
