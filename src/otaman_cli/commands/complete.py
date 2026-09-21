@@ -257,7 +257,10 @@ def cmd_complete(args: list[str]) -> int:
 
     slug = re.sub(r"[^a-z0-9]+", "-", change_name.lower()).strip("-")[:30]
     msg_id = f"{now_ts}-complete-{slug}"
-    filename = f"{now_ts}-{agent}-to-{recipient.replace('/', '-')}-task-complete.md"
+    # Change name in the stem: without it, completing two changes in the same
+    # second (a scripted sweep, an agent finishing a batch) puts both on the
+    # identical path. See the notify-change loss of 2026-09-21.
+    filename = f"{now_ts}-{agent}-to-{recipient.replace('/', '-')}-{change_name}-task-complete.md"
 
     task_label = "all tasks" if mark_all else f"tasks {tasks_spec}"
 
@@ -293,17 +296,16 @@ status: pending
 **Timestamp**: {now_iso}
 """
 
-    from otaman_cli.bus_write import BusMessageValidationError, assert_message_valid
+    from otaman_cli.bus_write import BusMessageValidationError, write_message_exclusive
 
-    filepath = active_dir / filename
     try:
-        assert_message_valid(content, filepath)  # bus-writer-self-validation 1.2
+        # Create-exclusive: never overwrite a message that is already there.
+        filepath = write_message_exclusive(active_dir / filename, content, validate=True)
     except BusMessageValidationError as exc:
         UI.error("Refusing to write task-complete — message failed self-validation:")
         for e in exc.errors:
             UI.muted(f"  - {e}")
         return 1
-    filepath.write_text(content, encoding="utf-8")
 
     print()
     UI.ok(f"Bus notification: {filepath.relative_to(root)}")
@@ -321,17 +323,19 @@ status: pending
     # Step 2b: Fanout to spec_owner if set and different from primary recipient
     spec_owner = _read_spec_owner(root, change_name)
     if spec_owner and spec_owner != recipient:
-        fanout_filename = f"{now_ts}-{agent}-to-{spec_owner.replace('/', '-')}-task-complete.md"
+        fanout_filename = (
+            f"{now_ts}-{agent}-to-{spec_owner.replace('/', '-')}-{change_name}-task-complete.md"
+        )
         fanout_content = content.replace(f"\nto: {recipient}\n", f"\nto: {spec_owner}\n", 1)
-        fanout_path = active_dir / fanout_filename
         try:
-            assert_message_valid(fanout_content, fanout_path)
+            fanout_path = write_message_exclusive(
+                active_dir / fanout_filename, fanout_content, validate=True
+            )
         except BusMessageValidationError as exc:
             UI.error("Refusing to write task-complete fan-out — failed self-validation:")
             for e in exc.errors:
                 UI.muted(f"  - {e}")
             return 1
-        fanout_path.write_text(fanout_content, encoding="utf-8")
         UI.ok(f"Bus notification: {fanout_path.relative_to(root)}")
         UI.muted(f"Type: task-complete | To: {spec_owner} (spec_owner) | Change: {change_name}")
 

@@ -305,20 +305,34 @@ def notify_change(project_root: Path, change_name: str) -> tuple[int, dict[str, 
             msg_id=msg_id,
             specs_repo_name=specs_root.name,
         )
-        msg_filename = f"{msg_ts}-{specs_root.name}-to-{recipient}-spec-change.md"
-        msg_path = bus_active / msg_filename
-        from otaman_cli.bus_write import BusMessageValidationError, assert_message_valid
+        # The change name is part of the stem, and the write is create-exclusive.
+        # Both are needed, and neither is redundant:
+        #
+        # Without the change name, two dispatches to one recipient in the same
+        # second produced the IDENTICAL path and the second silently overwrote
+        # the first — deploy-agent lost 2 of 6 changes this way on haulops
+        # (20260921T190949), every call exiting 0. Second precision is not
+        # enough on its own because scripted and automated dispatch is bursty
+        # by nature.
+        #
+        # Without the exclusive write, the residual collision — the SAME change
+        # re-dispatched inside one second — still loses a message. It is also
+        # what `bus_write` exists for: this writer already imported that
+        # module's validator while bypassing its collision-safe allocation,
+        # which is precisely the gap that let a fixed bug class reappear here.
+        msg_filename = f"{msg_ts}-{specs_root.name}-to-{recipient}-{change_name}-spec-change.md"
+        from otaman_cli.bus_write import BusMessageValidationError, write_message_exclusive
 
         try:
-            assert_message_valid(body, msg_path)  # bus-writer-self-validation 1.2
+            written = write_message_exclusive(bus_active / msg_filename, body, validate=True)
         except BusMessageValidationError as exc:
             joined = "; ".join(exc.errors)
             return 2, {**summary, "error": f"message failed self-validation: {joined}"}
-        try:
-            msg_path.write_text(body, encoding="utf-8")
         except OSError as exc:
             return 2, {**summary, "error": f"failed to write message: {exc}"}
-        message_paths.append(str(msg_path))
+        # The RETURNED path, not the requested one: a collision suffix must reach
+        # the summary or the caller reports a file that does not exist.
+        message_paths.append(str(written))
     summary["message_path"] = message_paths[0] if message_paths else None
     summary["message_paths"] = message_paths
 

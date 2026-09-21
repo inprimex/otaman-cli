@@ -86,7 +86,12 @@ def _write_audit(
         f"was **{verb}** in otaman -i by {identity.audit_label}.\n{reason_section}"
     )
     active_dir.mkdir(parents=True, exist_ok=True)
-    (active_dir / f"{stem}.md").write_text(content, encoding="utf-8")
+    from otaman_cli.bus_write import write_message_exclusive
+
+    # The stem is RETURNED to callers and used as the audit reference, so it has
+    # to be the stem actually written — a collision suffix must be reflected, not
+    # reported as the requested name.
+    stem = write_message_exclusive(active_dir / f"{stem}.md", content).stem
     if ack:
         acks_dir.mkdir(parents=True, exist_ok=True)
         (acks_dir / f"{proposal.stem}.human.ack").write_text(f"{verb}\n", encoding="utf-8")
