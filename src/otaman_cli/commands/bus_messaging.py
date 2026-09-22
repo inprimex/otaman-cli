@@ -257,6 +257,31 @@ def cmd_send(args: list[str]) -> int:
         resolve_cross_program_delivery,
     )
 
+    # A multi-recipient `to` reaches NOBODY, and says it worked. `otaman check`
+    # matches `-to-<agent>-` in the stem, so a comma-joined recipient produces
+    # `-to-runner-agent,` and `, web-agent-` — neither agent's filter hits, and
+    # the sender is told "Sent". That is the same loss notify-change-fanout
+    # ended in August; the `send` door stayed open, and deploy-agent found the
+    # residue of it on the live bus (20260921T225111).
+    #
+    # Refused rather than split: `--cc` already means "several recipients", and
+    # silently reinterpreting one spelling as the other is a second way to say
+    # the same thing. `otaman://` targets legitimately carry `/` and are not
+    # separators, so only the separator characters are rejected.
+    bad_sep = next((c for c in (",", ";") if c in ns.to), None)
+    if bad_sep is None and " " in ns.to.strip():
+        bad_sep = "a space"
+    if bad_sep is not None:
+        UI.error(
+            f"Refusing to send — {ns.to!r} looks like several recipients "
+            f"({bad_sep} in the address)."
+        )
+        UI.muted("  A message addressed this way reaches NEITHER agent:")
+        UI.muted("  `otaman check` matches `-to-<agent>-` and the filename would match no one.")
+        UI.muted("  Send to one agent and add the rest with --cc:")
+        UI.muted(f"    otaman send {ns.to.replace(',', ' ').split()[0]} --cc <other> ...")
+        return 2
+
     ctx = derive_local_context(root)
     target_uri = None
     to_agent = ns.to
