@@ -3,6 +3,115 @@
 # Self-contained: depends only on `otaman` CLI + `tmux`. No otaman-plugin runtime calls.
 
 set -u
+
+# ---------- selection: menu + arg dispatch (unified-launcher-profiles 1.2) ----------
+# Back-compat is the ABSENT block (D3): with no `launch:` in launch-settings.yaml
+# this whole section resolves to "full", no menu, no console — byte-compatible
+# with every existing CI and automation invocation.
+# Defined UNCONDITIONALLY: the legacy path's "nothing started" guard calls it
+# too. It was originally inside the `launch:` block, so a legacy launcher with
+# no enabled agents hit `_count: command not found` and then exited 0 — turning
+# "launched nothing" into a success, which is the exact class the no-silent-
+# success rule names. Caught by diffing legacy output rather than by a test.
+# (`${'{'}#arr[@]}` would open a Jinja comment, hence counting via "$#".)
+_count() { echo $#; }
+
+ALL_AGENTS=({% for agent in agents %}{% if agent.enabled %}"{{ agent.name }}" {% endif %}{% endfor %})
+SELECTED=("${ALL_AGENTS[@]}")
+SEAT_CONSOLE=0
+{% if launch %}
+INCLUDE_CONSOLE={{ 1 if launch.include_console else 0 }}
+CONSOLE_SOCKET="{{ launch.console.socket or 'otaman-human' }}"
+CONSOLE_SESSION="{{ launch.console.session or 'otaman-console' }}"
+CONSOLE_COMMAND="{{ launch.console.command or '' }}"
+
+profile_agents() {
+  case "$1" in
+{% for prof in launch.profiles %}
+    "{{ prof.name }}"|"{{ loop.index + 2 }}") printf '%s\n' {% for a in prof.agents %}"{{ a }}" {% endfor %};;
+{% endfor %}
+    *) return 1 ;;
+  esac
+}
+
+profile_console() {
+  case "$1" in
+{% for prof in launch.profiles %}
+    "{{ prof.name }}"|"{{ loop.index + 2 }}") return {{ 0 if prof.console else 1 }} ;;
+{% endfor %}
+    *) return 1 ;;
+  esac
+}
+
+show_menu() {
+  echo "Launch which set?"
+  echo "  1) full — every agent"
+  echo "  2) pick — choose agents"
+{% for prof in launch.profiles %}
+  echo "  {{ loop.index + 2 }}) {{ prof.name }} — {{ prof.agents | join(', ') or '(console only)' }}{{ '  + console' if prof.console else '' }}"
+{% endfor %}
+}
+
+pick_agents() {
+  local chosen=() i=1
+  for a in "${ALL_AGENTS[@]}"; do echo "  $i) $a" >&2; i=$((i+1)); done
+  printf 'agents (numbers or names, space separated): ' >&2
+  read -r reply || return 1
+  for tok in $reply; do
+    if [ "$tok" -eq "$tok" ] 2>/dev/null; then
+      [ "$tok" -ge 1 ] && [ "$tok" -le "$(_count "${ALL_AGENTS[@]}")" ] && chosen+=("${ALL_AGENTS[$((tok-1))]}")
+    else
+      chosen+=("$tok")
+    fi
+  done
+  printf '%s\n' "${chosen[@]}"
+}
+
+apply_choice() {
+  local choice="$1" lines
+  case "$choice" in
+    full|1) SELECTED=("${ALL_AGENTS[@]}") ;;
+    pick|2)
+      mapfile -t lines < <(pick_agents) || return 1
+      [ "$(_count ${lines[@]+"${lines[@]}"})" -gt 0 ] || { echo "Nothing selected." >&2; return 1; }
+      SELECTED=("${lines[@]}")
+      ;;
+    *)
+      if lines="$(profile_agents "$choice")"; then
+        mapfile -t SELECTED <<< "$lines"
+        # An empty line from a console-only profile must not become an agent.
+        [ "$(_count ${SELECTED[@]+"${SELECTED[@]}"})" -eq 1 ] && [ -z "${SELECTED[0]}" ] && SELECTED=()
+        # NOT `profile_console ... && SEAT_CONSOLE=1`: that compound is the last
+        # statement in the branch, so a profile WITHOUT a console makes it false
+        # and the false becomes apply_choice's return status — which the caller
+        # reads as "selection failed" and exits on. Every non-console profile
+        # was unusable. Explicit `if`, explicit `return 0`.
+        if profile_console "$choice"; then SEAT_CONSOLE=1; fi
+      else
+        echo "Unknown selection: $choice" >&2
+        return 1
+      fi
+      ;;
+  esac
+  return 0
+}
+
+CHOICE="${1:-}"
+if [ -z "$CHOICE" ]; then
+  # A menu only where a human is present. No TTY -> full (D3), which is what
+  # every existing automated caller gets today.
+  if [ -t 0 ] && [ -t 1 ]; then
+    show_menu
+    printf 'choice [1]: '
+    read -r CHOICE || CHOICE="full"
+    CHOICE="${CHOICE:-full}"
+  else
+    CHOICE="full"
+  fi
+fi
+apply_choice "$CHOICE" || exit 1
+[ "$INCLUDE_CONSOLE" = "1" ] && SEAT_CONSOLE=1
+{% endif %}
 {% if connection.mode == "mesh" %}
 # ========== mesh: runner-mediated spawn (Path B — no SSH, no tmux) ==========
 command -v curl   >/dev/null 2>&1 || { echo "ERROR: curl is required for mesh mode" >&2; exit 1; }
@@ -49,14 +158,46 @@ spawn_agent() {
   rm -f "$tmp"
 }
 
+agent_repo() {
+  case "$1" in
+{% for name, rel in agent_repos.items() %}
+    "{{ name }}") echo "{{ rel }}" ;;
+{% endfor %}
+    *) echo "" ;;
+  esac
+}
+
 echo "Spawning otaman agents via runner $RUNNER_BASE"
-{% for agent in agents %}{% if agent.enabled %}
-spawn_agent "{{ agent.name }}" "{{ agent_repos.get(agent.name, '') }}"
-{% endif %}{% endfor %}
+# Factored over the SELECTED list (1.2) — the same loop the local/ssh mode runs,
+# so a profile means the same thing in every connection mode instead of being a
+# feature one path has and the other does not.
+for _agent in ${SELECTED[@]+"${SELECTED[@]}"}; do
+  spawn_agent "$_agent" "$(agent_repo "$_agent")"
+done
 
 echo
 echo "Summary: spawned=$started failed=$failed"
-[ "$failed" -eq 0 ] && [ "$started" -gt 0 ] || exit 1
+if [ "$failed" -ne 0 ]; then exit 1; fi
+if [ "$started" -eq 0 ] && [ "${SEAT_CONSOLE:-0}" != "1" ]; then exit 1; fi
+
+{% if launch %}
+# ---------- console seat (1.2/1.3, D1) ----------
+# Delegated to `otaman console seat`, deliberately: the rule about WHICH tmux
+# server may hold a human console lives in one place in Python, not in a
+# template a tenant edit could quietly move onto the fleet socket. A refusal is
+# loud and non-zero here, so a launcher never reports success for a seat that
+# did not happen.
+if [ "${SEAT_CONSOLE:-0}" = "1" ]; then
+  echo
+  echo "Seating the human console…"
+  _seat_args=(--socket "$CONSOLE_SOCKET" --session "$CONSOLE_SESSION")
+  [ -n "$CONSOLE_COMMAND" ] && _seat_args+=(--command "$CONSOLE_COMMAND")
+  if ! otaman console seat "${_seat_args[@]}"; then
+    echo "  the console seat was refused — see the message above" >&2
+    exit 1
+  fi
+fi
+{% endif %}
 exit 0
 {% else %}
 # ---------- dependency check ----------
@@ -174,22 +315,58 @@ start_session() {
 }
 
 echo "Launching otaman sessions (prefix=$PREFIX, layout=$LAYOUT)"
-{% for agent in agents %}
-{% if agent.enabled %}
-start_session "{{ agent.name }}"
-{% endif %}
-{% endfor %}
+for _agent in ${SELECTED[@]+"${SELECTED[@]}"}; do
+  start_session "$_agent"
+done
 
 echo
 echo "Summary: started=$started skipped=$skipped failed=$failed"
 
-if [ "$started" -eq 0 ] && [ "$skipped" -eq 0 ]; then
+# Failure is "NOTHING happened", and seating a console counts as something. A
+# console-only profile legitimately starts no sessions; exiting here would kill
+# it before the console is seated, which is the whole point of such a profile.
+#
+# Keyed on SEAT_CONSOLE rather than on "were any agents selected": the latter
+# also made a LEGACY launcher with zero enabled agents exit 0, turning "launched
+# nothing" into a success. Legacy has SEAT_CONSOLE=0, so this is byte-identical
+# in behaviour to the original guard for every pre-existing configuration.
+if [ "$started" -eq 0 ] && [ "$skipped" -eq 0 ] && [ "${SEAT_CONSOLE:-0}" != "1" ]; then
   exit 1
 fi
 
+
+{% if launch %}
+# ---------- console seat (1.2/1.3, D1) ----------
+# Delegated to `otaman console seat`, deliberately: the rule about WHICH tmux
+# server may hold a human console lives in one place in Python, not in a
+# template a tenant edit could quietly move onto the fleet socket. A refusal is
+# loud and non-zero here, so a launcher never reports success for a seat that
+# did not happen.
+if [ "${SEAT_CONSOLE:-0}" = "1" ]; then
+  echo
+  echo "Seating the human console…"
+  _seat_args=(--socket "$CONSOLE_SOCKET" --session "$CONSOLE_SESSION")
+  [ -n "$CONSOLE_COMMAND" ] && _seat_args+=(--command "$CONSOLE_COMMAND")
+  if ! otaman console seat "${_seat_args[@]}"; then
+    echo "  the console seat was refused — see the message above" >&2
+    exit 1
+  fi
+fi
+{% endif %}
+
+{% if launch %}
+# With profiles, the first agent depends on the SELECTION, so the hint is
+# computed at runtime.
+if [ "$(_count ${SELECTED[@]+"${SELECTED[@]}"})" -gt 0 ]; then
+  echo "Attach: tmux attach -t $PREFIX-${SELECTED[0]}"
+fi
+{% else %}
+{# Legacy shape kept byte-identical (D3): an absent `launch:` block must
+   reproduce today's launcher exactly, down to this line. #}
 {% set _enabled = agents | selectattr('enabled') | map(attribute='name') | list %}
 {% if _enabled %}
 echo "Attach: tmux attach -t $PREFIX-{{ _enabled[0] }}"
+{% endif %}
 {% endif %}
 exit 0
 {% endif %}

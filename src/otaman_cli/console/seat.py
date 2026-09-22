@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Callable
+from pathlib import Path
 
 # Set inside the seat so the re-executed `otaman -i` runs the app instead of
 # re-wrapping itself (recursion guard).
@@ -211,6 +212,79 @@ def build_attach_command(
     ]
 
 
+#: `seat_console` outcomes, so a caller can report precisely what happened
+#: rather than inferring it from a bool (no-silent-success: a seat that did
+#: nothing must not look like a seat that worked).
+SEAT_CREATED = "created"
+SEAT_ALREADY = "already-running"
+SEAT_REFUSED_SOCKET = "refused-fleet-socket"
+SEAT_UNAVAILABLE = "tmux-unavailable"
+
+
+def seat_console(
+    *,
+    socket: str = PRIVATE_SOCKET,
+    session: str = SESSION_NAME,
+    command: str = "",
+    argv: list[str] | None = None,
+    env: dict[str, str] | None = None,
+    run: Runner = subprocess.run,
+) -> tuple[str, str]:
+    """Seat the human console DETACHED, for the launcher (unified-launcher 1.3).
+
+    Returns ``(outcome, message)`` where outcome is one of the ``SEAT_*``
+    constants. Distinct from :func:`reexec_into_seat`, which replaces the
+    CURRENT process when a human runs `otaman -i` directly: the launcher is
+    starting other things too, so it creates the seat and carries on.
+
+    The D1 boundary, enforced here and not assumed:
+
+    * **Private socket only.** A non-private socket is REFUSED — nothing is
+      created — and the message is :data:`FLEET_REFUSAL` verbatim rather than a
+      paraphrase, so the operator reads the same sentence whichever surface
+      stops them. The launcher must never be the thing that puts a console
+      somewhere fleet-reachable.
+    * **Idempotent.** An existing session is left exactly as it is. Re-running
+      the launcher must not stack a second console, and must not restart the one
+      the human is sitting in.
+    * **Host-local.** This runs `tmux` on the machine the launcher runs on. There
+      is no remote path and no runner `/spawn` — agents may be mesh/ssh-remote,
+      the human seat is local.
+    * **Identity is inherited, never fabricated.** ``OTAMAN_HUMAN`` is passed
+      through ONLY if the caller's environment already carries it (sshd stamps
+      it from the operator's key). A detached seat without it is
+      unverified-identity and the console asks for an explicit operator ID —
+      which is the correct outcome. Inventing a value here would forge exactly
+      the attestation the console exists to obtain.
+    """
+    if not tmux_available():
+        return SEAT_UNAVAILABLE, "tmux is not available — no console seat was created."
+
+    if Path(socket).name != PRIVATE_SOCKET:
+        return SEAT_REFUSED_SOCKET, FLEET_REFUSAL
+
+    if session_exists(socket=socket, session=session, run=run):
+        return SEAT_ALREADY, f"A console seat is already running on '{socket}' — left as is."
+
+    source = dict(os.environ if env is None else env)
+    inner: list[str] = ["env", f"{SEAT_ENV}=1"]
+    # Inherited, never fabricated: present → pass through, absent → say so.
+    human = (source.get("OTAMAN_HUMAN") or "").strip()
+    if human:
+        inner.append(f"OTAMAN_HUMAN={human}")
+    inner.extend((command or "").split() or [(sys.argv[0] or "otaman"), "-i", *(argv or [])])
+
+    result = _tmux(["new-session", "-d", "-s", session, "--", *inner], socket=socket, run=run)
+    if result is None or result.returncode != 0:
+        detail = (getattr(result, "stderr", "") or "").strip() or "tmux refused the request"
+        return SEAT_UNAVAILABLE, f"Could not create the console seat: {detail}"
+
+    note = (
+        "" if human else " (no OTAMAN_HUMAN in the environment — the console will ask who you are)"
+    )
+    return SEAT_CREATED, f"Console seated on '{socket}' as session '{session}'.{note}"
+
+
 def should_seat(argv: list[str]) -> bool:
     """Whether to wrap this launch in the surviving seat.
 
@@ -230,6 +304,11 @@ def reexec_into_seat(argv: list[str], *, exec_fn=os.execvp) -> None:
 
 __all__ = [
     "CONSOLE_VERSION_ENV",
+    "SEAT_ALREADY",
+    "SEAT_CREATED",
+    "SEAT_REFUSED_SOCKET",
+    "SEAT_UNAVAILABLE",
+    "seat_console",
     "FLEET_REFUSAL",
     "PRIVATE_SOCKET",
     "SEAT_ENV",

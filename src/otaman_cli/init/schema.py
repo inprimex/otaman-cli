@@ -145,6 +145,13 @@ class LaunchSettings(BaseModel):
     connection: Connection = Field(default_factory=Connection)
     agents: list[AgentEntry] = Field(default_factory=list)
     tmux: TmuxLayoutConfig
+    #: The `launch:` block (unified-launcher-profiles 1.1). Carried as a raw
+    #: mapping ON PURPOSE: `otaman_cli.launch_profiles` owns its parsing and
+    #: validation, and a second pydantic model here would be two schemas for one
+    #: block — the drift shared-logic-single-home exists to remove. `extra`
+    #: is forbidden on this model, so without this field a tenant writing the
+    #: documented block would have their whole launch-settings.yaml rejected.
+    launch: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def _version_is_one(self) -> LaunchSettings:
