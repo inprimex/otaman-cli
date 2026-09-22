@@ -87,7 +87,20 @@ class TreeNode:
             # A reference LINE, not a node: prefixed so it reads as a pointer,
             # and it never carries children to expand (D4).
             return [("→ ", st("")), (self.id or self.title, st("italic"))]
-        segs: list[tuple[str, str]] = [(self.id or self.title, st("bold"))]
+        # D4 — a rendered row is never visually EMPTY. Two ways it could be:
+        #
+        # 1. `id` and `title` both blank made the first segment `("", "bold")`,
+        #    i.e. a blank line in the tree. The builders should not emit such a
+        #    node, but the rule is enforced HERE so no future builder can
+        #    reintroduce it: the kind is always known, so it is always sayable.
+        # 2. A decided-out sibling rendered WHOLLY in `dim`. `dim` is relative
+        #    to the theme's foreground, and in a low-contrast terminal the whole
+        #    row reads as blank — which is exactly the "closed solutions are
+        #    blank lines" Roman reported. The row's own IDENTITY stays legible;
+        #    everything after it still reads as decided-out, so the signal is
+        #    kept without costing the reader the row.
+        anchor = self.id or self.title or f"({self.kind or 'item'})"
+        segs: list[tuple[str, str]] = [(anchor, "bold")]
         cols: list[tuple[str, str]] = []
         if self.kind == "outcome" and self.created:
             cols.append((str(self.created)[:10], st("")))
@@ -143,6 +156,49 @@ LENS_LABEL = {
     LENS_CAPABILITY: "capability",
     LENS_LIFECYCLE: "lifecycle",
 }
+
+#: What each lens ANSWERS (1.2 orientation header). The three arrangements were
+#: documented only as source comments beside the constants above — invisible to
+#: the person looking at the screen, who has to infer from the shape what
+#: question they are looking at the answer to. A lens is a question; saying
+#: which one costs one line.
+LENS_ORIENTATION = {
+    LENS_VALUE: "why we are doing this, and where it stands — outcomes → solutions → changes",
+    LENS_CAPABILITY: "what the system does, and what shaped it — specs ← the changes that hit them",
+    LENS_LIFECYCLE: "what is moving and what is stuck — every change, flat",
+}
+
+
+def lens_orientation(lens: str) -> str:
+    """The one-line "what question does this lens answer" for *lens*."""
+    return LENS_ORIENTATION.get(lens, "")
+
+
+def context_line(node: TreeNode, *, refs: list[str] | None = None) -> str:
+    """The per-row context line (1.2): what this row IS, and what it points at.
+
+    The row itself is identity columns plus a clipped title — deliberately
+    narrow, because a wide row hijacks ←/→ into horizontal scroll. That leaves
+    nowhere for the description or the JTBD/SOL/ADR/SCR references, which is
+    what a reader needs to decide whether this is the row they want.
+
+    Returns "" when there is genuinely nothing to add, so callers can skip the
+    line rather than render an empty one (D4 applies here too: no empty rows).
+    """
+    parts: list[str] = []
+    title = (node.title or "").strip()
+    # Only when the row CLIPPED it — repeating a fully-visible title is noise.
+    if title and title != node.id:
+        parts.append(title)
+    for ref in refs or []:
+        ref = str(ref).strip()
+        if ref and ref not in parts:
+            parts.append(ref)
+    if node.blocked_by:
+        parts.append(f"blocked by {node.blocked_by}")
+    if node.next_actor:
+        parts.append(f"next: {node.next_actor}")
+    return " · ".join(parts)
 
 
 def next_lens(current: str) -> str:
@@ -457,6 +513,9 @@ def build_artifact_tree(
 
 
 __all__ = [
+    "LENS_ORIENTATION",
+    "context_line",
+    "lens_orientation",
     "LENSES",
     "LENS_CAPABILITY",
     "LENS_LABEL",

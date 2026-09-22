@@ -1055,7 +1055,7 @@ class TreeScreen(Screen):
 
     def _apply_lens(self) -> None:
         """Show the widget this lens renders into, and say which lens is active."""
-        from otaman_cli.console.tree import LENS_LABEL, LENS_LIFECYCLE
+        from otaman_cli.console.tree import LENS_LABEL, LENS_LIFECYCLE, lens_orientation
 
         is_table = self._lens == LENS_LIFECYCLE
         table = self.query_one("#artifact-lifecycle", DataTable)
@@ -1068,9 +1068,24 @@ class TreeScreen(Screen):
         # only appeared after a mouse click. Both of Roman's reports, one cause.
         (table if is_table else self.query_one("#artifact-tree", Tree)).focus()
         label = LENS_LABEL.get(self._lens, self._lens)
+        # D1's arrow semantics have to survive THIS call, not just compose():
+        # _apply_lens runs on mount and on every lens switch, so the strip it
+        # writes is the only one a reader ever sees. It previously dropped
+        # "→ expand · ← collapse" entirely, which made the ruling invisible —
+        # and the advertised strip IS the discoverable surface (gate 6.1 F1).
+        #
+        # The table lens omits them rather than inheriting them: it cannot
+        # expand, and advertising a key that does nothing is the same class of
+        # lie the strip exists to prevent.
+        nav = "↑↓ move · enter open" if is_table else "↑↓ move · → expand · ← collapse · enter open"
+        # The orientation line (1.2): a lens is a QUESTION, and which one was
+        # documented only in source comments beside the constants — invisible to
+        # the person actually looking at the screen.
+        orientation = lens_orientation(self._lens)
         self.query_one("#mode-banner", Static).update(
-            f"Artifacts · {self.program.name} — {label} lens\n"
-            "↑↓ move · enter open · L lens · v spec-approve · f closed · p read · "
+            f"Artifacts · {self.program.name} — {label} lens"
+            + (f"  ·  {orientation}" if orientation else "")
+            + f"\n{nav} · L lens · v spec-approve · f closed · p read · "
             "r refresh · esc back · q quit"
         )
 
@@ -1107,8 +1122,38 @@ class TreeScreen(Screen):
             )
             body.update(text or f"{node.id}")
         else:
-            extra = f"\n  blocked by {node.blocked_by}" if node.blocked_by else ""
-            body.update(f"{node.id}\n  status: {node.status or node.kind}{extra}")
+            # The context line (1.2) rather than a hand-assembled status string:
+            # the row is deliberately narrow (a wide row hijacks ←/→ into
+            # horizontal scroll), so the description and the refs it points at
+            # have to live here. Same helper the tree uses, so the panel and the
+            # row can never describe the same node differently.
+            from otaman_cli.console.tree import context_line
+
+            context = context_line(node, refs=self._node_refs(node))
+            body.update(
+                f"{node.id}\n  status: {node.status or node.kind}"
+                + (f"\n  {context}" if context else "")
+            )
+
+    def _node_refs(self, node) -> list[str]:
+        """The JTBD/SOL/ADR/SCR references a row points at (1.2).
+
+        Read from the stamps and provenance edges that already exist — an
+        outcome-id stamp on a change, the requested_by/approved_by SCR stems on
+        its `.openspec.yaml`. Nothing new is stored, so there is no second
+        source to drift (the D3 argument, applied to references).
+        """
+        refs: list[str] = []
+        try:
+            if node.kind == "change":
+                from otaman_cli.console.tree import _change_outcome_id
+
+                oid = _change_outcome_id(self.program, node.id)
+                if oid:
+                    refs.append(str(oid))
+        except Exception:  # noqa: BLE001 - a missing stamp is not an error here
+            pass
+        return refs
 
     def _reload(self) -> None:
         self.run_worker(self._load, thread=True, exclusive=True, group="tree")
@@ -1265,6 +1310,26 @@ class TreeScreen(Screen):
         except Exception:  # noqa: BLE001 - unresolvable specs repo → not reviewable
             return False
 
+    def on_data_table_row_selected(self, event) -> None:
+        """Enter on a lifecycle row opens its change detail (D1).
+
+        The lifecycle lens renders a DataTable, and this screen only handled
+        tree selection — so Enter did nothing on one of the three lenses D1
+        makes uniform. Indexes `_rows`, the same list `_paint_lifecycle` stored,
+        so the row under the cursor and the change opened cannot disagree.
+        """
+        index = getattr(event, "cursor_row", None)
+        rows = getattr(self, "_rows", None) or []
+        if not isinstance(index, int) or not (0 <= index < len(rows)):
+            return  # stale cursor after a refresh — ignore, never raise into the TUI
+        name = getattr(rows[index], "name", None)
+        if name:
+            self._open_change(name)
+
+    def _open_change(self, name: str) -> None:
+        """Push the change detail — one door, so both lenses open the same screen."""
+        self.app.push_screen(ChangeDetailScreen(self.program, name))
+
     def on_tree_node_selected(self, event) -> None:
         node = getattr(event.node, "data", None)
         if node is None:
@@ -1282,7 +1347,7 @@ class TreeScreen(Screen):
             self.app.notify(f"{node.id} — no change was minted from this.", timeout=6)
             return
         if node.kind == "change":
-            self.app.push_screen(ChangeDetailScreen(self.program, node.id))
+            self._open_change(node.id)
         elif node.kind in ("outcome", "solution"):
             # enter opens the FULL artifact content (otaman <kind> show, in-console),
             # not a status-only popup (cofounder addendum, Roman feedback).

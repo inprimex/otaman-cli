@@ -198,7 +198,19 @@ def test_de_emphasis_is_theme_relative_not_a_fixed_grey():
     assert not GRAY_STYLE.startswith("grey")
 
 
-def test_every_segment_of_a_grayed_row_uses_it():
+def test_every_segment_of_a_grayed_row_uses_it_except_its_identity():
+    """AMENDED by console-lens-navigation-and-filtering D4.
+
+    This asserted `styles == {"dim"}` — every segment grayed. That was
+    tree-view-polish 1.3's rule, and it is what Roman then reported as "closed
+    solutions are blank lines": `dim` is relative to the theme's foreground, so
+    a wholly-dim row can read as nothing at all in a low-contrast terminal.
+
+    D4 makes "a rendered row is never visually empty — every row shows at least
+    its short colored form" normative, which overrides the uniform gray. The
+    row's IDENTITY stays legible; everything after it is still gray, so the
+    decided-out signal survives without costing the reader the row.
+    """
     from otaman_cli.console.tree import TreeNode
 
     node = TreeNode(
@@ -210,8 +222,9 @@ def test_every_segment_of_a_grayed_row_uses_it():
         grayed=True,
         priority="P1",
     )
-    styles = {style for text, style in node.row_segments() if text.strip()}
-    assert styles == {"dim"}
+    segs = [(text, style) for text, style in node.row_segments() if text.strip()]
+    assert segs[0] == ("SOL-3", "bold"), "the row lost its legible anchor"
+    assert {style for _text, style in segs[1:]} == {"dim"}, "the rest must still read as gray"
 
 
 # ---------------------------------------------------------------------------
