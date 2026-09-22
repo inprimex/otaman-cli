@@ -107,7 +107,18 @@ def _consoles_seated(trace: str) -> int:
     return sum(1 for line in trace.splitlines() if "console seat" in line)
 
 
-pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+#: These EXECUTE the generated POSIX launcher, so they run where that launcher
+#: is the artifact a tenant actually uses. Windows tenants get `launch.ps1`
+#: instead, and the `#!/usr/bin/env bash` stubs here are not executable there
+#: (chmod is a no-op), so running them would test the harness, not the launcher.
+#:
+#: Note what this does NOT skip: macOS. Its bash is 3.2, and that is precisely
+#: where `mapfile` silently did nothing and a profile started the whole fleet
+#: while reporting success — a bug only a macOS run could find.
+pytestmark = [
+    pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash"),
+    pytest.mark.skipif(os.name == "nt", reason="POSIX launcher; Windows uses launch.ps1"),
+]
 MODES = ["local", "mesh"]
 
 

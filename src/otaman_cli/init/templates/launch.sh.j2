@@ -16,6 +16,18 @@ set -u
 # (`${'{'}#arr[@]}` would open a Jinja comment, hence counting via "$#".)
 _count() { echo $#; }
 
+# Split newline-separated text into _ARRAY. Portable to bash 3.2 (macOS), where
+# `mapfile` does not exist — and where its absence failed SILENTLY, leaving the
+# caller's array untouched instead of erroring.
+_to_array() {
+  _ARRAY=()
+  while IFS= read -r _line; do
+    [ -n "$_line" ] && _ARRAY+=("$_line")
+  done <<EOF
+$1
+EOF
+}
+
 ALL_AGENTS=({% for agent in agents %}{% if agent.enabled %}"{{ agent.name }}" {% endif %}{% endfor %})
 SELECTED=("${ALL_AGENTS[@]}")
 SEAT_CONSOLE=0
@@ -72,15 +84,17 @@ apply_choice() {
   case "$choice" in
     full|1) SELECTED=("${ALL_AGENTS[@]}") ;;
     pick|2)
-      mapfile -t lines < <(pick_agents) || return 1
-      [ "$(_count ${lines[@]+"${lines[@]}"})" -gt 0 ] || { echo "Nothing selected." >&2; return 1; }
-      SELECTED=("${lines[@]}")
+      _to_array "$(pick_agents)" || return 1
+      [ "$(_count ${_ARRAY[@]+"${_ARRAY[@]}"})" -gt 0 ] || { echo "Nothing selected." >&2; return 1; }
+      SELECTED=(${_ARRAY[@]+"${_ARRAY[@]}"})
       ;;
     *)
       if lines="$(profile_agents "$choice")"; then
-        mapfile -t SELECTED <<< "$lines"
-        # An empty line from a console-only profile must not become an agent.
-        [ "$(_count ${SELECTED[@]+"${SELECTED[@]}"})" -eq 1 ] && [ -z "${SELECTED[0]}" ] && SELECTED=()
+        # NOT `mapfile`: that is bash 4+, and macOS ships bash 3.2. There it
+        # silently did nothing, SELECTED kept every agent, and the launcher
+        # started the full fleet while reporting success for the profile.
+        _to_array "$lines"
+        SELECTED=(${_ARRAY[@]+"${_ARRAY[@]}"})
         # NOT `profile_console ... && SEAT_CONSOLE=1`: that compound is the last
         # statement in the branch, so a profile WITHOUT a console makes it false
         # and the false becomes apply_choice's return status — which the caller
