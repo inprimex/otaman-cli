@@ -29,41 +29,53 @@ import yaml
 
 
 # ---------------------------------------------------------------- glob matcher
-def _compile_glob(pattern: str) -> re.Pattern[str]:
-    """Translate a gitignore-style glob into a compiled regex anchored at both ends.
-
-    Supported wildcards (Phase 1):
-        **      — matches any sequence of characters, including slashes
-        *       — matches anything except `/`
-        ?       — matches a single character except `/`
-
-    Other special regex characters are escaped.  Patterns are anchored;
-    a trailing `**` is required to match subtrees.  Example:
-        `apps/web/**` → `^apps/web/.*$` → matches `apps/web/src/App.tsx`
-        `apps/web`    → `^apps/web$`    → matches only `apps/web` exactly
-    """
-    out: list[str] = []
-    i = 0
-    while i < len(pattern):
-        c = pattern[i]
-        if c == "*" and pattern[i : i + 2] == "**":
-            out.append(".*")
-            i += 2
-        elif c == "*":
-            out.append("[^/]*")
-            i += 1
-        elif c == "?":
-            out.append("[^/]")
-            i += 1
-        else:
-            out.append(re.escape(c))
-            i += 1
-    return re.compile("^" + "".join(out) + "$")
-
-
 def _glob_matches(path: str, pattern: str) -> bool:
-    """Check whether *path* matches *pattern* under gitignore-style semantics."""
-    return bool(_compile_glob(pattern).match(path))
+    """Whether *path* is owned by *pattern* — core's RULED matcher (1.4).
+
+    The local `_compile_glob`/`_glob_matches` pair is deleted in favour of
+    `otaman_core.owner_paths.path_matches` (core #71), which every "who owns this
+    path" surface now shares.
+
+    **This changed behaviour, deliberately.** The local matcher anchored both
+    ends, so a wildcard-free pattern matched only itself: `apps/web` did NOT own
+    `apps/web/x`, and a bare directory owned nothing inside it. The ruling is
+    that a bare directory means `<dir>/**`, so it owns its whole subtree. Six of
+    99 differential cases diverged, all that one shape.
+
+    Live impact when adopted: none. No repo in the program declares any
+    owner-paths pattern, so no file changed owner. Recorded because that will not
+    stay true, and the next reader needs to know this widened rather than
+    refactored.
+
+    The fallback mirrors the RULED semantics, not the old local ones — a laggard
+    core must not silently resolve ownership differently from an updated one.
+    """
+    try:
+        from otaman_core.owner_paths import path_matches
+    except Exception:  # noqa: BLE001 - laggard core → the ruled semantics, locally
+        norm = path.strip("/").replace("\\", "/")
+        pat = pattern.strip("/").replace("\\", "/")
+        if not pat:
+            return False
+        if not any(ch in pat for ch in "*?"):
+            return norm == pat or norm.startswith(f"{pat}/")
+        out: list[str] = []
+        i = 0
+        while i < len(pat):
+            if pat[i : i + 2] == "**":
+                out.append(".*")
+                i += 2
+            elif pat[i] == "*":
+                out.append("[^/]*")
+                i += 1
+            elif pat[i] == "?":
+                out.append("[^/]")
+                i += 1
+            else:
+                out.append(re.escape(pat[i]))
+                i += 1
+        return re.match("^" + "".join(out) + "$", norm) is not None
+    return path_matches(path, pattern)
 
 
 # ---------------------------------------------------------------- resolver

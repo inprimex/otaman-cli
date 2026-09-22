@@ -798,14 +798,17 @@ def _file_is_for_agent(stem: str, fm: dict, agent: str) -> bool:
     """
     if f"-cc-{agent}-" in stem or stem.endswith(f"-cc-{agent}"):
         return True  # legacy cc naming — my copy
-    if fm.get("x-cc"):
+    from otaman_cli.frontmatter_gate import frontmatter
+
+    _fm_api = frontmatter()
+    if _fm_api.is_cc_copy(fm):
         if "-cc-" in stem:
             return False  # legacy cc naming — another recipient's copy
         if f"-to-{agent}-" in stem or stem.endswith(f"-to-{agent}"):
             return True
         if "-to-" in stem:
             return False  # designated for another recipient
-        cc_list = fm.get("cc") or []
+        cc_list = _fm_api.cc_recipients(fm)
         return isinstance(cc_list, list) and agent in cc_list
     if f"-to-{agent}-" in stem or stem.endswith(f"-to-{agent}"):
         return True

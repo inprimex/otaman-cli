@@ -14,7 +14,6 @@ Outputs JSON report of actions taken.
 from __future__ import annotations
 
 import json
-import re
 import shutil
 import sys
 from datetime import datetime, timedelta, timezone
@@ -29,16 +28,20 @@ except ImportError:
 
 
 def parse_frontmatter(filepath: Path) -> dict[str, Any] | None:
-    """Parse YAML frontmatter from a markdown file."""
+    """Frontmatter of *filepath*, or None when it is not a bus message.
+
+    The parse itself is core's (shared-logic 1.2). ``None`` is preserved for
+    "not a message" because every caller here skips on it; core returns ``{}``
+    for that case, and a caller checking ``is None`` would stop skipping.
+    """
+    from otaman_cli.frontmatter_gate import frontmatter
+
     try:
         content = filepath.read_text(encoding="utf-8")
-        match = re.match(r"^---\n(.+?)\n---", content, re.DOTALL)
-        if not match:
-            return None
-        fm = yaml.safe_load(match.group(1))
-        return fm if isinstance(fm, dict) else None
-    except (OSError, yaml.YAMLError):
+    except OSError:
         return None
+    fm, _body = frontmatter().parse(content)
+    return fm or None
 
 
 def get_agents(project_root: Path) -> list[str]:

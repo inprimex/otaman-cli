@@ -51,17 +51,18 @@ class RequestHumanReview:
 
 
 def _parse_frontmatter(text: str) -> tuple[dict | None, str]:
-    """Return (frontmatter_dict, body)."""
-    m = re.match(r"^---\n(.+?)\n---\n?(.*)$", text, re.DOTALL)
-    if not m:
-        return None, text
-    try:
-        fm = yaml.safe_load(m.group(1))
-    except yaml.YAMLError:
-        return None, text
-    if not isinstance(fm, dict):
-        return None, text
-    return fm, m.group(2)
+    """Return (frontmatter_dict, body) — the shared parser (shared-logic 1.2).
+
+    Keeps the ``None`` return for "no frontmatter" rather than adopting core's
+    ``{}``: this module's callers distinguish a non-message from a message
+    with an empty block, and collapsing the two would make them treat a
+    stray file as a decision payload. Core is the parser; the sentinel is
+    this call site's contract.
+    """
+    from otaman_cli.frontmatter_gate import frontmatter
+
+    fm, body = frontmatter().parse(text)
+    return (fm, body) if fm else (None, text)
 
 
 def _extract_subject(body: str) -> str:
