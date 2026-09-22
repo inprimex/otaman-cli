@@ -245,30 +245,63 @@ def resolve_agent_identity(
     # cross-check against — env/walk still apply (identity-divergence D1: the
     # resolver is the single entry point, so it must handle root=None).
     cwd_owner = _resolve_cwd_owner(root, cwd) if root is not None else None
+    # core's resolver returns the platform.yaml value as written; cli's own
+    # lookup normalized it. A padded `owner: "  backend-agent  "` would
+    # otherwise become an agent name with spaces in it — and then a bus stem
+    # with spaces in it. Stripped here AND reported upstream, since every other
+    # consumer of the shared kernel inherits the same behaviour.
+    if cwd_owner:
+        cwd_owner = cwd_owner.strip() or None
 
-    # 2. OTAMAN_AGENT environment variable
+    # 2. The RULED kernel: cwd-ownership, then OTAMAN_AGENT
+    #    (shared-logic-single-home 1.5). core owns the precedence between these
+    #    two signals — team-mode B1 made cwd-ownership authoritative precisely so
+    #    a stale or leaked env var cannot claim someone else's repo — and every
+    #    consumer (cli, bridge, plugin, runner) now resolves them identically.
+    #
+    #    This was blocked until core #73: `resolve_owner_for_cwd` had no worktree
+    #    awareness, so a worktree session resolved to None and fell through to
+    #    OTAMAN_AGENT — the exact stale-env case B1 exists to prevent. cli's
+    #    local `resolve_worktree_main` compensation is now core's, and the four
+    #    worktree tests that failed on the first attempt pass against the kernel.
     env_agent = os.environ.get("OTAMAN_AGENT", "").strip()
+
+    # The disagreement warning stays at cli's layer: it is operator UX, not part
+    # of the resolution, and it is how a poisoned tmux server-global env gets
+    # noticed at all rather than silently losing to the owner.
+    if env_agent and cwd_owner and cwd_owner != env_agent:
+        print(
+            f"[otaman] WARNING: OTAMAN_AGENT={env_agent!r} disagrees with the "
+            f"repo owner resolved from cwd ({cwd_owner!r}) — using {cwd_owner!r}. "
+            f"This usually means a stale/leaked OTAMAN_AGENT (e.g. a poisoned "
+            f"tmux server-global environment); fix the source rather than this "
+            f"warning.",
+            file=sys.stderr,
+        )
+    if cwd_owner:
+        return cwd_owner
+
+    # 3. OTAMAN_AGENT, applied ONLY where cwd resolves to no owner.
+    #    core-agent suggested (20260922T220310) that no-silent-success clause 1
+    #    might land here — surfacing the unresolvable case rather than falling
+    #    through quietly. It does NOT: this path is the documented, intentional
+    #    answer when there is no repo to own the cwd, and the common case is
+    #    running from the otaman meta dir itself (pinned by
+    #    test_env_var_trusted_when_cwd_outside_any_repo). Clause 1 is about a
+    #    verb reporting success while doing no work; a correct resolution by the
+    #    documented precedence is not that. Annotating it on every invocation
+    #    would train operators to ignore stderr, which costs more than it buys.
     if env_agent:
-        if cwd_owner and cwd_owner != env_agent:
-            print(
-                f"[otaman] WARNING: OTAMAN_AGENT={env_agent!r} disagrees with the "
-                f"repo owner resolved from cwd ({cwd_owner!r}) — using {cwd_owner!r}. "
-                f"This usually means a stale/leaked OTAMAN_AGENT (e.g. a poisoned "
-                f"tmux server-global environment); fix the source rather than this "
-                f"warning.",
-                file=sys.stderr,
-            )
-            return cwd_owner
         return env_agent
 
-    # 3. .otaman agent: field — CWD ancestry walk (keeps walking past .otaman without agent:)
+    # 4. .otaman agent: field — CWD ancestry walk. DEMOTED below cwd-ownership
+    #    by 1.5: B1 retires marker reads, and a stale marker is a known bug class
+    #    in this fleet. Retained rather than deleted because this repo's own
+    #    runbook still tells agents to write the sibling signal for hooks —
+    #    removing both outright is spec-agent's sequencing call, not a refactor.
     dotoman_agent = _read_otaman_agent_field(cwd)
     if dotoman_agent:
         return dotoman_agent
-
-    # 4. CWD → platform.yaml (+ owner-paths) → owner — already resolved above
-    if cwd_owner:
-        return cwd_owner
 
     # 5. .agents/current-agent — deprecated fallback, validated (R3) against
     #    platform.yaml's declared agents before being trusted.

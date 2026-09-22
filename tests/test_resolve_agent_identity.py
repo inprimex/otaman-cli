@@ -299,3 +299,51 @@ def test_direct_cwd_match_still_preferred_over_worktree_logic(project: Path) -> 
     (project / ".agents" / "current-agent").write_text("stale-agent\n")
     backend_cwd = project.parent / "auth-service"
     assert resolve_agent_identity(project, backend_cwd) == "backend-agent"
+
+
+# ---------------------------------------------------------------------------
+# shared-logic-single-home 1.5 — consuming core's kernel
+
+
+def test_a_padded_owner_value_is_normalized(tmp_path, monkeypatch):
+    """core returns the platform.yaml value as written; cli's own lookup stripped it.
+
+    Without normalizing, `owner: "  backend-agent  "` becomes an agent name with
+    spaces in it — and then a BUS STEM with spaces in it, which is the shape that
+    reaches neither recipient (cli #190). Reported upstream too: every consumer
+    of the shared kernel inherits the same behaviour.
+    """
+    from otaman_cli.identity import resolve_agent_identity
+
+    root = tmp_path / "meta"
+    (root / ".agents").mkdir(parents=True)
+    (root / "platform.yaml").write_text(
+        'project: p\nversion: "1.0"\nrepos:\n'
+        '  - name: svc\n    path: ../svc\n    owner: "  backend-agent  "\n',
+        encoding="utf-8",
+    )
+    repo = tmp_path / "svc"
+    repo.mkdir()
+    monkeypatch.delenv("OTAMAN_AGENT", raising=False)
+
+    assert resolve_agent_identity(root, repo) == "backend-agent"
+
+
+def test_cwd_ownership_still_outranks_a_stale_env_var(tmp_path, monkeypatch, capsys):
+    """B1's authoritative rule, re-verified against core's kernel rather than
+    cli's retired local implementation."""
+    from otaman_cli.identity import resolve_agent_identity
+
+    root = tmp_path / "meta"
+    (root / ".agents").mkdir(parents=True)
+    (root / "platform.yaml").write_text(
+        'project: p\nversion: "1.0"\nrepos:\n'
+        "  - name: svc\n    path: ../svc\n    owner: backend-agent\n",
+        encoding="utf-8",
+    )
+    repo = tmp_path / "svc"
+    repo.mkdir()
+    monkeypatch.setenv("OTAMAN_AGENT", "someone-else")
+
+    assert resolve_agent_identity(root, repo) == "backend-agent"
+    assert "disagrees with the repo owner" in capsys.readouterr().err
