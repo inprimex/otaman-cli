@@ -976,6 +976,10 @@ class TreeScreen(Screen):
     change detail; f toggles closed items (hidden by default). Loads off-thread."""
 
     BINDINGS = [
+        # `:` opens command mode (1.3). `f` stays as SUGAR for the closed-state
+        # filter rather than a second mechanism — D2's whole point is that the
+        # per-lens ad-hoc toggles stop growing.
+        Binding("colon", "command_mode", "Filter/command", priority=True),
         Binding("f", "toggle_closed", "Show/hide closed", priority=True),
         Binding("p", "toggle_panel", "Read panel", priority=True),
         # 2.2 — spec review is an ACTION on an authored change row, not a screen.
@@ -983,7 +987,10 @@ class TreeScreen(Screen):
         # 3.1 — one key cycles value → capability → lifecycle.
         Binding("L", "cycle_lens", "Switch lens", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
-        Binding("escape", "back", "Back", priority=True),
+        # Esc clears an active filter first, and only then leaves the screen —
+        # otherwise the key that "gets you out" of a filter also throws away the
+        # screen you were filtering.
+        Binding("escape", "clear_filter", "Clear filter / back", priority=True),
         Binding("q", "app.quit", "Quit", priority=True),
     ]
 
@@ -999,6 +1006,13 @@ class TreeScreen(Screen):
         # 3.1 — Artifacts is ONE door with three lenses over the same objects.
         self._lens = lens or LENS_VALUE
         self._rows: list = []  # lifecycle-lens rows
+        # 1.3 — the active filter (persists, displayed, Esc-cleared) and the
+        # one-shot view command (`e+`/`e-`), which deliberately holds no state.
+        from otaman_cli.console.filter_grammar import Query
+
+        self._query = Query()
+        self._pending_view: str | None = None
+        self._awaiting_count = 0
         # 2.2 — `b`'s new home: Artifacts filtered to authored changes, which is
         # what the standalone spec-review browser used to be a separate screen for.
         self._authored_only = authored_only
@@ -1014,6 +1028,16 @@ class TreeScreen(Screen):
         notice = Static("", id="tree-notice", markup=False)
         notice.display = False
         yield notice
+        # The active-filter line and the `:` input. Both hidden until used —
+        # a filter that is not filtering must not cost a row of screen.
+        active = Static("", id="tree-filter", markup=False)
+        active.display = False
+        yield active
+        cmd = Input(
+            placeholder=":p1 sappr t login   ·   e+ / e- expand/collapse", id="tree-command"
+        )
+        cmd.display = False
+        yield cmd
         with Horizontal(id="tree-row"):
             yield Tree("artifacts", id="artifact-tree")
             with VerticalScroll(id="tree-side"):
@@ -1044,6 +1068,75 @@ class TreeScreen(Screen):
         self.query_one("#artifact-tree", Tree).auto_expand = False
         self._apply_lens()
         self._reload()
+
+    # ------------------------------------------------------------------ 1.3
+    def action_command_mode(self) -> None:
+        """`:` opens the command line (1.3)."""
+        cmd = self.query_one("#tree-command", Input)
+        cmd.display = True
+        cmd.value = ""
+        cmd.focus()
+
+    def on_input_submitted(self, event) -> None:
+        if getattr(event.input, "id", "") != "tree-command":
+            return
+        from otaman_cli.console.filter_grammar import parse
+
+        text = (event.value or "").lstrip(":").strip()
+        cmd = self.query_one("#tree-command", Input)
+        cmd.display = False
+        query = parse(text)
+        if query.error:
+            # The error IS the feedback — the view is left exactly as it was,
+            # because emptying the screen on a typo teaches nothing.
+            self.app.notify(query.error, severity="warning", timeout=8)
+            self._restore_focus()
+            return
+        if query.terms or not query.view:
+            # A bare view command (`:e+`) must NOT clear the active filter — it
+            # acts within it (D2). Only a line carrying terms replaces them, and
+            # an empty line clears.
+            self._query = query
+        self._pending_view = query.view
+        self._render_active_filter()
+        self._reload()
+        self._restore_focus()
+
+    def _restore_focus(self) -> None:
+        """Focus back to whichever widget this lens renders into."""
+        from otaman_cli.console.tree import LENS_LIFECYCLE
+
+        if self._lens == LENS_LIFECYCLE:
+            self.query_one("#artifact-lifecycle", DataTable).focus()
+        else:
+            self.query_one("#artifact-tree", Tree).focus()
+
+    def _render_active_filter(self) -> None:
+        """Show what is filtering, or hide the line entirely (D4: no empty rows)."""
+        line = self.query_one("#tree-filter", Static)
+        text = self._query.describe() if self._query else ""
+        if text:
+            line.update(f"filter: {text}   (esc clears)")
+            line.display = True
+        else:
+            line.update("")
+            line.display = False
+
+    def action_clear_filter(self) -> None:
+        """Esc clears the filter; with none active it leaves the screen (1.3)."""
+        from otaman_cli.console.filter_grammar import Query
+
+        cmd = self.query_one("#tree-command", Input)
+        if cmd.display:
+            cmd.display = False
+            self._restore_focus()
+            return
+        if self._query and not self._query.is_empty:
+            self._query = Query()
+            self._render_active_filter()
+            self._reload()
+            return
+        self.action_back()
 
     def action_cycle_lens(self) -> None:
         """Cycle value → capability → lifecycle (3.1)."""
@@ -1082,8 +1175,13 @@ class TreeScreen(Screen):
         # documented only in source comments beside the constants — invisible to
         # the person actually looking at the screen.
         orientation = lens_orientation(self._lens)
+        # "N awaiting you" (1.4) — the count the `:a` filter selects, from the
+        # same derived set, so the header and the filter cannot disagree.
+        count = getattr(self, "_awaiting_count", 0)
+        awaiting_note = f"  ·  {count} awaiting you" if count else ""
         self.query_one("#mode-banner", Static).update(
             f"Artifacts · {self.program.name} — {label} lens"
+            + awaiting_note
             + (f"  ·  {orientation}" if orientation else "")
             + f"\n{nav} · L lens · v spec-approve · f closed · p read · "
             "r refresh · esc back · q quit"
@@ -1166,16 +1264,107 @@ class TreeScreen(Screen):
         )
 
         if self._lens == LENS_LIFECYCLE:
+            from otaman_cli.console.filter_grammar import matches
             from otaman_cli.console.lifecycle import derive_lifecycle_rows
 
-            self.app.call_from_thread(self._paint_lifecycle, derive_lifecycle_rows(self.program))
+            rows = derive_lifecycle_rows(self.program)
+            if self._query is not None and not self._query.is_empty:
+                awaiting = self._awaiting_ids()
+                # A flat table needs no path-preservation — the row IS the hit.
+                rows = [r for r in rows if matches(self._query, r, awaiting=awaiting)]
+            self.app.call_from_thread(self._paint_lifecycle, rows)
             return
 
         roots = build_artifact_tree(self.program, show_closed=self._show_closed, lens=self._lens)
         if self._authored_only:
             roots = _authored_change_roots(self.program, roots)
+        awaiting = self._awaiting_ids()
+        count = self._stamp_awaiting(roots, awaiting)
+        roots = self._filtered(roots)
         notice = tree_fallback_notice(self.program)
         self.app.call_from_thread(self._populate, roots, notice)
+        self.app.call_from_thread(self._set_awaiting_count, count)
+
+    def _stamp_awaiting(self, roots: list, awaiting: set[str]) -> int:
+        """Mark every row that is waiting on the human; return how many.
+
+        Counted on the UNFILTERED tree deliberately: "3 awaiting you" is a fact
+        about the program, not about the current filter. A count that shrank when
+        you typed `:p1` would be answering a different question from the one the
+        header asks.
+        """
+        seen: set[str] = set()
+
+        def walk(nodes) -> None:
+            for node in nodes:
+                if node.id in awaiting:
+                    node.awaiting = True
+                    seen.add(node.id)
+                walk(node.children or [])
+
+        walk(roots)
+        return len(seen)
+
+    def _set_awaiting_count(self, count: int) -> None:
+        self._awaiting_count = count
+        self._apply_lens()
+
+    def _filtered(self, roots: list) -> list:
+        """Prune the tree to the active filter, keeping the PATH to each hit.
+
+        `matches_tree` keeps a branch when anything inside it matches, so a
+        `:p1` on an outcome-first tree still shows which outcome the P1 change
+        sits under instead of emptying the screen.
+        """
+        from otaman_cli.console.filter_grammar import matches_tree
+
+        query = self._query
+        if query is None or query.is_empty:
+            return roots
+        awaiting = self._awaiting_ids()
+
+        def prune(node):
+            kept = [
+                prune(c) for c in (node.children or []) if matches_tree(query, c, awaiting=awaiting)
+            ]
+            node.children = kept
+            return node
+
+        return [prune(r) for r in roots if matches_tree(query, r, awaiting=awaiting)]
+
+    def _awaiting_ids(self) -> set[str]:
+        """The set the marker, the header count and `:a` ALL key on (D3).
+
+        Two existing sources, unioned, and neither is new storage:
+
+          * the lifecycle derivation's ``next_actor`` — a complete-unarchived
+            change with no approval is ratify-blocked on the human, which is
+            exactly what `otaman ratify` acts on;
+          * ``list_authored_changes`` — the set awaiting spec-approval, which is
+            exactly what `v` acts on.
+
+        Derived rather than registered, so there is no "needs approval" list to
+        go stale, and the filter cannot disagree with the action beside it.
+        """
+        awaiting: set[str] = set()
+        try:
+            from otaman_cli.console.lifecycle import derive_lifecycle_rows
+
+            for row in derive_lifecycle_rows(self.program):
+                actor = str(getattr(row, "next_actor", "") or "")
+                if "human" in actor.lower():
+                    name = getattr(row, "name", None)
+                    if name:
+                        awaiting.add(str(name))
+        except Exception:  # noqa: BLE001 - an underivable lifecycle is not an error here
+            pass
+        try:
+            from otaman_cli.console import artifacts
+
+            awaiting |= {c.name for c in artifacts.list_authored_changes(self.program)}
+        except Exception:  # noqa: BLE001 - unresolvable specs repo → that half is empty
+            pass
+        return awaiting
 
     def _paint_lifecycle(self, rows: list) -> None:
         """The lifecycle lens — the Roman-defined columns, rendered by the SAME
@@ -1211,6 +1400,31 @@ class TreeScreen(Screen):
         width = tree.size.width - 4 if tree.size.width else 0
         for r in roots:
             self._add(tree.root, r, width)
+        self._apply_pending_view(tree)
+
+    def _apply_pending_view(self, tree) -> None:
+        """Act on a one-shot `:e+` / `:e-`, then forget it (D2).
+
+        A VIEW command holds no state — it acts once. It runs AFTER the tree is
+        populated and after the filter has pruned it, which is what makes
+        `:p1 e+` expand only the P1 rows: the composition is free because both
+        halves came from one parsed line.
+        """
+        from otaman_cli.console.filter_grammar import VIEW_EXPAND_ALL
+
+        view, self._pending_view = self._pending_view, None
+        if view is None:
+            return
+
+        def walk(node):
+            for child in node.children:
+                if child.children:
+                    child.expand() if view == VIEW_EXPAND_ALL else child.collapse()
+                    walk(child)
+
+        if view == VIEW_EXPAND_ALL:
+            tree.root.expand()
+        walk(tree.root)
 
     def _add(self, parent, node, width=0) -> None:
         from rich.text import Text

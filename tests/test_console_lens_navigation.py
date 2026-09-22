@@ -269,3 +269,355 @@ def test_context_line_does_not_repeat_a_ref_it_already_shows():
 
     line = context_line(TreeNode(kind="change", id="c", title="JTBD-1"), refs=["JTBD-1"])
     assert line.count("JTBD-1") == 1
+
+
+# ---------------------------------------------------------------------------
+# 1.3 — ':' command mode wired into the screen
+
+
+def _screen_state(app):
+    from textual.widgets import Input, Static
+
+    return (
+        app.screen.query_one("#tree-command", Input),
+        app.screen.query_one("#tree-filter", Static),
+    )
+
+
+@_textual
+def test_colon_opens_the_command_line(program):
+    from otaman_cli.console.app import OtamanConsole, TreeScreen
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(TreeScreen(program))
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            cmd, _active = _screen_state(app)
+            assert cmd.display is False, "the command line must not cost a row until used"
+            app.screen.action_command_mode()
+            await pilot.pause()
+            assert cmd.display is True and cmd.has_focus
+            await app.action_quit()
+
+    asyncio.run(go())
+
+
+@_textual
+def test_a_submitted_filter_is_stored_and_displayed(program):
+    from types import SimpleNamespace
+
+    from otaman_cli.console.app import OtamanConsole, TreeScreen
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(TreeScreen(program))
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            cmd, active = _screen_state(app)
+            app.screen.on_input_submitted(
+                SimpleNamespace(input=SimpleNamespace(id="tree-command"), value=":p1")
+            )
+            await pilot.pause()
+            assert app.screen._query.describe() == "P1"
+            assert active.display is True
+            assert "P1" in str(active.render())
+            assert cmd.display is False, "the command line closes after submitting"
+            await app.action_quit()
+
+    asyncio.run(go())
+
+
+@_textual
+def test_a_bare_view_command_does_not_clear_the_active_filter(program):
+    """D2: `:e+` acts WITHIN the filter — that is why it lives in the grammar."""
+    from types import SimpleNamespace
+
+    from otaman_cli.console.app import OtamanConsole, TreeScreen
+    from otaman_cli.console.filter_grammar import VIEW_EXPAND_ALL
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(TreeScreen(program))
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            submit = lambda v: app.screen.on_input_submitted(  # noqa: E731
+                SimpleNamespace(input=SimpleNamespace(id="tree-command"), value=v)
+            )
+            submit(":p1")
+            await pilot.pause()
+            submit(":e+")
+            await pilot.pause()
+            assert app.screen._query.describe() == "P1", "the view command cleared the filter"
+            assert app.screen._pending_view in (None, VIEW_EXPAND_ALL)
+            await app.action_quit()
+
+    asyncio.run(go())
+
+
+@_textual
+def test_an_unparseable_line_warns_and_leaves_the_view_alone(program):
+    """The error is the feedback; emptying the screen on a typo teaches nothing."""
+    from types import SimpleNamespace
+
+    from otaman_cli.console.app import OtamanConsole, TreeScreen
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(TreeScreen(program))
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            before = app.screen._query
+            app.screen.on_input_submitted(
+                SimpleNamespace(input=SimpleNamespace(id="tree-command"), value=":nonsense")
+            )
+            await pilot.pause()
+            assert app.screen._query is before, "a broken line changed the active filter"
+            await app.action_quit()
+
+    asyncio.run(go())
+
+
+@_textual
+def test_escape_clears_the_filter_before_it_leaves_the_screen(program):
+    """Otherwise the key that gets you out of a filter also throws away the view."""
+    from types import SimpleNamespace
+
+    from otaman_cli.console.app import OtamanConsole, TreeScreen
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(TreeScreen(program))
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            screen = app.screen
+            screen.on_input_submitted(
+                SimpleNamespace(input=SimpleNamespace(id="tree-command"), value=":p1")
+            )
+            await pilot.pause()
+            assert not screen._query.is_empty
+
+            screen.action_clear_filter()  # first Esc: clears the filter
+            await pilot.pause()
+            assert screen._query.is_empty
+            assert app.screen is screen, "the first Esc left the screen"
+
+            screen.action_clear_filter()  # second Esc: leaves
+            await pilot.pause()
+            await app.action_quit()
+
+    asyncio.run(go())
+
+
+@_textual
+def test_the_filter_prunes_but_keeps_the_path_to_a_match(program, monkeypatch):
+    """A parent whose child matches must survive, or `:p1` empties the tree."""
+    from otaman_cli.console.app import OtamanConsole, TreeScreen
+    from otaman_cli.console.filter_grammar import parse
+    from otaman_cli.console.tree import TreeNode
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(TreeScreen(program))
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            screen = app.screen
+            screen._query = parse("p1")
+            roots = [
+                TreeNode(
+                    kind="outcome",
+                    id="JTBD-1",
+                    title="",
+                    children=[
+                        TreeNode(kind="change", id="hit", title="", priority="P1"),
+                        TreeNode(kind="change", id="miss", title="", priority="P3"),
+                    ],
+                ),
+                TreeNode(
+                    kind="outcome",
+                    id="JTBD-2",
+                    title="",
+                    children=[TreeNode(kind="change", id="no", title="", priority="P2")],
+                ),
+            ]
+            kept = screen._filtered(roots)
+            assert [r.id for r in kept] == ["JTBD-1"], "the matching branch did not survive alone"
+            assert [c.id for c in kept[0].children] == ["hit"], "non-matching children survived"
+            await app.action_quit()
+
+    asyncio.run(go())
+
+
+# ---------------------------------------------------------------------------
+# 1.4 — awaiting-you (D3)
+
+
+def test_an_awaiting_row_carries_a_visible_token_not_just_a_colour():
+    """The 1.2 lesson applied: a row that says "yours" only by being a slightly
+    different shade says it to nobody."""
+    from otaman_cli.console.tree import TreeNode
+
+    node = TreeNode(kind="change", id="c", title="t", awaiting=True)
+    text = node.display_label()
+    assert "you" in text
+    # …and a non-awaiting row is unchanged.
+    assert "you" not in TreeNode(kind="change", id="c", title="t").display_label()
+
+
+def test_the_awaiting_marker_survives_a_grayed_row():
+    """A decided-out row can still be waiting on you; the token must not vanish."""
+    from otaman_cli.console.tree import TreeNode
+
+    node = TreeNode(kind="change", id="c", title="t", awaiting=True, grayed=True)
+    assert "you" in node.display_label()
+
+
+@_textual
+def test_stamping_marks_only_the_awaiting_ids_and_counts_them(program):
+    from otaman_cli.console.app import OtamanConsole, TreeScreen
+    from otaman_cli.console.tree import TreeNode
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(TreeScreen(program))
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            roots = [
+                TreeNode(
+                    kind="outcome",
+                    id="JTBD-1",
+                    title="",
+                    children=[
+                        TreeNode(kind="change", id="mine", title=""),
+                        TreeNode(kind="change", id="theirs", title=""),
+                    ],
+                )
+            ]
+            count = app.screen._stamp_awaiting(roots, {"mine"})
+            assert count == 1
+            by_id = {c.id: c for c in roots[0].children}
+            assert by_id["mine"].awaiting is True
+            assert by_id["theirs"].awaiting is False
+            await app.action_quit()
+
+    asyncio.run(go())
+
+
+@_textual
+def test_the_awaiting_count_is_about_the_program_not_the_active_filter(program):
+    """`:p1` must not change "3 awaiting you" — the header answers a different
+    question from the filter, and a count that moved with it would be lying
+    about which one."""
+    from otaman_cli.console.app import OtamanConsole, TreeScreen
+    from otaman_cli.console.tree import TreeNode
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(TreeScreen(program))
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            roots = [
+                TreeNode(kind="change", id="a", title="", priority="P1", awaiting=False),
+                TreeNode(kind="change", id="b", title="", priority="P3", awaiting=False),
+            ]
+            # Both awaiting; only one survives a P1 filter.
+            assert app.screen._stamp_awaiting(roots, {"a", "b"}) == 2
+            await app.action_quit()
+
+    asyncio.run(go())
+
+
+@_textual
+def test_awaiting_ids_union_the_two_existing_sources(program, monkeypatch):
+    """D3: derived from next-actor AND authored-changes — no new registry."""
+    from types import SimpleNamespace
+
+    from otaman_cli.console.app import OtamanConsole, TreeScreen
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(TreeScreen(program))
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+            from otaman_cli.console import artifacts
+            from otaman_cli.console import lifecycle as clifecycle
+
+            monkeypatch.setattr(
+                clifecycle,
+                "derive_lifecycle_rows",
+                lambda program: [
+                    SimpleNamespace(name="ratify-me", next_actor="human (otaman ratify ratify-me)"),
+                    SimpleNamespace(name="not-mine", next_actor="spec-agent (archive the change)"),
+                ],
+            )
+            monkeypatch.setattr(
+                artifacts,
+                "list_authored_changes",
+                lambda program: [SimpleNamespace(name="approve-me")],
+            )
+            assert app.screen._awaiting_ids() == {"ratify-me", "approve-me"}
+            await app.action_quit()
+
+    asyncio.run(go())
+
+
+@_textual
+def test_a_broken_lifecycle_derivation_does_not_empty_the_other_half(program, monkeypatch):
+    """One unavailable source must not silently zero the awaiting set."""
+    from types import SimpleNamespace
+
+    from otaman_cli.console.app import OtamanConsole, TreeScreen
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(TreeScreen(program))
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+            from otaman_cli.console import artifacts
+            from otaman_cli.console import lifecycle as clifecycle
+
+            def boom(program):
+                raise RuntimeError("no specs repo")
+
+            monkeypatch.setattr(clifecycle, "derive_lifecycle_rows", boom)
+            monkeypatch.setattr(
+                artifacts,
+                "list_authored_changes",
+                lambda program: [SimpleNamespace(name="approve-me")],
+            )
+            assert app.screen._awaiting_ids() == {"approve-me"}
+            await app.action_quit()
+
+    asyncio.run(go())
