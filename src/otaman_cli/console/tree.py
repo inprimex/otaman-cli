@@ -51,6 +51,11 @@ class TreeNode:
     collapsed: bool = False
     dormant: bool = False
     grayed: bool = False  # decided-out sibling solution (tree-view-polish 1.3)
+    #: This row is waiting on the human at the console (1.4/D3). Derived from
+    #: the EXISTING next-actor computation and the authored-changes set — the
+    #: same sets `v` and `otaman ratify` act on — so the marker, the header
+    #: count and `:a` cannot disagree with the action sitting beside them.
+    awaiting: bool = False
     marker: str = ""  # e.g. ★ for the chosen solution
     pm_sync_id: str | None = None  # linked issue/ticket id (S10)
     children: list[TreeNode] = field(default_factory=list)
@@ -120,6 +125,12 @@ class TreeNode:
                     segs.append((" | ", st("")))
                 segs.append(seg)
         tail: list[tuple[str, str]] = []
+        if self.awaiting:
+            # Its own visible token, not a color: "awaiting you" is the one
+            # thing a reader scans for, and a row that says it only by being a
+            # slightly different shade says it to nobody (the same lesson as
+            # the dim-row defect in 1.2).
+            tail.append(("◀ you", "bold yellow" if not self.grayed else GRAY_STYLE))
         if self.marker:
             tail.append((self.marker, st("")))
         if self.pm_sync_id:
