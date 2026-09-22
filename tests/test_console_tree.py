@@ -335,7 +335,12 @@ def test_chosen_solution_grays_and_closes_siblings(program, monkeypatch):
     # grayed rows render wholly in the gray style
     from otaman_cli.console import palette
 
-    assert all(style == palette.GRAY_STYLE for _, style in by_id["SOL-2"].row_segments() if style)
+    # AMENDED by console-lens D4: the identity segment stays legible (a wholly
+    # dim row is what Roman reported as a blank line); everything after it
+    # still reads as decided-out.
+    segs = [(text, style) for text, style in by_id["SOL-2"].row_segments() if text.strip()]
+    assert segs[0][1] == "bold"
+    assert all(style == palette.GRAY_STYLE for _text, style in segs[1:] if style)
 
 
 def test_no_graying_without_a_decided_solution(program, monkeypatch):
