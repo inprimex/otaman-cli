@@ -92,11 +92,18 @@ def _render_template(
         lstrip_blocks=True,
     )
     template = env.get_template(name)
+    # The parsed `launch:` block, or None for the legacy shape (D3). Parsed here
+    # rather than in the template so the menu rules live in Python and the
+    # template only renders what it is handed.
+    from otaman_cli.launch_profiles import parse as _parse_launch
+
+    launch = _parse_launch({"launch": settings.launch} if settings.launch else None)
     return template.render(
         connection=settings.connection,
         agents=settings.agents,
         tmux=settings.tmux,
         agent_repos=agent_repos or {},
+        launch=launch,
     )
 
 
