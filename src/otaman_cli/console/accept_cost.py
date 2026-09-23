@@ -34,6 +34,14 @@ def accept_cost_candidate(program: Program, outcome_id: str) -> tuple[str | None
         return None, "outcome not found"
     if o.get("cost-accepted") is True:
         return None, "cost already accepted"
+    # D2 — the state-machine's own answer, not a console-local string. The CLI
+    # verb refuses on exactly this call, so the two surfaces cannot disagree
+    # about whether accept-cost is available or about why it is not.
+    from otaman_cli.registries.outcomes import check_action
+
+    verdict = check_action("accept-cost", o.get("status"))
+    if not verdict.allowed:
+        return None, verdict.reason
     chosen = o.get("chosen-solution")
     if chosen:
         return chosen, f"accept cost for chosen solution {chosen}"

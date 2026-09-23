@@ -433,6 +433,24 @@ def cmd_accept_cost(args: dict[str, Any]) -> int:
         )
 
     from_status = outcome.get("status", "Backlog")
+
+    # D1/1.3 — refuse below Backlog, and refuse BEFORE writing anything.
+    #
+    # The half-apply this replaces: from Drafting, the code below set
+    # cost-accepted=True and chosen-solution but left status at Drafting,
+    # because the status bump was conditional on `from_status == "Backlog"`. The
+    # result was an outcome with money accepted and an incomplete statement —
+    # JTBD-138 exactly. The strict validator permitted it; this change
+    # supersedes that permission.
+    #
+    # The reason comes from check_action, not from a string here, so the CLI and
+    # the console refuse with the identical sentence (D2).
+    from otaman_cli.registries.outcomes import check_action
+
+    verdict = check_action("accept-cost", from_status)
+    if not verdict.allowed:
+        return _bail(verdict.reason)
+
     outcome["cost-accepted"] = True
     outcome["chosen-solution"] = args["solution"]
     if from_status == "Backlog":
