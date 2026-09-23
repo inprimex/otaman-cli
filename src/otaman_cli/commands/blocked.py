@@ -97,25 +97,41 @@ def cmd_blocked(args: list[str]) -> int:
         if not blocked_file.is_file():
             print("No blocked tasks.")
             return 0
+        # Consumes core's parser like every other path in this file
+        # (shared-logic-single-home). This was the SEVENTH surface-local entry
+        # regex, found by slsh gate 2.1 on v0.5.13 — it predated the
+        # consolidation and was missed while the migrate/sweep paths below were
+        # converted.
+        #
+        # It was not merely duplicate, it LOST rows: the inline pattern required
+        # `## Blocked: <space><title>`, so a malformed entry (empty or
+        # space-less title) never matched and simply did not appear. A three
+        # entry fixture printed two lines with no indication a third existed —
+        # a read surface silently disagreeing with core, the console and MCP,
+        # all of which show `[malformed]`. It also excluded tombstones only by
+        # accident of the `^` anchor against wrapped lines.
+        from otaman_cli.blocked_gate import REMEDY, blocked_entries
+
+        mod = blocked_entries()
+        if mod is None:
+            UI.error(REMEDY)
+            return 1
+
         text = blocked_file.read_text(encoding="utf-8")
-        sections = re.findall(
-            r"^## Blocked: (.+?)$(.*?)(?=^## Blocked:|\Z)",
-            text,
-            re.MULTILINE | re.DOTALL,
-        )
-        if not sections:
+        entries = mod.parse_entries(text)
+        if not entries:
             print("No blocked tasks.")
             return 0
-        for slug, body in sections:
-            slug = slug.strip()
-            since = ""
-            m = re.search(r"\*\*Blocked since\*\*:\s*(.+)", body)
-            if m:
-                since = f"  (since {m.group(1).strip()})"
-            print(f"{slug}{since}")
-            proposal_m = re.search(r"\*\*Proposal\*\*:\s*(.+)", body)
-            if proposal_m:
-                UI.muted(f"  proposal: {proposal_m.group(1).strip()}")
+        for entry in entries:
+            # `get`, not `fields[...]`: core lowercases its keys, and the
+            # accessor is the documented case-insensitive way in.
+            since = entry.get("Blocked since")
+            # `display_title` is what makes a malformed entry VISIBLE as
+            # `[malformed]` here, identically to every other surface.
+            print(f"{entry.display_title}" + (f"  (since {since})" if since else ""))
+            proposal = entry.proposal or entry.get("Proposal")
+            if proposal:
+                UI.muted(f"  proposal: {proposal}")
         return 0
 
     if clear_slug:
