@@ -89,21 +89,47 @@ def test_an_unrecognised_anchor_warns_but_records(program, capsys):
 # the round-trip guard
 
 
-def test_a_title_that_does_not_survive_writing_is_refused(program, capsys):
-    """The live finding: `#` opens a YAML comment, so the title was truncated
-    and the entry still parsed — recorded, and quietly wrong."""
-    rc = cmd_knowledge(
-        ["add", "--title", "worktree sessions need core #73", "--anchor", "x.py:1", "--body", "b"]
-    )
+def test_a_hash_in_a_title_now_survives(program):
+    """The live finding, and its upstream fix.
+
+    `render_entry` wrote frontmatter UNQUOTED, so a title carrying `#` — a PR
+    ref, which is exactly what a knowledge title carries — was truncated at the
+    `#` and the entry still parsed. Recorded, and quietly wrong. Reported, and
+    core-agent quoted the frontmatter in core #79 within the hour.
+
+    This pins the fixed behaviour: a core regression here fails this test rather
+    than silently costing a title again.
+    """
+    title = "worktree sessions need core #73"
+    assert cmd_knowledge(["add", "--title", title, "--anchor", "x.py:1", "--body", "b"]) == 0
+    assert [e.title for e in _entries(program)] == [title]
+
+
+@pytest.mark.parametrize("title", ["with #hash", "with: colon", "plain"])
+def test_the_round_trip_guard_refuses_a_writer_that_mangles(program, monkeypatch, capsys, title):
+    """The guard itself, tested independently of whether core is currently correct.
+
+    core's renderer is fixed today, so the guard no longer TRIGGERS in normal
+    use — which would leave it unverified if the only test were "record a title
+    with a #". Simulating a mangling writer keeps the door-check honest: a
+    future escaping bug, in core or anywhere else, must still be refused rather
+    than recorded.
+    """
+    original = core.render_entry
+
+    def mangling(entry):
+        return original(entry).replace(entry.title, entry.title.split("#")[0].split(":")[0])
+
+    monkeypatch.setattr(core, "render_entry", mangling)
+
+    rc = cmd_knowledge(["add", "--title", title, "--anchor", "x.py:1", "--body", "b"])
+    if title == "plain":
+        assert rc == 0, "an unmangled title must still record"
+        return
     assert rc == 2
     out = capsys.readouterr().out
     assert "does not survive being written" in out
-    assert "#73" in out and "read back" in out, "must show what was lost"
     assert _entries(program) == [], "a mangled entry was left on disk"
-
-
-def test_the_mangled_file_is_removed_not_left_behind(program):
-    cmd_knowledge(["add", "--title", "a # b", "--anchor", "x.py:1", "--body", "b"])
     assert list((program / ".agents" / "knowledge").glob("*.md")) == []
 
 

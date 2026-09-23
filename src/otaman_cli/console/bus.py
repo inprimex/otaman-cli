@@ -42,6 +42,33 @@ class Proposal:
     body: str
     msg_type: str = "spec-change-request"
 
+    #: Short human names for the message types the console decides on. A raw
+    #: `spec-change-request` in a confirmation prompt is accurate and unreadable.
+    _TYPE_NAMES = {
+        "spec-change-request": "SCR",
+        "outcome-proposal": "outcome proposal",
+    }
+
+    def describe(self) -> str:
+        """`SCR 'add rate limiting' from backend-agent` (console-undo 1.1).
+
+        Every decision confirmation names its target before acting. Roman
+        deferred an item and could not tell which one, because the prompt said
+        only "Defer — enter a reason": correct, and useless. Type, title and
+        sender are the three facts that identify WHICH item is about to be acted
+        on, and all three are already here.
+
+        Falls back to the stem rather than rendering an empty quote: a prompt
+        that names nothing is the defect this closes.
+        """
+        kind = self._TYPE_NAMES.get(self.msg_type, self.msg_type or "item")
+        title = (self.subject or "").strip()
+        sender = (self.from_agent or "").strip()
+        if not title:
+            return f"{kind} {self.stem}" if self.stem else kind
+        described = f"{kind} '{title}'"
+        return f"{described} from {sender}" if sender else described
+
     @property
     def from_human(self) -> bool:
         """Display flag: the sender looks like a human, not an ``*-agent``.

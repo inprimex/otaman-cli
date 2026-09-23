@@ -774,7 +774,7 @@ class _DecisionActions:
                 self._apply_decision(verb, reason, target=decided, delivery=delivery)
 
         label = "approve-auto" if delivery == "auto" else verb
-        self.app.push_screen(ReasonModal(label), _after)
+        self.app.push_screen(ReasonModal(label, decided.describe()), _after)
 
     def action_approve_auto(self) -> None:
         self._prompt_and_decide("approve", delivery="auto")
@@ -1480,7 +1480,7 @@ class TreeScreen(Screen):
             if ok:
                 self._reload()
 
-        self.app.push_screen(ReasonModal("spec-approve"), _after)
+        self.app.push_screen(ReasonModal("spec-approve", f"change {node.id!r}"), _after)
 
     def _navigate_to(self, kind: str, node_id: str) -> None:
         """Open the referenced node's own view (D4: references navigate).
@@ -1698,7 +1698,7 @@ class RegistryDetailScreen(Screen):
             result = run_discard(self.program, self.node_id, reason)
             self._notify_result("discarded solution", result)
 
-        self.app.push_screen(ReasonModal("discard"), _after)
+        self.app.push_screen(ReasonModal("discard", f"solution {self.node_id!r}"), _after)
 
     def action_accept_cost(self) -> None:
         if not self._accept_args:
@@ -1774,13 +1774,22 @@ class ReasonModal(ModalScreen[str | None]):
 
     BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)]
 
-    def __init__(self, verb: str) -> None:
+    def __init__(self, verb: str, target: str = "") -> None:
         super().__init__()
         self._verb = verb
+        self._target = (target or "").strip()
 
     def compose(self) -> ComposeResult:
+        # console-undo 1.1 — the prompt NAMES what is about to be acted on.
+        # "Defer — enter a reason" is accurate and useless: Roman deferred an
+        # item and could not tell which one. A caller that passes no target
+        # still gets the old wording rather than an empty quote, because a
+        # prompt naming nothing is the defect, not the fallback.
+        head = (
+            f"{self._verb.capitalize()} {self._target}" if self._target else self._verb.capitalize()
+        )
         yield Static(
-            f"{self._verb.capitalize()} — enter a reason (optional), Enter to confirm:",
+            f"{head} — enter a reason (optional), Enter to confirm:",
             id="reason-prompt",
             markup=False,
         )
@@ -2005,7 +2014,7 @@ class LifecycleScreen(Screen):
             if ok:
                 self._load()  # refresh so the last-nudged column updates
 
-        self.app.push_screen(ReasonModal("nudge"), _after)
+        self.app.push_screen(ReasonModal("nudge", f"change {row.name!r}"), _after)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         # Enter opens the per-change detail view (1.3).
@@ -2082,7 +2091,7 @@ class LifecycleScreen(Screen):
             if ok:
                 self._load()
 
-        self.app.push_screen(ReasonModal("ratify"), _after)
+        self.app.push_screen(ReasonModal("ratify", f"change {row.name!r}"), _after)
 
     def _advance_to_spec_approved(self, row) -> None:
         """Advance an authored row to spec-approved (1.5), via the shared action.
@@ -2111,7 +2120,7 @@ class LifecycleScreen(Screen):
             if ok:
                 self._load()
 
-        self.app.push_screen(ReasonModal("spec-approve"), _after)
+        self.app.push_screen(ReasonModal("spec-approve", f"change {row.name!r}"), _after)
 
     def action_archive(self) -> None:
         # D1: archive is offered only on a complete-unarchived row whose archive
@@ -2416,7 +2425,7 @@ class ChangeReviewScreen(Screen):
                 return
             self._apply(verb, reason)
 
-        self.app.push_screen(ReasonModal(verb), _after)
+        self.app.push_screen(ReasonModal(verb, f"change {self.change.name!r}"), _after)
 
     def _apply(self, verb: str, reason: str) -> None:
         from otaman_cli.console import artifacts
@@ -2444,10 +2453,76 @@ class ChangeReviewScreen(Screen):
             self.app.pop_screen()  # ArtifactBrowserScreen.on_screen_resume refreshes
 
 
+class SessionActionsScreen(Screen):
+    """ "What did I just do" — the session's decision actions (console-undo 1.3).
+
+    Roman could not answer this from inside the console: reconstructing an
+    accidental defer meant grepping console logs and the bus from outside. The
+    journal already held every answer; nothing read it back.
+    """
+
+    BINDINGS = [
+        Binding("escape", "back", "Back", priority=True),
+        Binding("r", "refresh", "Refresh", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield _header()
+        yield _mode_banner(
+            "Session actions — what you have done in this session",
+            "↑↓ scroll · r refresh · esc back · q quit",
+        )
+        table = DataTable(id="session-actions", zebra_stripes=True, cursor_type="row")
+        yield table
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.query_one("#session-actions", DataTable).add_columns(
+            "time", "action", "target", "outcome"
+        )
+        self._load()
+
+    def action_refresh(self) -> None:
+        # This screen reads the session log rather than program data, so there
+        # is nothing cached for it to serve stale. It invalidates anyway: `r`
+        # means "read the world again" on every screen, and the invariant is
+        # worth more than the microsecond — a later edit that makes this view
+        # read program state would otherwise inherit a silent staleness bug.
+        invalidate_read_caches()
+        self._load()
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+    def _load(self) -> None:
+        from otaman_cli.console.journal import describe_action_row, read_session_actions
+
+        table = self.query_one("#session-actions", DataTable)
+        table.clear()
+        log = getattr(self.app, "session_log", None)
+        rows = read_session_actions(getattr(log, "path", None))
+        if not rows:
+            # D4's no-empty-rows rule applies to a table too: say why it is
+            # empty rather than showing a blank grid.
+            table.add_row("—", "(no decision actions recorded yet)", "", "")
+            return
+        for record in rows:
+            table.add_row(*describe_action_row(record))
+
+
 class OtamanConsole(App):
     """`otaman -i` — the human console shell."""
 
     TITLE = "Otaman Console"
+
+    #: App-level so both work from ANY screen (console-undo 1.2/1.3). A per-screen
+    #: binding would mean "what did I just do" is answerable only where you
+    #: happen to be standing, which is the gap this closes.
+    BINDINGS = [
+        Binding("u", "undo", "Undo last", priority=True, show=False),
+        Binding("ctrl+a", "session_actions", "Session actions", priority=True, show=False),
+    ]
 
     # The identity badge sits on an overlay layer docked top-right, so it rides
     # over the header's right corner on every screen (deploy 2.1 / Roman).
@@ -2489,6 +2564,60 @@ class OtamanConsole(App):
         # Per-session observability log (silent-approval-loss fix). Opened in
         # on_mount so a filesystem hiccup degrades a live app, not construction.
         self.session_log = None
+        # console-undo 1.2 — the last SUCCEEDED decision action, set by
+        # run_decision_action. `u` reverses it when the table says it can.
+        self.last_action = None
+
+    def action_undo(self) -> None:
+        """`u` — reverse the last decision action, when the table allows it (1.2)."""
+        from otaman_cli.console.undo import (
+            classify,
+            confirmation_message,
+            refusal_message,
+            write_inverse_entry,
+        )
+
+        item = getattr(self, "last_action", None)
+        if item is None:
+            self.notify("Nothing to undo in this session.", timeout=5)
+            return
+
+        reversible, _why = classify(item.action)
+        if not reversible:
+            # Named, never a bare "cannot undo": the operator needs to know
+            # WHICH consequence already left the console.
+            self.notify(refusal_message(item), severity="warning", timeout=10)
+            if self.session_log is not None:
+                self.session_log.event("undo-refused", action=item.action, target=item.target)
+            return
+
+        program = getattr(getattr(self, "screen", None), "program", None)
+        if program is None:
+            self.notify("Undo needs a program context.", severity="warning", timeout=6)
+            return
+        try:
+            from otaman_cli.console.identity import resolve_identity
+
+            stem = write_inverse_entry(program, item, resolve_identity(program.root))
+        except Exception as exc:  # noqa: BLE001 - a failed undo must be LOUD
+            self.notify(f"Undo failed — {type(exc).__name__}: {exc}", severity="error", timeout=10)
+            if self.session_log is not None:
+                self.session_log.event(
+                    "undo-failed", action=item.action, target=item.target, error=repr(exc)
+                )
+            return
+
+        if self.session_log is not None:
+            self.session_log.event(
+                "undo", action=item.action, target=item.target, inverse_stem=stem
+            )
+        # One undo per action: pressing `u` twice must not write two inverses.
+        self.last_action = None
+        self.notify(confirmation_message(item), timeout=8)
+
+    def action_session_actions(self) -> None:
+        """`ctrl+a` — what did I just do (1.3)."""
+        self.push_screen(SessionActionsScreen())
 
     def _open_session_log(self) -> None:
         # Full-session trace to ~/.otaman/console-logs/<ts>.log: no tmux on
