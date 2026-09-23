@@ -1584,9 +1584,52 @@ class RegistryDetailScreen(Screen):
         Binding("a", "accept_cost", "Accept cost", priority=True),
         Binding("c", "choose", "Choose", priority=True),
         Binding("d", "discard", "Discard", priority=True),
+        # 1.2 — the status verbs as state-derived console actions. Advertised,
+        # not hidden: an operation whose only path is a show=False key is the
+        # discoverability defect rule 5 audits for (1.4).
+        Binding("P", "promote", "Promote", priority=True),
+        Binding("D", "demote", "Demote", priority=True),
         Binding("escape", "back", "Back", priority=True),
         Binding("q", "app.quit", "Quit", priority=True),
     ]
+
+    def _status_verb(self, action: str) -> None:
+        """Run promote/demote against this node, refusing per the state machine.
+
+        The availability AND the refusal reason both come from `check_action`
+        (D2) — the console renders the machine's answer instead of deciding for
+        itself, so a status verb cannot be offered here and refused by the CLI,
+        or vice versa.
+        """
+        if self.kind != "outcome":
+            self.app.notify(f"{action} applies to outcomes, not {self.kind}s", timeout=4)
+            return
+        from otaman_cli.console.registry_detail import _find, _load_raw
+        from otaman_cli.registries.outcomes import check_action
+
+        data = _load_raw(self.program, "outcomes")
+        node = _find((data or {}).get("outcomes") or [], self.node_id)
+        if not node:
+            self.app.notify("outcome not found", severity="warning", timeout=5)
+            return
+        verdict = check_action(action, node.get("status"))
+        if not verdict.allowed:
+            self.app.notify(verdict.reason, severity="warning", timeout=8)
+            return
+        # Through the SAME verb a human would run at the shell (D4) — one write
+        # path, so the console cannot drift from the CLI's transition handling.
+        from otaman_cli.console.setup import run_verb
+
+        result = run_verb(self.program, ["outcome", action, self.node_id])
+        self.app.notify(result.output, severity="information" if result.ok else "error", timeout=8)
+        if result.ok:
+            self._reload()
+
+    def action_promote(self) -> None:
+        self._status_verb("promote")
+
+    def action_demote(self) -> None:
+        self._status_verb("demote")
 
     def __init__(self, program: Program, kind: str, node_id: str) -> None:
         super().__init__()
@@ -2520,8 +2563,12 @@ class OtamanConsole(App):
     #: binding would mean "what did I just do" is answerable only where you
     #: happen to be standing, which is the gap this closes.
     BINDINGS = [
-        Binding("u", "undo", "Undo last", priority=True, show=False),
-        Binding("ctrl+a", "session_actions", "Session actions", priority=True, show=False),
+        # ADVERTISED (rule 5 / 1.4): these were show=False when they shipped an
+        # hour ago, which made each of them an operation whose ONLY path was an
+        # unadvertised key — exactly the discoverability defect this change's
+        # audit looks for. Undo that nobody knows about protects nobody.
+        Binding("u", "undo", "Undo last", priority=True),
+        Binding("ctrl+a", "session_actions", "Session actions", priority=True),
     ]
 
     # The identity badge sits on an overlay layer docked top-right, so it rides

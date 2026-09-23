@@ -12,6 +12,7 @@ in this module check shape and intra-file invariants only.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
@@ -68,6 +69,72 @@ def promote_target(current: OutcomeStatus) -> OutcomeStatus | None:
 def demote_target(current: OutcomeStatus) -> OutcomeStatus | None:
     """Return the previous backward state for `demote`, or None if at start."""
     return _DEMOTE_BACKWARD.get(current)
+
+
+@dataclass(frozen=True)
+class ActionCheck:
+    """Whether an action is available in a status, and WHY NOT when it is not."""
+
+    allowed: bool
+    reason: str = ""
+
+
+def check_action(action: str, status: OutcomeStatus | str | None) -> ActionCheck:
+    """Whether *action* is available on an outcome in *status* (D2).
+
+    ONE source for both the verb's refusal and the console's disabled-with-reason
+    rendering. The console does not carry a table of reason strings: it calls
+    this and renders what it gets back, so a wrong reason is structurally
+    impossible rather than merely discouraged. A console-local table would drift
+    from the machine within a release — that is the whole of D2.
+
+    An unknown action or unparseable status is ALLOWED: this answers "is there a
+    state-machine reason to refuse", not "is this a real action". Inventing a
+    refusal for a verb nobody classified would block work on a guess.
+    """
+    try:
+        current = OutcomeStatus(status) if status is not None else None
+    except ValueError:
+        return ActionCheck(True)
+    if current is None:
+        return ActionCheck(True)
+
+    if action == "promote":
+        if promote_target(current) is None:
+            if current == OutcomeStatus.DONE:
+                detail = "Done is the final state — nothing to promote to"
+            else:
+                detail = f"no promote path from {current.value}"
+            return ActionCheck(False, f"promote: {detail}")
+        return ActionCheck(True)
+
+    if action == "demote":
+        if demote_target(current) is None:
+            # The reason has to be TRUE for each state, not one string reused.
+            # Drafting has nothing behind it; Done and Retired are simply not on
+            # the backward path at all. Saying "Done is the first state" would be
+            # a wrong reason — which D2 exists to make structurally impossible,
+            # and which a single generic message quietly reintroduces.
+            if current == OutcomeStatus.DRAFTING:
+                detail = "Drafting is the first state — nothing to demote to"
+            else:
+                detail = f"no demote path from {current.value}"
+            return ActionCheck(False, f"demote: {detail}")
+        return ActionCheck(True)
+
+    if action == "accept-cost":
+        # D1, ruled REFUSE over walk-it-up and warn-and-flag. accept-cost is the
+        # CEO accepting the cost of an ESTIMATED, BACKLOGGED outcome; a Drafting
+        # outcome has, by its own status definition, an incomplete statement and
+        # no estimation pass. Walking it up would perform a hidden multi-step
+        # transition — the silent-state-change class just outlawed — and
+        # warn-and-flag preserves exactly the misleading state that triggered
+        # JTBD-138: money approved for something still in draft.
+        if current == OutcomeStatus.DRAFTING:
+            return ActionCheck(False, "accept-cost: requires status Backlog — promote first")
+        return ActionCheck(True)
+
+    return ActionCheck(True)
 
 
 # Valid transition.action values for outcomes (Appendix A.5 row 3).
