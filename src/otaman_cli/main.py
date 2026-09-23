@@ -674,6 +674,7 @@ def cmd_help() -> int:
   {C.GREEN}presale{C.RESET} [name domain client]   Initialize pre-sale estimation project
   {C.GREEN}discovery{C.RESET}                     Show discovery phase status
   {C.GREEN}audit-knowledge{C.RESET}               Show tech stack knowledge audit (Claude's coverage)
+  {C.GREEN}credential-helper{C.RESET} <op>     Git credential helper (resolves secret_ref; stores nothing)
   {C.GREEN}handoff{C.RESET}                       Show handoff readiness (presale → development)
   {C.GREEN}retrospective{C.RESET} [project-code]   Post-project retrospective (updates benchmarks library)
 
