@@ -109,7 +109,9 @@ def _notify(app: object, message: str, *, error: bool) -> None:
         pass
 
 
-def run_decision_action(app: object, *, action: str, target: str, fn) -> tuple[bool, str]:
+def run_decision_action(
+    app: object, *, action: str, target: str, fn, described: str = ""
+) -> tuple[bool, str]:
     """Run a console decision action LOUDLY and JOURNALED — the silent-loss net.
 
     Records intent before the write and the outcome after, into the app's
@@ -141,8 +143,80 @@ def run_decision_action(app: object, *, action: str, target: str, fn) -> tuple[b
     ok = bool(ok)
     if log is not None:
         log.event("action-result", action=action, target=target, ok=ok, message=msg)
+    if ok:
+        # console-undo 1.2 — remember what `u` would reverse. Only a SUCCEEDED
+        # action is undoable: offering to undo something that failed would be
+        # offering to reverse work that never happened.
+        from otaman_cli.console.undo import UndoableAction
+
+        try:
+            app.last_action = UndoableAction(  # type: ignore[attr-defined]
+                action=action, target=target, described=described or target
+            )
+        except Exception:  # noqa: BLE001 - a host without the attribute is fine
+            pass
     _notify(app, msg, error=not ok)
     return ok, msg
 
 
-__all__ = ["ConsoleLog", "run_decision_action"]
+#: Journal events the session-actions view renders, mapped to how they read.
+_ACTION_EVENTS = {
+    "action-result": "",
+    "action-exception": "FAILED",
+    "undo": "undone",
+    "undo-refused": "undo refused",
+    "undo-failed": "undo FAILED",
+}
+
+
+def read_session_actions(path: Path | None, *, limit: int = 30) -> list[dict]:
+    """The recent decision actions from *path*, newest last (console-undo 1.3).
+
+    Reads the session's own JSONL log rather than keeping a second in-memory
+    list: the log is already the record, and a parallel list would be one more
+    thing that can disagree with it. A malformed line is SKIPPED, not fatal —
+    this view exists to answer "what did I just do" and must work when something
+    else has gone wrong.
+    """
+    if path is None or not path.is_file():
+        return []
+    rows: list[dict] = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict) or record.get("event") not in _ACTION_EVENTS:
+            continue
+        rows.append(record)
+    return rows[-limit:]
+
+
+def describe_action_row(record: dict) -> tuple[str, str, str, str]:
+    """``(time, action, target, outcome)`` for one journal record."""
+    event = str(record.get("event") or "")
+    ts = str(record.get("ts") or "")[11:19]  # HH:MM:SS from the ISO stamp
+    action = str(record.get("action") or "?")
+    target = str(record.get("target") or "?")
+    if event == "action-result":
+        outcome = "ok" if record.get("ok") else f"refused — {record.get('message') or ''}"
+    elif event == "action-exception":
+        outcome = f"FAILED — {record.get('error') or ''}"
+    else:
+        outcome = _ACTION_EVENTS.get(event, event)
+    return ts, action, target, outcome.strip()
+
+
+__all__ = [
+    "ConsoleLog",
+    "describe_action_row",
+    "read_session_actions",
+    "run_decision_action",
+]
