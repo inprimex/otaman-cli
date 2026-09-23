@@ -164,12 +164,18 @@ def _list(argv: list[str], root: Path, core) -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
-    entries = core.load_entries(_knowledge_dir(root))
+    all_entries = core.load_entries(_knowledge_dir(root))
+    entries = all_entries
+    # What the reader was filtering BY, so an empty result can say which filter
+    # matched nothing rather than claiming the pile is empty.
+    applied: list[str] = []
     if args.kind:
         entries = [e for e in entries if e.type == args.kind]
+        applied.append(f"type {args.kind}")
     today = _today()
     if args.past_due:
         entries = [e for e in entries if core.is_past_due(e, today)]
+        applied.append("past review")
 
     if args.json:
         import json
@@ -195,6 +201,16 @@ def _list(argv: list[str], root: Path, core) -> int:
         return 0
 
     if not entries:
+        # An empty FILTER is not an empty SURFACE (plugin-agent 20260923T191515).
+        # Reporting "nothing recorded" when five entries exist asserts something
+        # false about the pile and sends the reader to fix a problem they do not
+        # have. Which of the two is true decides the message.
+        if all_entries:
+            UI.ok(
+                f"No entries match {' and '.join(applied)} — {len(all_entries)} recorded in total."
+            )
+            UI.muted("  otaman knowledge list        (all of them)")
+            return 0
         UI.ok("No knowledge entries recorded.")
         UI.muted("  otaman knowledge add --title '…' --anchor <file:line|stem|number>")
         return 0
