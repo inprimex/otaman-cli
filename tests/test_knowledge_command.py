@@ -231,3 +231,55 @@ def test_list_json_carries_the_past_due_flag(program, capsys):
     rows = json.loads(capsys.readouterr().out)
     assert rows[0]["past_due"] is False
     assert rows[0]["anchor"] == "x.py:1"
+
+
+# ---------------------------------------------------------------------------
+# an empty FILTER is not an empty SURFACE (plugin-agent, 20260923T191515)
+
+
+def test_a_filter_matching_nothing_does_not_claim_the_pile_is_empty(program, capsys):
+    """plugin-agent hit this on their first use of `--past-due`.
+
+    Five entries existed and none were overdue. Both facts are true; the message
+    said neither — it reported "No knowledge entries recorded" and offered the
+    how-to-add hint, which asserts something false about the pile and sends the
+    reader to fix a problem they do not have.
+    """
+    cmd_knowledge(["add", "--title", "current one", "--anchor", "x.py:1", "--body", "b"])
+    capsys.readouterr()
+
+    assert cmd_knowledge(["list", "--past-due"]) == 0
+    out = capsys.readouterr().out
+    assert "No knowledge entries recorded" not in out, "an empty filter claimed an empty pile"
+    assert "1" in out, "the reader needs to know entries exist"
+    assert "past" in out.lower(), "…and which filter matched nothing"
+
+
+def test_a_type_filter_matching_nothing_says_so_too(program, capsys):
+    """Same bug, other filter — it was general to filtering, not specific to
+    --past-due; --type only looked right because plugin's pile happened to
+    contain the type they filtered for."""
+    cmd_knowledge(
+        ["add", "--title", "a lesson", "--type", "lesson", "--anchor", "x.py:1", "--body", "b"]
+    )
+    capsys.readouterr()
+
+    assert cmd_knowledge(["list", "--type", "reference"]) == 0
+    out = capsys.readouterr().out
+    assert "No knowledge entries recorded" not in out
+    assert "reference" in out
+
+
+def test_a_genuinely_empty_pile_still_says_how_to_start(program, capsys):
+    """The original message is right when it is TRUE — that is the distinction."""
+    assert cmd_knowledge(["list"]) == 0
+    out = capsys.readouterr().out
+    assert "No knowledge entries recorded" in out
+    assert "--anchor" in out
+
+
+def test_an_unfiltered_list_of_a_full_pile_is_unchanged(program, capsys):
+    cmd_knowledge(["add", "--title", "one", "--anchor", "x.py:1", "--body", "b"])
+    capsys.readouterr()
+    cmd_knowledge(["list"])
+    assert "Knowledge (1)" in capsys.readouterr().out
