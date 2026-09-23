@@ -15,6 +15,8 @@ about what is in the file is the failure the single-home rule exists to prevent.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip("otaman_core.blocked_entries")
@@ -104,67 +106,58 @@ def test_tombstoned_entries_stay_hidden(isolate_bus, monkeypatch, capsys):
     assert "gone" not in capsys.readouterr().out
 
 
-#: `## Blocked:` patterns that REMAIN in blocked.py, each with why it is still
-#: here. This is a debt register, not an exemption: a NEW one fails the test.
+#: `## Blocked:` mentions that REMAIN in blocked.py, keyed by a distinctive
+#: fragment of the line and mapped to why it is still there. A debt register,
+#: not an exemption: anything NOT listed fails the guard.
 #:
-#: They are all in the two --clear paths, which do destructive REWRITES of the
-#: blocked file rather than reads. Converting them is the right end state — core
-#: owns `tombstone()` and the sweep path already uses it — but it is not this
-#: change: core shipped a tombstone data-loss bug ten days ago (plugin-agent,
-#: core #66), so rewriting a destructive path blind, in the PR that fixes a
-#: read path, trades a visible bug for a risk of an invisible one.
-#:
-#: Reported to spec-agent as found-and-not-fixed rather than left silent.
+#: Keyed on CONTENT rather than line number, deliberately. The first version
+#: used line numbers and broke twice in one session — once when the fix above
+#: shifted the file, once from editing a docstring. A register that needs
+#: re-syncing after every unrelated edit gets re-synced carelessly, and then it
+#: is not a register.
 _KNOWN_REMAINING = {
-    172: "containment check before writing a new entry (write path, not a parse)",
-    196: "docstring prose describing the old matching rule — not code",
-    444: "docstring prose describing the sweep's own pattern — not code",
-    218: "clear: locate the exact-titled section to remove",
-    229: "clear: enumerate titles for the partial-match fallback — a real parse, 8th instance",
-    255: "clear: remove the matched section",
-    467: "clear-by-stem: split the file into sections for rewriting",
-    474: "clear-by-stem: read a section's title while rewriting",
+    'if f"## Blocked: {slug}" in existing:': (
+        "containment check before writing a new entry — a write path, not a parse"
+    ),
+    "``^## Blocked:`` regex.": "docstring prose describing the sweep's pattern — not code",
+    'r"^(## Blocked: .+?)(?=\\n## Blocked: |\\Z)",': (
+        "clear-by-stem: splits the file into sections for rewriting — the NINTH "
+        "instance, not yet converted"
+    ),
+    'title_re = re.compile(r"^## Blocked:\\s*(.+)$", re.MULTILINE)': (
+        "clear-by-stem: reads a section title while rewriting — same instance"
+    ),
 }
+
+
+def _remaining_sites() -> list[str]:
+    """Lines in blocked.py mentioning the entry heading, as stripped text."""
+    source = (
+        Path(__file__).resolve().parent.parent / "src" / "otaman_cli" / "commands" / "blocked.py"
+    ).read_text(encoding="utf-8")
+    return [
+        line.strip()
+        for line in source.splitlines()
+        if "## Blocked:" in line and not line.strip().startswith("#")
+    ]
 
 
 def test_the_list_path_carries_no_surface_local_entry_regex():
     """The generalized guard spec-agent asked for.
 
-    A check for `## Blocked:` parsing outside core would have caught the seventh
-    instance and will catch the ninth. The known remaining sites are registered
-    above with reasons; anything NEW fails here.
+    It found the seventh instance's siblings immediately; the eighth (the
+    --clear matching path) is now converted. What remains is registered above.
     """
-    from pathlib import Path
-
-    source = (
-        Path(__file__).resolve().parent.parent / "src" / "otaman_cli" / "commands" / "blocked.py"
-    ).read_text(encoding="utf-8")
-
-    found = {
-        lineno
-        for lineno, line in enumerate(source.splitlines(), 1)
-        if "## Blocked:" in line and not line.strip().startswith("#")
-    }
-    unregistered = sorted(found - set(_KNOWN_REMAINING))
+    unregistered = sorted(set(_remaining_sites()) - set(_KNOWN_REMAINING))
     assert not unregistered, (
-        "new surface-local blocked-entry parsing at line(s) "
-        f"{unregistered} — consume otaman_core.blocked_entries instead"
+        "new surface-local blocked-entry parsing:\n  "
+        + "\n  ".join(unregistered)
+        + "\nconsume otaman_core.blocked_entries instead"
     )
 
 
 def test_the_debt_register_has_no_stale_entries():
-    """A registered line that no longer matches is stale — drop it, or the
+    """A registered line that no longer exists is stale — drop it, or the
     register quietly widens the guard's blind spot."""
-    from pathlib import Path
-
-    lines = (
-        (Path(__file__).resolve().parent.parent / "src" / "otaman_cli" / "commands" / "blocked.py")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    )
-    stale = [
-        lineno
-        for lineno in _KNOWN_REMAINING
-        if lineno > len(lines) or "## Blocked:" not in lines[lineno - 1]
-    ]
+    stale = sorted(set(_KNOWN_REMAINING) - set(_remaining_sites()))
     assert not stale, f"stale debt-register entries: {stale}"

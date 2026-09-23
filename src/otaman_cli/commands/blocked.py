@@ -193,71 +193,89 @@ def cmd_blocked(args: list[str]) -> int:
 def _cmd_blocked_clear(blocked_file: Path, clear_slug: str) -> int:
     """`otaman blocked --clear <value>` — remove a blocked entry (issue #94).
 
-    Previously required *value* to equal the ENTIRE `## Blocked: <title>`
-    line exactly — a short/partial slug silently matched nothing, even
-    though `otaman blocked clear <stem>` (`_cmd_blocked_clear_by_stem`)
-    happily matches on the shorter `**Proposal**:` stem. Now:
+    Matching, most specific first:
 
-    1. Exact title match (unchanged, most specific — removes all sections
-       whose title equals *value* exactly, same as before).
-    2. Falling back when there's no exact match: any section whose title
-       CONTAINS *value* as a substring, or whose `**Proposal**:` field
-       equals *value*, is a candidate.
-       - Exactly one candidate → clear it.
-       - Zero candidates → "not found".
-       - More than one → ambiguous; list them and ask for a more specific
-         value rather than guessing which one to clear.
+    1. **Exact title.**
+    2. **Exact stable ref** — the proposal stem of an approval wait, via core's
+       ``find_by_ref``. Exact, not prefix: core's rule is that a stable id is
+       exact, because a substring match over free text is how an unrelated entry
+       gets cleared by someone else's completion.
+    3. **Substring of the title** — free text, so more than one candidate
+       REFUSES and lists them rather than guessing which was meant.
+
+    Zero candidates reports "not found" and changes nothing, which also makes a
+    second clear of the same entry a stated no-op rather than an error.
+
+    Entries are removed by their own exact block text, so every neighbour —
+    including a tombstoned or a malformed one — survives byte-identical.
     """
     if not blocked_file.is_file():
         UI.muted(f"No blocked task found: {clear_slug}")
         return 0
 
-    text = blocked_file.read_text(encoding="utf-8")
+    # Consumes core's parser (the EIGHTH surface-local instance, spec-agent GO
+    # 20260923T093222). Entries are removed by their own exact block text —
+    # `BlockedEntry.block` — rather than by a reconstructed regex, so every
+    # neighbour survives byte-identical. That is what scenario (d) is aimed at:
+    # a title-keyed rewrite is precisely where a tombstoned or malformed
+    # neighbour gets swallowed, and core #66 was that failure in the other
+    # direction.
+    from otaman_cli.blocked_gate import REMEDY, blocked_entries
 
-    exact_pattern = re.compile(
-        rf"^## Blocked: {re.escape(clear_slug)}\s*\n.*?(?=^## Blocked:|\Z)",
-        re.MULTILINE | re.DOTALL,
-    )
-    new_text = exact_pattern.sub("", text).rstrip("\n")
-    if new_text != text.rstrip("\n"):
-        blocked_file.write_text(new_text + "\n" if new_text else "", encoding="utf-8")
-        UI.ok(f"Cleared blocked task: {clear_slug}")
-        return 0
-
-    # No exact title match — fall back to substring-of-title or proposal-stem.
-    section_re = re.compile(
-        r"^## Blocked: (.+?)$(.*?)(?=^## Blocked:|\Z)",
-        re.MULTILINE | re.DOTALL,
-    )
-    proposal_field_re = re.compile(r"\*\*Proposal\*\*:\s*(\S+)")
-
-    candidates: list[str] = []  # matched titles, in file order
-    for m in section_re.finditer(text):
-        title = m.group(1).strip()
-        body = m.group(2)
-        proposal_m = proposal_field_re.search(body)
-        proposal_stem = proposal_m.group(1).strip() if proposal_m else None
-        if clear_slug in title or proposal_stem == clear_slug:
-            candidates.append(title)
-
-    if not candidates:
-        UI.muted(f"No blocked task found: {clear_slug}")
-        return 0
-
-    if len(candidates) > 1:
-        UI.error(f"'{clear_slug}' matches {len(candidates)} blocked entries — be more specific")
-        for title in candidates:
-            UI.muted(f"  {title}")
+    mod = blocked_entries()
+    if mod is None:
+        UI.error(REMEDY)
         return 1
 
-    matched_title = candidates[0]
-    match_pattern = re.compile(
-        rf"^## Blocked: {re.escape(matched_title)}\s*\n.*?(?=^## Blocked:|\Z)",
-        re.MULTILINE | re.DOTALL,
-    )
-    new_text = match_pattern.sub("", text).rstrip("\n")
-    blocked_file.write_text(new_text + "\n" if new_text else "", encoding="utf-8")
-    UI.ok(f"Cleared blocked task: {matched_title} (matched '{clear_slug}')")
+    text = blocked_file.read_text(encoding="utf-8")
+    entries = mod.parse_entries(text)
+
+    def _remove(entry) -> int:
+        remaining = text.replace(entry.block, "", 1).rstrip("\n")
+        blocked_file.write_text(remaining + "\n" if remaining else "", encoding="utf-8")
+        return 0
+
+    # 1. Exact title.
+    exact = [e for e in entries if e.title == clear_slug]
+    if len(exact) == 1:
+        _remove(exact[0])
+        UI.ok(f"Cleared blocked task: {clear_slug}")
+        return 0
+    if len(exact) > 1:
+        UI.error(f"'{clear_slug}' matches {len(exact)} blocked entries — be more specific")
+        for e in exact:
+            UI.muted(f"  {e.display_title}")
+        return 1
+
+    # 2. Exact stable ref (the proposal stem for an approval wait).
+    #    EXACT, per core's own rule: a stable id is exact, and a substring match
+    #    over free text is how an unrelated entry gets cleared by someone else's
+    #    completion. A PREFIX of a stem therefore does not match — see the note
+    #    in tests/test_blocked_clear_consumes_core.py.
+    by_ref = mod.find_by_ref(text, clear_slug)
+    if len(by_ref) == 1:
+        _remove(by_ref[0])
+        UI.ok(f"Cleared blocked task: {by_ref[0].display_title} (matched ref '{clear_slug}')")
+        return 0
+    if len(by_ref) > 1:
+        UI.error(f"'{clear_slug}' matches {len(by_ref)} blocked entries — be more specific")
+        for e in by_ref:
+            UI.muted(f"  {e.display_title}")
+        return 1
+
+    # 3. Substring of the TITLE — free text, so ambiguity refuses rather than
+    #    guessing which one the operator meant.
+    partial = [e for e in entries if clear_slug in e.title]
+    if not partial:
+        UI.muted(f"No blocked task found: {clear_slug}")
+        return 0
+    if len(partial) > 1:
+        UI.error(f"'{clear_slug}' matches {len(partial)} blocked entries — be more specific")
+        for e in partial:
+            UI.muted(f"  {e.display_title}")
+        return 1
+    _remove(partial[0])
+    UI.ok(f"Cleared blocked task: {partial[0].display_title} (matched '{clear_slug}')")
     return 0
 
 
