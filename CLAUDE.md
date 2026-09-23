@@ -40,6 +40,24 @@ manifest-named files, checks each one's content hash first, and keeps anything
 edited since the cut — that text was never released, so it belongs to the next
 one.
 
+## Git credentials
+
+Never put a token in a remote URL, an askpass script, or a tenant-local shim.
+Register the connection once (values-free — `secret_ref` is a key name, never a
+value) and wire the shipped helper:
+
+```
+git config credential.helper '!otaman credential-helper'
+```
+
+It resolves the connection's `secret_ref` from the credential cascade at the
+moment git asks, and writes the value nowhere: git's `store` operation is a
+deliberate no-op, because honouring it would persist the token on the first
+successful push and recreate the problem the helper exists to remove.
+
+A host with no registered connection gets no credential and git falls through
+to its next helper — the refusal is silent to git and explained on stderr.
+
 ## AI assistants
 
 Follow `CONTRIBUTING.md` and keep CI green. Repo-local operational

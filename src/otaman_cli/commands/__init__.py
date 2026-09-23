@@ -82,6 +82,7 @@ from otaman_cli.commands import (  # noqa: E402
 from otaman_cli.commands import complete as _complete  # noqa: E402,F401
 from otaman_cli.commands import connection as _connection  # noqa: E402,F401
 from otaman_cli.commands import console_seat as _console_seat  # noqa: E402,F401
+from otaman_cli.commands import credential_helper as _credential_helper  # noqa: E402,F401
 from otaman_cli.commands import doctor as _doctor  # noqa: E402,F401
 from otaman_cli.commands import emergency_halt as _emergency_halt  # noqa: E402,F401
 from otaman_cli.commands import git_host as _git_host  # noqa: E402,F401
