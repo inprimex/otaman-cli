@@ -510,9 +510,18 @@ def _amend(argv: list[str], root: Path, core) -> int:
         anchor=args.anchor,
         title=args.title,
         body=body,
-        # Inherit the superseded entry's partition when it HAS one; a pre-v2
-        # entry carries `function=""`, which validation rejects — so inheriting
-        # blindly would make every correction to a legacy entry impossible.
+        # Inherit the superseded entry's partition when it HAS one, and derive
+        # one when it does not.
+        #
+        # The original reason for the fallback was that `function=""` failed
+        # validation, so inheriting it blindly made legacy entries unamendable.
+        # Core #83 removed that: an empty function is now a legacy/unassigned
+        # entry, read not rejected. The fallback STAYS, for a different and
+        # better reason — core's own ruling that "the OLD entry stays
+        # function='' and valid; your NEW correcting entry carries the derived
+        # function as before". A correction is a new entry written today, and a
+        # new entry belongs in a partition; inheriting the legacy blank would
+        # file it where no index will scope it.
         function=superseded.function or _resolve_function(root, core, None)[0],
         domain=superseded.domain,
     )
