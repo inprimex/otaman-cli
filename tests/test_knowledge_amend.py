@@ -22,6 +22,13 @@ from otaman_core import knowledge as core  # noqa: E402
 
 from otaman_cli.commands.knowledge import cmd_knowledge  # noqa: E402
 
+#: A partition that is NOT the fallback, derived from core rather than named.
+#: These tests originally hardcoded "strategy"; core #82 replaced the seeded
+#: three with Roman's fixed eight and removed it, turning cli main red against
+#: core main. A sibling's enum VALUES are its to change — what these tests
+#: actually care about is "some partition other than the default", so they ask.
+OTHER_FUNCTION = next(f for f in core.FUNCTIONS if f != core.FUNCTION_DEVELOPMENT)
+
 
 @pytest.fixture
 def program(isolate_bus, monkeypatch):
@@ -221,11 +228,11 @@ def test_a_budget_never_truncates_silently(program, capsys):
 def test_partition_scoping_filters_and_names_the_filter(program, capsys):
     _add("dev thing", body="b")
     capsys.readouterr()
-    cmd_knowledge(["list", "--function", "strategy"])
+    cmd_knowledge(["list", "--function", OTHER_FUNCTION])
     out = capsys.readouterr().out
     # The partition is named; the active-only default is named alongside it,
     # which is correct — both filters were applied.
-    assert "partition strategy" in out
+    assert f"partition {OTHER_FUNCTION}" in out
     assert "recorded in total" in out
 
 
@@ -282,15 +289,16 @@ def test_a_declared_partition_map_is_used(program, capsys):
     (program / "platform.yaml").write_text(
         "project: demo\nversion: '1.0'\nrepos: []\n"
         "program:\n  processes:\n    knowledge:\n      partitions:\n"
-        "        strategy: cli-agent\n        development: someone-else\n",
+        f"        {OTHER_FUNCTION}: cli-agent\n"
+        f"        {core.FUNCTION_DEVELOPMENT}: someone-else\n",
         encoding="utf-8",
     )
     _add("mine", body="b")
     out = capsys.readouterr().out
     assert "no knowledge partitions declared" not in out
-    assert core.load_entries(_dir(program))[0].function == "strategy"
+    assert core.load_entries(_dir(program))[0].function == OTHER_FUNCTION
 
 
 def test_an_explicit_function_overrides_the_derivation(program):
-    _add("explicit", body="b", function="support")
-    assert core.load_entries(_dir(program))[0].function == "support"
+    _add("explicit", body="b", function=OTHER_FUNCTION)
+    assert core.load_entries(_dir(program))[0].function == OTHER_FUNCTION
