@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "otaman-bus": {
+      "command": "/home/otaman-dev/.local/venv/otaman/bin/python",
+      "args": [
+        "-m",
+        "otaman_plugin.servers.bus_server"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+    "otaman-estimation": {
+      "command": "/home/otaman-dev/.local/venv/otaman/bin/python",
+      "args": [
+        "-m",
+        "otaman_plugin.servers.estimation_server"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}
