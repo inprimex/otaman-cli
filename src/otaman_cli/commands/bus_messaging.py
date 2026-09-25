@@ -945,6 +945,12 @@ def _status_hook_after_ack(root: Path, agent: str, msg_files: list[Path]) -> Non
         return  # first task-assignment in this ack batch is enough
 
 
+#: The dispatcher names the change two ways — in the subject ("Tasks assigned
+#: from \u2026") and in the body ("from the feature \u2026"). Module-level so the
+#: pattern is named once and no formatter has to decide how to wrap it.
+_CHANGE_NAME_RE = re.compile(r'(?:Tasks assigned from|from the feature)\s+["\u201c](.+?)["\u201d]')
+
+
 def _parse_task_and_change_from_body(body: str) -> tuple[str | None, str | None]:
     """Best-effort: pull task + change from a task-assignment body.
 
@@ -998,9 +1004,7 @@ def _parse_task_and_change_from_body(body: str) -> tuple[str | None, str | None]
             # ("Tasks assigned from \u2026") and in the body ("from the feature
             # \u2026"). Match either, with or without the `## Subject:` prefix,
             # and tolerate curly quotes.
-            m = re.search(
-                r'(?:Tasks assigned from|from the feature)\s+["\u201c](.+?)["\u201d]', s
-            )
+            m = _CHANGE_NAME_RE.search(s)
             if m:
                 change = m.group(1).strip()
                 continue
