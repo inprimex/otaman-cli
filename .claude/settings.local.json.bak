@@ -1,0 +1,6 @@
+{
+  "enabledMcpjsonServers": [
+    "otaman-bus",
+    "otaman-estimation"
+  ]
+}

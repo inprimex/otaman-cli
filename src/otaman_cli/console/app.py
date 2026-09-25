@@ -2554,6 +2554,86 @@ class SessionActionsScreen(Screen):
             table.add_row(*describe_action_row(record))
 
 
+class SessionFreshnessScreen(Screen):
+    """Is what is RUNNING still the thing the config describes? (1.3)
+
+    Renders plugin's verdicts from plugin's computation — `assess()` — because
+    the defect this change exists for is a running session silently outliving
+    its inputs, and two checkers that disagreed about "stale" would reproduce
+    that one level up. cli owns the rendering; plugin owns the checks.
+    """
+
+    BINDINGS = [
+        Binding("escape", "back", "Back", priority=True),
+        Binding("r", "refresh", "Refresh", priority=True),
+        Binding("q", "app.quit", "Quit", priority=True),
+    ]
+
+    def __init__(self, program: Program) -> None:
+        super().__init__()
+        self.program = program
+
+    def compose(self) -> ComposeResult:
+        yield _header()
+        yield _mode_banner(
+            f"Runtime freshness — {self.program.name}",
+            "↑↓ scroll · r refresh · esc back · q quit",
+        )
+        yield Static("", id="freshness-summary", markup=False)
+        table = DataTable(id="freshness-rows", zebra_stripes=True, cursor_type="row")
+        yield table
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.query_one("#freshness-rows", DataTable).add_columns(
+            "verdict", "check", "subject", "what it means"
+        )
+        self._load()
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+    def action_refresh(self) -> None:
+        # Freshness is a read of live processes and file mtimes, not of the
+        # cached program model — but `r` means "read the world again" on every
+        # screen, and the invariant is worth more than the microsecond.
+        invalidate_read_caches()
+        self._load()
+
+    def _load(self) -> None:
+        from otaman_cli.console.freshness import (
+            VERDICT_FRESH,
+            VERDICT_NOT_CHECKED,
+            VERDICT_SKEWED,
+            VERDICT_STALE,
+            assess_rows,
+            summarize,
+        )
+
+        rows = assess_rows(self.program.root)
+        self.query_one("#freshness-summary", Static).update(f"  {summarize(rows)}")
+
+        from rich.text import Text
+
+        #: One style per verdict, from the palette's own vocabulary. `stale` is
+        #: the only one that means "act now", so it is the only red.
+        style_for = {
+            VERDICT_STALE: "bold red",
+            VERDICT_SKEWED: "yellow",
+            VERDICT_NOT_CHECKED: "yellow",
+            VERDICT_FRESH: "green",
+        }
+
+        table = self.query_one("#freshness-rows", DataTable)
+        table.clear()
+        for row in rows:
+            verdict = Text(row.verdict, style=style_for.get(row.verdict, ""))
+            # The remedy rides in the same cell as the reason: a verdict the
+            # reader cannot act on is a verdict that gets ignored.
+            meaning = row.reason + (f"  →  {row.remedy}" if row.remedy else "")
+            table.add_row(verdict, row.check, row.subject, meaning)
+
+
 class OtamanConsole(App):
     """`otaman -i` — the human console shell."""
 
@@ -2569,6 +2649,9 @@ class OtamanConsole(App):
         # audit looks for. Undo that nobody knows about protects nobody.
         Binding("u", "undo", "Undo last", priority=True),
         Binding("ctrl+a", "session_actions", "Session actions", priority=True),
+        # ADVERTISED, per this console's own show=False audit (sdca 1.4): a
+        # staleness view nobody can find does not prevent a stale session.
+        Binding("ctrl+f", "session_freshness", "Runtime freshness", priority=True),
     ]
 
     # The identity badge sits on an overlay layer docked top-right, so it rides
@@ -2663,8 +2746,16 @@ class OtamanConsole(App):
         self.notify(confirmation_message(item), timeout=8)
 
     def action_session_actions(self) -> None:
-        """`ctrl+a` — what did I just do (1.3)."""
+        """`ctrl+a` — what did I just do (console-undo 1.3)."""
         self.push_screen(SessionActionsScreen())
+
+    def action_session_freshness(self) -> None:
+        """`ctrl+f` — is what is running still what the config describes (srf 1.3)."""
+        program = getattr(getattr(self, "screen", None), "program", None)
+        if program is None:
+            self.notify("Runtime freshness needs a program context.", timeout=5)
+            return
+        self.push_screen(SessionFreshnessScreen(program))
 
     def _open_session_log(self) -> None:
         # Full-session trace to ~/.otaman/console-logs/<ts>.log: no tmux on
