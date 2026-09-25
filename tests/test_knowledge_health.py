@@ -149,9 +149,16 @@ def test_known_keys_are_derived_from_cores_schema_not_hardcoded():
 
 
 def test_the_known_gap_is_stated():
-    """The register. A gap that stops being written down stops being fixed."""
-    doc = health.out_of_band_edits.__doc__ or ""
+    """The register. A gap that stops being written down gets re-litigated by
+    the next reader who sees only the hole — so the docstring must carry both
+    the gap AND core's ruling against closing it with a schema field."""
+    # Whitespace-normalised: the assertion is about what the register SAYS, and
+    # a guard that breaks when a paragraph is re-wrapped gets "fixed" by
+    # loosening it, which is how a register quietly stops being one.
+    doc = " ".join((health.out_of_band_edits.__doc__ or "").split())
     assert "GAP" in doc and "BODY PROSE" in doc
+    assert "content hash" in doc and "ruled against" in doc
+    assert "git" in doc, "the ruled alternative must be named, or it is re-derived"
 
 
 # ---------------------------------------------------------------------------

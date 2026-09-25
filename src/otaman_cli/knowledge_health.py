@@ -131,13 +131,27 @@ def out_of_band_edits(knowledge_dir: Path, core: Any) -> list[Finding]:
       parsing silently DROPS it, so the next write would destroy it; and
     * an entry that fails core's own validation.
 
-    KNOWN GAP, stated because an unstated gap reads as coverage: an edit to a
-    known field's value, or to BODY PROSE, is indistinguishable from a CLI
-    write and is invisible here. Catching it needs a content hash the schema
-    does not carry; core has been asked whether one belongs there (kv2 2.2).
-    Until it does, THIS PARAGRAPH is the register — `test_the_known_gap_is_stated`
-    fails if it disappears, so the hole cannot be quietly undocumented while it
-    is still open.
+    KNOWN GAP, and a RULED one: an edit to a known field's value, or to BODY
+    PROSE, is indistinguishable from a CLI write and is invisible here.
+
+    Closing it would need a content hash on the entry, and core ruled against
+    that (2026-09-25, in answer to this module's question). Three reasons, kept
+    here so the question is not re-opened by someone who only sees the hole:
+    the vault is human-editable by design, so a hash is a line a human sees and
+    does not understand, and a legitimate prose fix in Obsidian then reports as
+    drift until re-blessed — cry-wolf, needing a bless verb that does not
+    exist; git ALREADY is the byte-level record (design D1), with author and
+    time, for free; and the cases that actually destroy something — a dropped
+    unknown key, an invalid entry — are the ones already caught above. The
+    remaining case looks benign because it usually is: a human improving prose
+    in the lens the vault was built for. Flagging it fights the feature.
+
+    If byte-drift detection is ever genuinely needed, the ruled direction is a
+    git-backed doctor check (files changed since the verb's last commit, or
+    commits not authored by the verb) — not a schema field.
+
+    THIS PARAGRAPH is the register: `test_the_known_gap_is_stated` fails if it
+    disappears, so the hole stays admitted in executable form.
     """
     if not knowledge_dir.is_dir():
         return []
