@@ -1350,6 +1350,7 @@ def cmd_doctor(args: list[str]) -> int:
         "repo_owner_registration": "Repo Owners (registry match)",
         "tmux_global_agent_env": "Agent Identity Scope (tmux)",
         "orphan_status_files": "Status Files (orphans)",
+        "knowledge_health": "Knowledge Vault (decay/drift/ownership)",
     }
 
     for check in checks:

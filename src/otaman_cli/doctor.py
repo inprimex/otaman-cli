@@ -22,6 +22,7 @@ Exit codes:
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import re
@@ -1330,6 +1331,90 @@ def check_git_host(project_root: Path) -> dict[str, Any]:
     return result
 
 
+def check_knowledge_health(project_root: Path) -> dict[str, Any]:
+    """Knowledge vault health — decay, out-of-band edits, ownership (kv2 2.2).
+
+    Reports only. Doctor never modifies files (the stated invariant of this
+    module), so the sweep that actually moves entries to dormant lives behind
+    `otaman knowledge sweep --apply` and this check points at it — the same
+    shape as `openspec` pointing at `otaman validate docs --fix`.
+
+    An ownership map that does not exist yields WARN/not-checked, never `ok`.
+    A health surface reporting `[OK]` for a check it never ran is the defect
+    this repo has now shipped twice.
+    """
+    result: dict[str, Any] = {"check": "knowledge_health", "status": "ok", "details": {}}
+    try:
+        from otaman_core import knowledge as core
+
+        from otaman_cli import knowledge_health as health
+    except Exception as exc:  # noqa: BLE001 - old bundle → not-checked, not "clean"
+        result["status"] = "warn"
+        result["details"]["skipped"] = f"knowledge support unavailable: {exc}"
+        return result
+
+    directory = project_root / ".agents" / "knowledge"
+    if not directory.is_dir():
+        result["details"]["vault"] = "no .agents/knowledge yet — nothing to check"
+        return result
+
+    today = datetime.date.today().isoformat()
+    entries = core.load_entries(directory)
+    decayed = health.decay_candidates(entries, today)
+    drifted = health.out_of_band_edits(directory, core)
+    owned = health.ownership_violations(entries, _knowledge_partitions(project_root))
+
+    result["details"]["entries"] = len(entries)
+    issues: list[dict[str, Any]] = []
+
+    if decayed:
+        result["status"] = "warn"
+        result["details"]["unreinforced"] = len(decayed)
+        for f in decayed[:5]:
+            issues.append(
+                {"severity": "low", "message": f"knowledge {f.stem}: {f.detail}", "fix": f.remedy}
+            )
+    if drifted:
+        result["status"] = "warn"
+        result["details"]["edited_out_of_band"] = len(drifted)
+        for f in drifted[:5]:
+            issues.append(
+                {"severity": "low", "message": f"knowledge {f.stem}: {f.detail}", "fix": f.remedy}
+            )
+    for f in owned:
+        if f.kind == health.NOT_CHECKED:
+            result["status"] = "warn"
+            result["details"]["ownership"] = "NOT CHECKED — " + f.detail
+        else:
+            result["status"] = "warn"
+            issues.append(
+                {
+                    "severity": "medium",
+                    "message": f"knowledge {f.stem}: {f.detail}",
+                    "fix": f.remedy,
+                }
+            )
+
+    if decayed or drifted:
+        result["details"]["sweep"] = "otaman knowledge sweep  (doctor never modifies files)"
+    if issues:
+        result["issues"] = issues
+    return result
+
+
+def _knowledge_partitions(project_root: Path) -> dict[str, str] | None:
+    """`{function: owner}` from platform.yaml, or None when unset/unreadable."""
+    try:
+        import yaml
+
+        cfg = yaml.safe_load((project_root / "platform.yaml").read_text(encoding="utf-8")) or {}
+        node = ((cfg.get("program") or {}).get("processes") or {}).get("knowledge") or {}
+        raw = node.get("partitions") or {}
+        return {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else None
+    except Exception:  # noqa: BLE001 - unreadable config → not-checked, never "clean"
+        return None
+
+
 def check_plugin_doctor(project_root: Path) -> dict[str, Any]:
     """Run plugin-side doctor checks (M4_PLUGIN_DIR_DRIFT, M4_WSL_PATH_UNDER_SSH,
     M13B_MISSING_CONTINUE_FLAG) via otaman_plugin.doctor_checks.run_all_checks().
@@ -1904,6 +1989,7 @@ def run_doctor(project_root: Path) -> dict[str, Any]:
         check_tmux_global_agent_env(),
         check_orphan_status_files(project_root, known_agents),
         check_plugin_doctor(project_root),
+        check_knowledge_health(project_root),
         check_human_roster(config),
         check_edition_consistency(),
         check_branch_policy(config, project_root),

@@ -95,8 +95,13 @@ def _configured_path(program: Program, key: str, cfg: object) -> Path | None:
     return home / str(name or f"{key}.yaml")
 
 
-def _entry_rows(path: Path) -> list[tuple[str, str]]:
+def entry_rows(path: Path) -> list[tuple[str, str]]:
     """``[(id, title), ...]`` from a registry file of UNKNOWN schema.
+
+    Public because `domain:` validation (knowledge-v2 2.3) reads the vocabulary
+    registry through this same reader. The four sibling registries are still
+    unbuilt and their schemas are spec-agent's to define, so a second
+    schema-guessing reader would be two guesses to reconcile when they land.
 
     Accepts either a top-level list or a mapping whose first list-of-mappings
     value is the entries (``vocabulary: [...]``, ``risks: [...]``, …). Anything
@@ -167,7 +172,7 @@ def discover(program: Program) -> list[ExtraRegistry]:
                 key=key,
                 path=path,
                 exists=exists,
-                entries=_entry_rows(path) if exists and path else [],
+                entries=entry_rows(path) if exists and path else [],
             )
         )
     return out
