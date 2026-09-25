@@ -155,9 +155,15 @@ def test_a_correction_inherits_the_type_unless_told_otherwise(program):
 
 
 def test_a_legacy_entry_with_no_partition_can_still_be_amended(program):
-    """Pre-v2 entries carry function="" which validation REJECTS, so inheriting
-    it blindly would make every correction to a legacy entry impossible — and
-    gate 4.1's own test subject is a legacy entry."""
+    """A correction to a legacy entry lands in a partition; the legacy entry
+    keeps its blank one.
+
+    Core #83 made `function=""` valid rather than rejected, which removed the
+    ORIGINAL reason for deriving a partition here. The behaviour is unchanged
+    because the real reason survives it: a correction is a new entry written
+    today, and one filed with a blank partition is scoped into no agent's
+    index. Gate 4.1's own subject is a legacy entry.
+    """
     legacy = core.KnowledgeEntry(
         type="lesson",
         author="plugin-agent",
@@ -178,6 +184,13 @@ def test_a_legacy_entry_with_no_partition_can_still_be_amended(program):
     )
     correcting = [e for e in core.load_entries(_dir(program)) if e.supersedes == legacy.stem]
     assert correcting and correcting[0].function in core.FUNCTIONS
+
+    # Core's other half: the superseded entry is untouched and still valid with
+    # no partition. A "fix" that backfilled one onto the original would rewrite
+    # the record of what was believed — the thing the amend edge exists to avoid.
+    after = core.load_entry_by_stem(_dir(program), legacy.stem)
+    assert after.function == ""
+    assert core.validate_entry(after) == []
 
 
 # ---------------------------------------------------------------------------
