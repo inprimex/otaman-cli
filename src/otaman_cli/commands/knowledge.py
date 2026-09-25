@@ -147,6 +147,9 @@ def _add(argv: list[str], root: Path, core) -> int:
     parser.add_argument(
         "--function", default=None, help="knowledge partition (derived from the map by default)"
     )
+    parser.add_argument(
+        "--domain", default="", help="industry vocabulary term (validated against the registry)"
+    )
     args = parser.parse_args(argv)
 
     body = args.body
@@ -164,6 +167,18 @@ def _add(argv: list[str], root: Path, core) -> int:
     created = args.created or _today()
     review_by = args.review_by or _default_review_by(created)
 
+    # `domain:` is the PROGRAM's vocabulary, so it is validated here and not by
+    # core (kv2 2.3). Refusal names the registry; acceptance without a registry
+    # says so rather than implying the term was checked.
+    from otaman_cli import vocabulary
+
+    domain_ok, domain_note = vocabulary.check_domain(root, getattr(args, "domain", ""))
+    if not domain_ok:
+        UI.error("Refusing to record this entry:")
+        for line in domain_note.splitlines():
+            UI.muted(f"  {line}" if line.startswith("  ") else f"  - {line}")
+        return 2
+
     function, fn_note = _resolve_function(root, core, getattr(args, "function", None))
     entry = core.KnowledgeEntry(
         type=args.kind,
@@ -174,6 +189,7 @@ def _add(argv: list[str], root: Path, core) -> int:
         title=args.title,
         body=body,
         function=function,
+        domain=(getattr(args, "domain", "") or "").strip(),
     )
 
     errors = core.validate_entry(entry)
@@ -232,6 +248,8 @@ def _add(argv: list[str], root: Path, core) -> int:
     )
     if fn_note:
         UI.warn(f"  {fn_note}")
+    if domain_note:
+        UI.warn(f"  {domain_note}")
     return 0
 
 
@@ -530,6 +548,100 @@ def _amend(argv: list[str], root: Path, core) -> int:
     return 0
 
 
+def _partitions(root: Path) -> dict[str, str] | None:
+    """`{function: owner}` from platform.yaml, or None when unset.
+
+    None and `{}` mean the same thing here and both must stay distinguishable
+    from "checked, none found" downstream — see `ownership_violations`.
+    """
+    try:
+        import yaml
+
+        cfg = yaml.safe_load((root / "platform.yaml").read_text(encoding="utf-8")) or {}
+        node = ((cfg.get("program") or {}).get("processes") or {}).get("knowledge") or {}
+        raw = node.get("partitions") or {}
+        return {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else None
+    except Exception:  # noqa: BLE001 - unreadable config → not-checked, never "clean"
+        return None
+
+
+def _sweep(argv: list[str], root: Path, core) -> int:
+    """`otaman knowledge sweep [--apply] [--restore <stem>]` (knowledge-v2 2.2).
+
+    Reports by default and mutates only under `--apply`, because a verb that
+    retires things as a side effect of being asked a question is one nobody can
+    afford to run to find out.
+    """
+    from otaman_cli import knowledge_health as health
+
+    apply = "--apply" in argv
+    rest = [a for a in argv if a != "--apply"]
+    restore = ""
+    if "--restore" in rest:
+        i = rest.index("--restore")
+        if i + 1 >= len(rest):
+            return _bail("Usage: otaman knowledge sweep --restore <stem>", code=2)
+        restore = rest[i + 1]
+
+    directory = _knowledge_dir(root)
+
+    if restore:
+        if core.load_entry_by_stem(directory, restore) is None:
+            return _bail(f"No knowledge entry with stem {restore!r} to restore.")
+        core.set_state(directory, restore, core.STATE_ACTIVE)
+        UI.ok(f"Restored {restore} to active.")
+        return 0
+
+    entries = core.load_entries(directory)
+    decayed = health.decay_candidates(entries, _today())
+    drifted = health.out_of_band_edits(directory, core)
+    owned = health.ownership_violations(entries, _partitions(root))
+
+    print()
+    UI.header("Knowledge sweep")
+
+    if not decayed:
+        UI.muted("  Decay: no active entry is past review-by and unread since.")
+    else:
+        UI.warn(f"  Decay: {len(decayed)} entr{'y' if len(decayed) == 1 else 'ies'} unreinforced")
+        for f in decayed:
+            UI.muted(f"    - {f.stem}")
+            UI.muted(f"      {f.detail}")
+
+    if drifted:
+        UI.warn(f"  Out-of-band: {len(drifted)} entr{'y' if len(drifted) == 1 else 'ies'} edited")
+        for f in drifted:
+            UI.muted(f"    - {f.stem}: {f.detail}")
+
+    for f in owned:
+        if f.kind == health.NOT_CHECKED:
+            UI.warn(f"  Ownership: NOT CHECKED — {f.detail}")
+            UI.muted(f"    {f.remedy}")
+        else:
+            UI.warn(f"  Ownership: {f.stem} — {f.detail}")
+
+    if not apply:
+        if decayed:
+            print()
+            UI.muted("  Nothing was changed. `otaman knowledge sweep --apply` moves the")
+            UI.muted("  decayed entries to dormant; `otaman knowledge show <stem>` keeps one")
+            UI.muted("  active by reinforcing it.")
+        return 0
+
+    moved = 0
+    for f in decayed:
+        if core.set_state(directory, f.stem, core.STATE_DORMANT) is not None:
+            moved += 1
+            UI.muted(f"    dormant: {f.stem} — {f.detail}")
+    print()
+    if moved:
+        UI.ok(f"Moved {moved} entr{'y' if moved == 1 else 'ies'} to dormant (reversible:")
+        UI.muted("  `otaman knowledge sweep --restore <stem>`). Only `state:` changed.")
+    else:
+        UI.muted("  Nothing to move.")
+    return 0
+
+
 def cmd_knowledge(args: list[str]) -> int:
     if not args or args[0] in {"-h", "--help", "help"}:
         UI.info("otaman knowledge <subcommand>")
@@ -561,6 +673,8 @@ def cmd_knowledge(args: list[str]) -> int:
         return _show(rest, root, core)
     if sub == "amend":
         return _amend(rest, root, core)
+    if sub == "sweep":
+        return _sweep(rest, root, core)
     return _bail(f"unknown `otaman knowledge` subcommand: {sub!r}")
 
 
@@ -568,7 +682,7 @@ register(
     CommandSpec(
         name="knowledge",
         handler=cmd_knowledge,
-        help="Durable agent knowledge: add | list | show",
+        help="Durable agent knowledge: add | list | show | amend | sweep",
     )
 )
 
