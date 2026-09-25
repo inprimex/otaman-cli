@@ -109,6 +109,62 @@ def _is_spec_agent(agent: str) -> bool:
     return agent == "spec-agent"
 
 
+def _changes_root(root: Path) -> Path | None:
+    """`<specs>/openspec/changes`, or None when the specs repo is not resolvable."""
+    specs_rel = _read_platform_specs_path(root)
+    if not specs_rel:
+        return None
+    specs_dir = (root / specs_rel).resolve()
+    if not specs_dir.is_dir():
+        return None  # specs repo not checked out here — cannot check, not "invalid"
+    changes = specs_dir / "openspec" / "changes"
+    return changes if changes.is_dir() else None
+
+
+def check_change_exists(root: Path, change_name: str) -> tuple[bool, str]:
+    """``(accepted, note)`` — does *change_name* name a real change?
+
+    `otaman complete` used to accept ANY string and report "spec-agent will tick
+    tasks.md on next session start" for a tasks.md that does not exist. The
+    completion then routes to spec-agent, who finds nothing to tick, while the
+    caller has already been told the work is filed — a verb reporting success
+    for work it did not do, which is what no-silent-success forbids.
+
+    A typo is the common case and the expensive one: `otaman complete
+    sesion-runtime-freshness --all` exits 0 today and the real change is never
+    ticked. So a near-miss is named rather than just refused.
+
+    Refuses ONLY when the changes directory is readable and the name is absent
+    from both `changes/` and `archive/`. An unresolvable specs repo means the
+    check could not run, which warns and proceeds — losing a quality gate on
+    an unreadable sibling is acceptable and stated; refusing would make
+    `complete` unusable wherever the specs repo is not checked out.
+    """
+    changes = _changes_root(root)
+    if changes is None:
+        return True, (
+            "could not verify the change name — no readable specs repo here, "
+            "so a typo would not be caught"
+        )
+
+    if (changes / change_name).is_dir():
+        return True, ""
+    archive = changes / "archive" / change_name
+    if archive.is_dir():
+        return True, f"{change_name!r} is already archived — filing completion against it anyway"
+
+    known = sorted(d.name for d in changes.iterdir() if d.is_dir() and d.name != "archive")
+    import difflib
+
+    near = difflib.get_close_matches(change_name, known, n=3, cutoff=0.6)
+    note = f"no change named {change_name!r} in {changes}"
+    if near:
+        note += "\n  Did you mean: " + ", ".join(near) + "?"
+    elif known:
+        note += "\n  Active changes: " + ", ".join(known[:8])
+    return False, note
+
+
 def cmd_complete(args: list[str]) -> int:
     """Report task completion: send bus notification + (spec-agent only) tick tasks.md.
 
@@ -161,7 +217,18 @@ def cmd_complete(args: list[str]) -> int:
         UI.muted(f"  otaman complete {change_name} --all")
         return 1
 
+    # no-silent-success: a completion filed against a change that does not
+    # exist reports success for work nothing will ever tick.
+    change_ok, change_note = check_change_exists(root, change_name)
+    if not change_ok:
+        UI.error("Refusing to file this completion:")
+        for line in change_note.splitlines():
+            UI.muted(f"  {line}" if line.startswith("  ") else f"  - {line}")
+        return 2
+
     UI.header("Task Completion")
+    if change_note:
+        UI.warn(f"  {change_note}")
 
     # Get agent identity: CWD→repo→owner → .agents/current-agent → "unknown-agent"
     agent = resolve_agent_identity(root) or "unknown-agent"
