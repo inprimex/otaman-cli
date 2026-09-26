@@ -128,7 +128,13 @@ def _approved_titles(bus_active_dir: Path) -> list[tuple[str, str, str]]:
     if not bus_active_dir.is_dir():
         return []
     out: list[tuple[str, str, str]] = []
-    for f in sorted(bus_active_dir.glob("*spec-change-approved*.md")):
+    # By frontmatter type, never by filename: 5 live files matching
+    # `*spec-change-approved*` are `type: info` — messages ABOUT an approval —
+    # and each became a phantom APPROVED_UNAUTHORED row telling spec-agent to
+    # author a change nobody approved. See `bus_message_types`.
+    from otaman_cli.bus_message_types import messages_of_type
+
+    for f in messages_of_type(bus_active_dir, "spec-change-approved"):
         try:
             text = f.read_text(encoding="utf-8")
         except OSError:
