@@ -843,13 +843,45 @@ def _file_is_for_agent(stem: str, fm: dict, agent: str) -> bool:
     return agent in to_list or "all" in to_list
 
 
+def _assignment_is_addressed_to(fm: dict, agent: str) -> bool:
+    """Is this task-assignment's WORK addressed to *agent*?
+
+    Distinct from :func:`_file_is_for_agent`, which answers "is this file my
+    copy" — true for a CC copy too. Both questions are legitimate and they are
+    not the same: I should SEE plugin-agent's assignment, and I should not be
+    marked working on it.
+
+    `to: all` counts: a broadcast assignment is addressed to everyone.
+    """
+    to_field = str(fm.get("to", "") or "")
+    recipients = [t.strip() for t in to_field.split(",") if t.strip()]
+    return agent in recipients or "all" in recipients
+
+
 def _status_hook_after_ack(root: Path, agent: str, msg_files: list[Path]) -> None:
     """agent-status-presence task 1.6 — set `working` after acking a task-assignment.
 
-    For each acked message: if `type: task-assignment`, parse task + change from
-    the body (best-effort) and write a `working` status record.  Multiple
-    task-assignments in one ack call → first one wins (rare path; matches
-    spec's "fires when acked message is type: task-assignment" wording).
+    For each acked message: if `type: task-assignment` AND the assignment is
+    addressed to *agent*, parse task + change from the body and write a
+    `working` record. Multiple task-assignments in one ack call → first one
+    wins (rare path; matches the spec's "fires when acked message is type:
+    task-assignment" wording).
+
+    Two things this deliberately does NOT do, both found live (2026-09-25):
+
+    **A CC copy of someone else's assignment does not make me working.**
+    `_file_is_for_agent` answers "is this file my copy", which is true for a CC
+    copy — but being copied on plugin-agent's task is not being given it. The
+    recipient of the WORK is frontmatter `to:`, and acking a CC copy of an
+    assignment addressed elsewhere marked this agent `working` on a task it had
+    not been given.
+
+    **A `working` record is never written without a task.** `set-status`
+    refuses bare `working` outright, for a stated reason: "a working record
+    with no task cannot be told from a dead session." This path was writing
+    exactly that record whenever the body parse came back empty — the same
+    invariant enforced in one path and violated in the other, which is worse
+    than not having it, because the staleness surfaces trust it.
     """
     try:
         from otaman_cli.status import (
@@ -880,8 +912,16 @@ def _status_hook_after_ack(root: Path, agent: str, msg_files: list[Path]) -> Non
         if not isinstance(fm, dict) or fm.get("type") != "task-assignment":
             continue
 
+        if not _assignment_is_addressed_to(fm, agent):
+            continue  # a CC copy of another agent's task is not my task
+
         body = text[fm_match.end() :] if fm_match else ""
         task, change = _parse_task_and_change_from_body(body)
+        if not (task or "").strip():
+            # The rule `set-status` enforces, applied to the path that bypassed
+            # it. Skipping leaves the previous record standing, which is more
+            # honest than a `working` nobody can act on or verify.
+            continue
         backend = get_backend(root)
         existing = backend.read(agent)
         from datetime import datetime, timezone
@@ -905,6 +945,12 @@ def _status_hook_after_ack(root: Path, agent: str, msg_files: list[Path]) -> Non
         return  # first task-assignment in this ack batch is enough
 
 
+#: The dispatcher names the change two ways — in the subject ("Tasks assigned
+#: from \u2026") and in the body ("from the feature \u2026"). Module-level so the
+#: pattern is named once and no formatter has to decide how to wrap it.
+_CHANGE_NAME_RE = re.compile(r'(?:Tasks assigned from|from the feature)\s+["\u201c](.+?)["\u201d]')
+
+
 def _parse_task_and_change_from_body(body: str) -> tuple[str | None, str | None]:
     """Best-effort: pull task + change from a task-assignment body.
 
@@ -912,8 +958,17 @@ def _parse_task_and_change_from_body(body: str) -> tuple[str | None, str | None]
       1. `**Task:** <N.M ...>` or `**Tasks:** <N.M ...>`
       2. `**Change:** <slug>` (sometimes appears in design / task assignment)
       3. `### N.M — <text>` heading (first occurrence) → use heading text
-      4. Change slug: a line starting with `**Spec:**` or path hint
+      4. `- [ ] N.M @repo <text>` — the DISPATCHER's own format
+      5. `Tasks assigned from "<change>"` — the dispatcher's change line
+      6. Change slug: a line starting with `**Spec:**` or path hint
     Returns (task, change), either may be None.
+
+    Shapes 4 and 5 were missing until 2026-09-25, and they are the ones the
+    live dispatcher actually emits — so acking a REAL task-assignment parsed
+    nothing and the status hook wrote `working` with `task: null`. That record
+    is what rendered fleet-wide as `working (—)`, including on spec-agent's
+    own row (noted in `status_cluster`'s refusal comment). The templates the
+    parser did know were the hand-written ones.
     """
     task: str | None = None
     change: str | None = None
@@ -933,6 +988,25 @@ def _parse_task_and_change_from_body(body: str) -> tuple[str | None, str | None]
             m = re.match(r"^###\s+(\d+(?:\.\d+)+)\s+[—-]?\s*(.+)$", s)
             if m:
                 task = f"{m.group(1)} {m.group(2)}"[:120]
+                continue
+        if task is None:
+            # The dispatcher's own line: `- [ ] 1.3 @otaman-cli <text> (repo)`.
+            # The @repo token and the trailing `(repo)` are routing metadata,
+            # not part of what the agent is doing, so both are stripped.
+            m = re.match(r"^-\s*\[[ xX]?\]\s*(\d+(?:\.\d+)+[a-z]?)\s+(.+)$", s)
+            if m:
+                text = re.sub(r"@\S+\s*", "", m.group(2)).strip()
+                text = re.sub(r"\s*\([\w.\-]+\)$", "", text).strip()
+                task = f"{m.group(1)} {text}".strip()[:120]
+                continue
+        if change is None:
+            # The dispatcher names the change two ways: in the subject
+            # ("Tasks assigned from \u2026") and in the body ("from the feature
+            # \u2026"). Match either, with or without the `## Subject:` prefix,
+            # and tolerate curly quotes.
+            m = _CHANGE_NAME_RE.search(s)
+            if m:
+                change = m.group(1).strip()
                 continue
         if change is None:
             m = re.match(r"^\*\*Change:\*\*\s+(.+)$", s)
