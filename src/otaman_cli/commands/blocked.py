@@ -409,14 +409,18 @@ def _decided_proposal_stems(root: Path) -> set[str]:
         bus_dir = active_dir.parent if active_dir.name == "active" else active_dir
     except Exception:  # noqa: BLE001 - unresolvable bus → nothing sweepable
         return stems
+    # By frontmatter type, never by filename. A message whose SUBJECT mentions
+    # an approval matched here and contributed its proposal stems as terminator
+    # evidence — clearing a blocked entry on a message that approved nothing.
+    from otaman_cli.bus_message_types import messages_of_type
+
     try:
-        paths = list(bus_dir.rglob("*.md"))
+        paths = messages_of_type(
+            bus_dir, "spec-change-approved", "spec-change-rejected", recursive=True
+        )
     except OSError:
         return stems
     for path in paths:
-        name = path.name
-        if "spec-change-approved" not in name and "spec-change-rejected" not in name:
-            continue
         try:
             body = path.read_text(encoding="utf-8")
         except OSError:

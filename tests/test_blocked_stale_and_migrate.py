@@ -181,7 +181,13 @@ def test_migrate_sweeps_an_entry_whose_proposal_was_decided(program, capsys):
         / "active"
         / "20260910T081510-human-to-all-spec-change-approved.md"
     ).write_text(
-        f"## Subject: Approved: something\n\n**Original proposal**: {stem}\n", encoding="utf-8"
+        # Real frontmatter: the sweep reads `type:`, never the filename. These
+        # fixtures carried no frontmatter and were matched by name — the
+        # convention this sweep stopped trusting, because 5 live `type: info`
+        # messages match the same name pattern and were clearing blocked entries.
+        "---\nid: x\nfrom: human\nto: all\ntype: spec-change-approved\n---\n\n"
+        f"## Subject: Approved: something\n\n**Original proposal**: {stem}\n",
+        encoding="utf-8",
     )
     f = _write_blocked(program, "cli-agent", _entry("waiting", proposal=stem))
     _cmd_blocked_migrate(program, apply=True)
@@ -206,7 +212,8 @@ def test_migrate_dry_run_writes_nothing(program, capsys):
 
     stem = "20260909T225320-a-to-human-spec-change-request"
     (program / ".agents" / "bus" / "active" / "x-spec-change-approved.md").write_text(
-        f"proposal {stem}", encoding="utf-8"
+        f"---\nid: x\nfrom: human\nto: all\ntype: spec-change-approved\n---\n\nproposal {stem}",
+        encoding="utf-8",
     )
     f = _write_blocked(program, "cli-agent", _entry("waiting", proposal=stem))
     before = f.read_text(encoding="utf-8")
@@ -230,7 +237,8 @@ def test_migrate_names_why_each_entry_was_swept(program, capsys):
 
     stem = "20260909T225320-a-to-human-spec-change-request"
     (program / ".agents" / "bus" / "active" / "x-spec-change-approved.md").write_text(
-        f"proposal {stem}", encoding="utf-8"
+        f"---\nid: x\nfrom: human\nto: all\ntype: spec-change-approved\n---\n\nproposal {stem}",
+        encoding="utf-8",
     )
     _write_blocked(program, "cli-agent", _entry("waiting", proposal=stem))
     _cmd_blocked_migrate(program, apply=False)
