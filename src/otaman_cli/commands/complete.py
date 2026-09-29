@@ -341,13 +341,14 @@ def cmd_complete(args: list[str]) -> int:
     # Note: `updated` is only set when the caller is spec-agent (i.e. the
     # actualize-tasks.py path ran).  For non-spec-agents the bus body
     # records the requested task ids; spec-agent's sweep applies the tick
-    # asynchronously, so the "Updated: N" line becomes a forward-looking
-    # plan rather than a past-tense report.
+    # asynchronously, so the non-owner line states DEFERRAL rather than a
+    # schedule — a past-tense report would be false, and so is a promised time.
     if is_spec:
         updated_line = f"**Updated**: {updated} task(s) in tasks.md"
     else:
         updated_line = (
-            "**Pending tick**: spec-agent will apply tasks.md ticks on next session sweep"
+            "**Pending tick**: the durable tasks.md tick is DEFERRED to the specs owner "
+            "and is not applied yet (task-complete-reconciler 2.3 — no schedule is promised)"
         )
 
     content = f"""---
@@ -385,17 +386,29 @@ status: pending
     UI.ok(f"Bus notification: {filepath.relative_to(root)}")
     UI.muted(f"Type: task-complete | To: {recipient} | Change: {change_name}")
 
-    # fix-otaman-complete-task-drift task 1.2 — sweep notice for non-spec-agents.
-    # The bus message above IS the canonical signal; spec-agent picks it up
-    # via the session-start sweep (Part B) and applies the tick to tasks.md
-    # at that point.  Print this so the calling agent doesn't expect the
-    # checkboxes to be live immediately.
+    # task-complete-reconciler 2.3 — the deferral is stated, the TIMING is not.
+    #
+    # This used to print "spec-agent will tick tasks.md on next session start",
+    # which asserts when the tick lands. Nothing keeps that promise: the tick
+    # has no automated consumer, so it applies only when the owner's agent
+    # happens to sweep by hand. On the pmeets tenant that gap ran ~2 weeks with
+    # completes unapplied, the lens under-counting 5/11 against a real 11/11,
+    # and nothing anywhere warning — the caller had been told it was handled.
+    #
+    # So: name the owner the durable write is deferred TO, say tasks.md is
+    # unchanged, and promise no schedule. Deliberately names no mechanism
+    # either: `otaman spec sweep` (task 1.2) is not built yet, and pointing at
+    # a command that does not exist would replace one unfounded promise with
+    # another.
+    spec_owner = _read_spec_owner(root, change_name)
     if not is_spec:
+        owner_label = spec_owner or recipient or "the specs owner"
         UI.ok("Bus task-complete sent.")
-        UI.muted("    spec-agent will tick tasks.md on next session start.")
+        UI.muted(f"    Durable tick DEFERRED to {owner_label}; tasks.md is unchanged.")
+        UI.muted("    This filing is the record — it is applied when the owner reconciles.")
 
     # Step 2b: Fanout to spec_owner if set and different from primary recipient
-    spec_owner = _read_spec_owner(root, change_name)
+    # (`spec_owner` was resolved above, for the deferral notice.)
     if spec_owner and spec_owner != recipient:
         fanout_filename = _stem.build_filename(
             timestamp=now_ts,

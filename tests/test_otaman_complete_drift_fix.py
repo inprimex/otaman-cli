@@ -248,9 +248,18 @@ class TestCmdCompleteBranching:
         # Bus message file was written
         bus_files = list((tmp_path / ".agents" / "bus" / "active").glob("*task-complete*.md"))
         assert len(bus_files) >= 1, "task-complete bus message must be written"
-        # Sweep notice in output
+        # Deferral notice in output.
+        #
+        # This asserted "spec-agent will tick tasks.md on next session start"
+        # until task-complete-reconciler 2.3. That sentence promised a schedule
+        # nothing kept — the tick has no automated consumer, and on the pmeets
+        # tenant the gap ran ~2 weeks with completes unapplied while every
+        # caller had been told it was handled. The contract is now: state the
+        # deferral and its owner, promise no time. The intent of THIS test is
+        # unchanged — a non-owner must still be told the tick is not live yet.
         out = capsys.readouterr().out
-        assert "spec-agent will tick tasks.md" in out
+        assert "DEFERRED" in out and "tasks.md is unchanged" in out
+        assert "next session start" not in out
 
     # 1.4 (f) — exit code 0 in both branches
     def test_exit_code_zero_in_both_branches(self, tmp_path: Path, monkeypatch):
