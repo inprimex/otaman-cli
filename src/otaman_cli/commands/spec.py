@@ -16,7 +16,7 @@ from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.main import UI
 
-_ACTIONS = ("status", "gate", "approve", "reconcile")
+_ACTIONS = ("status", "gate", "approve", "reconcile", "sweep")
 _GATES = ("dispatch", "archive", "merge")
 
 #: Valid keys for a per-action ``spec_policy.enforcement`` map (spec-gate-hardening
@@ -63,6 +63,7 @@ def cmd_spec(args: list[str]) -> int:
             '  approve <change> [--reason "..."]     — mint spec-approved (human, approver hat)'
         )
         UI.muted("  reconcile [--json]                    — contradictory ratified records")
+        UI.muted("  sweep [--apply] [--change <name>]     — apply filed task-complete ticks")
         return 0 if args and args[0] in ("-h", "--help") else 1
     action, *rest = args
     if action not in _ACTIONS:
@@ -79,7 +80,140 @@ def cmd_spec(args: list[str]) -> int:
         return _cmd_approve(root, rest)
     if action == "reconcile":
         return _cmd_reconcile(root, rest)
+    if action == "sweep":
+        return _cmd_sweep(root, rest)
     return _cmd_status(root, rest)
+
+
+# ---------------------------------------------------------------------------
+# sweep — the task-complete reconciler (task-complete-reconciler 1.2)
+
+
+def _cmd_sweep(root: Path, rest: list[str]) -> int:
+    """`otaman spec sweep [--apply] [--change <name>]`.
+
+    Reports by default; `--apply` performs the tick and commits. The write is
+    gated on the specs owner for the same reason `otaman complete` is: only the
+    owner's edit survives the next `git pull --ff-only`, so a non-owner's
+    "successful" sweep would be reverted silently — which is the class of
+    failure this whole change exists to end, not to relocate.
+    """
+    from otaman_cli import spec_sweep
+
+    apply = "--apply" in rest
+    only = ""
+    if "--change" in rest:
+        i = rest.index("--change")
+        if i + 1 >= len(rest):
+            UI.error("Usage: otaman spec sweep [--apply] [--change <name>]")
+            return 2
+        only = rest[i + 1]
+
+    changes_dir = _specs_changes_dir(root)
+    if changes_dir is None:
+        UI.error("No specs repo resolved here — nothing to sweep.")
+        UI.muted("  `program.registries` / `specs.path` in platform.yaml names it.")
+        return 1
+
+    config = _sweep_config(root)
+    names = [only] if only else spec_sweep.changes_with_filings(changes_dir)
+    if only and not (changes_dir / only / "tasks.md").is_file():
+        UI.error(f"No change named {only!r} with a tasks.md under {changes_dir}.")
+        return 2
+
+    outcomes = [spec_sweep.plan(root, changes_dir, name, config) for name in names]
+    blocked = [o for o in outcomes if o.error]
+    working = [o for o in outcomes if not o.error and o.did_work]
+
+    print()
+    UI.header("Task-complete sweep")
+
+    if blocked:
+        # not-checked, never a silent zero (no-silent-success).
+        UI.warn(f"  NOT CHECKED — {blocked[0].error}")
+        UI.muted("    Update the bundle — `otaman upgrade` — then re-run.")
+        return 1
+
+    if not working:
+        # Zero work STATED. A sweep that prints nothing is indistinguishable
+        # from a sweep that did not run, which is how the backlog went unseen.
+        UI.ok(
+            f"  Nothing owed: {len(outcomes)} change(s) checked, every filed tick already applied."
+        )
+        return 0
+
+    applied_total = 0
+    for o in working:
+        UI.muted(f"  {o.change}")
+        if o.owed:
+            UI.muted(f"    owed: {', '.join(o.owed)}")
+        if o.already:
+            UI.muted(f"    already ticked: {o.already}")
+        if o.retracted:
+            UI.warn(f"    retracted (filing older than an un-tick): {', '.join(o.retracted)}")
+        if o.ambiguous:
+            UI.warn(
+                f"    ambiguous id (several task lines, e.g. `N-bis`), NOT ticked: "
+                f"{', '.join(o.ambiguous)}"
+            )
+        for stem in o.unparseable:
+            UI.warn(f"    unparseable filing, nothing applied: {stem}")
+
+        if apply and o.owed:
+            rc, report = _apply_ticks(root, o.change, o.owed)
+            if rc != 0:
+                UI.error(f"    apply failed for {o.change}: {report}")
+                continue
+            applied = int(report.get("updated", 0) or 0)
+            applied_total += applied
+            o.applied = applied
+            UI.ok(f"    applied: {applied}")
+            not_found = report.get("not_found") or []
+            if not_found:
+                UI.warn(f"    named but absent from tasks.md: {', '.join(not_found)}")
+
+    print()
+    if not apply:
+        owed = sum(len(o.owed) for o in working)
+        UI.muted(f"  Dry run — {owed} tick(s) would be applied. Re-run with --apply.")
+        return 0
+
+    touched = len([o for o in working if o.applied])
+    UI.ok(f"  Applied {applied_total} tick(s) across {touched} change(s).")
+    UI.muted("  Commit the tasks.md changes in the specs repo to publish them.")
+    return 0
+
+
+def _sweep_config(root: Path) -> dict:
+    """platform.yaml as a dict — core's reader needs it for `bus_path`."""
+    try:
+        import yaml
+
+        return yaml.safe_load((root / "platform.yaml").read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001 - unreadable config → core falls back to its default
+        return {}
+
+
+def _apply_ticks(root: Path, change: str, ids: list[str]) -> tuple[int, dict]:
+    """Drive `actualize_tasks` — the single home for the tasks.md write."""
+    import json
+
+    from otaman_cli.main import run_script
+
+    result = run_script(
+        "actualize-tasks.py",
+        "--change",
+        change,
+        "--tasks",
+        ",".join(ids),
+        "--project-root",
+        str(root),
+        capture=True,
+    )
+    try:
+        return 0, json.loads(result.stdout)
+    except Exception:  # noqa: BLE001 - unparseable report is a failure, not a zero
+        return 1, {"stderr": (result.stderr or result.stdout or "").strip()[:200]}
 
 
 # ---------------------------------------------------------------------------
