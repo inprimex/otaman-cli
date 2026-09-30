@@ -1281,11 +1281,9 @@ class TreeScreen(Screen):
             body.update("(nothing selected)")
             return
         if node.kind in ("outcome", "solution"):
-            from otaman_cli.console.registry_detail import node_detail_text, role_emphasis
-
-            text = node_detail_text(
-                self.program, node.kind, node.id, emphasis=role_emphasis(self.program)
-            )
+            # From the PROJECTION: this runs on every cursor move while the side
+            # panel is open, and derived it directly at ~128ms per arrow key.
+            text = self._projections.node_detail(node.kind, node.id)
             body.update(text or f"{node.id}")
         else:
             # The context line (1.2) rather than a hand-assembled status string:
@@ -2486,11 +2484,20 @@ class ArtifactBrowserScreen(Screen):
         self._load()
 
     def _load(self) -> None:
-        from otaman_cli.console.artifacts import list_authored_changes
-
+        """Scan OFF the UI thread, like every other list here (crs 2.3)."""
         lv = self.query_one("#authored-list", ListView)
         lv.clear()
-        changes = list_authored_changes(self.program)
+        lv.append(ListItem(Label("Loading…")))
+        self.run_worker(self._load_worker, thread=True, exclusive=True, group="authored")
+
+    def _load_worker(self) -> None:
+        from otaman_cli.console.artifacts import list_authored_changes
+
+        self.app.call_from_thread(self._paint_authored, list_authored_changes(self.program))
+
+    def _paint_authored(self, changes) -> None:
+        lv = self.query_one("#authored-list", ListView)
+        lv.clear()
         if changes:
             for c in changes:
                 lv.append(_AuthoredItem(c))
