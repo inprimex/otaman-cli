@@ -91,11 +91,16 @@ def test_a_change_with_no_filings_does_no_work(fleet):
 
 
 def test_an_ambiguous_id_is_surfaced_and_never_ticked(fleet):
-    """`1.7-bis` parses to `1.7` (core's task_id_of stops at a word boundary),
-    so a tick aimed at either lands on both. That is a wrong write."""
+    """Two task lines carrying the SAME id: a tick aimed at it lands on both.
+
+    `1.7-bis` reading as `1.7` was the live instance when this was written;
+    core #88 taught `task_id_of` the suffix, so that case is fixed upstream and
+    this now uses a literal duplicate — which a hand-edited tasks.md can still
+    contain, and which still writes to the wrong line.
+    """
     root, bus, changes = fleet
     (changes / "demo" / "tasks.md").write_text(
-        "- [ ] 1.1 @otaman-cli first\n- [ ] 1.1-bis @otaman-cli variant\n", encoding="utf-8"
+        "- [ ] 1.1 @otaman-cli first\n- [ ] 1.1 @otaman-cli duplicated\n", encoding="utf-8"
     )
     _filing(bus, "demo", "tasks 1.1")
     out = _plan(fleet)
@@ -280,3 +285,124 @@ def test_a_filing_newer_than_an_untick_still_applies(tmp_path):
 
     out = spec_sweep.plan(root, changes, "demo", {})
     assert out.owed == ["1.1"] and out.retracted == []
+
+
+# ---------------------------------------------------------------------------
+# 2.2 — the awaiting-tick count, and what it says when it cannot count
+
+
+def test_the_count_is_the_number_of_owed_ticks(fleet):
+    root, bus, changes = fleet
+    _filing(bus, "demo", "tasks 1.1")
+    count, note = spec_sweep.awaiting_tick(root, changes, {})
+    assert (count, note) == (1, "")
+
+
+def test_a_clean_fleet_counts_zero_with_no_complaint(fleet):
+    root, _, changes = fleet
+    assert spec_sweep.awaiting_tick(root, changes, {}) == (0, "")
+
+
+def test_an_absent_reader_is_not_checked_never_zero(fleet, monkeypatch):
+    """The distinction the whole change exists for: 0 must mean "looked and
+    found none", never "did not look"."""
+    root, bus, changes = fleet
+    _filing(bus, "demo", "tasks 1.1")
+    monkeypatch.setattr(spec_sweep, "_core", lambda: None)
+    count, note = spec_sweep.awaiting_tick(root, changes, {})
+    assert count is None and "reader" in note
+
+
+def test_exceeding_the_budget_is_not_checked_never_a_partial_number(fleet):
+    """A partial count reads as authoritative while being short — worse than
+    admitting the count did not finish."""
+    root, bus, changes = fleet
+    _filing(bus, "demo", "tasks 1.1")
+    count, note = spec_sweep.awaiting_tick(root, changes, {}, budget=-1.0)
+    assert count is None
+    assert "budget" in note and "spec sweep" in note, "name the command that has no budget"
+
+
+def test_a_reader_that_raises_is_not_checked(fleet, monkeypatch):
+    root, bus, changes = fleet
+    _filing(bus, "demo", "tasks 1.1")
+
+    def boom(*a, **k):
+        raise RuntimeError("bus unreadable")
+
+    monkeypatch.setattr(spec_sweep, "plan", boom)
+    count, note = spec_sweep.awaiting_tick(root, changes, {})
+    assert count is None and "RuntimeError" in note
+
+
+# ---------------------------------------------------------------------------
+# the two surfaces, rendering the SAME reader
+
+
+def test_check_renders_the_count_when_work_is_owed(fleet, monkeypatch, capsys):
+    from otaman_cli.commands import check as CH
+
+    root, _, changes = fleet
+    monkeypatch.setattr(spec_sweep, "awaiting_tick", lambda *a, **k: (7, ""))
+    monkeypatch.setattr("otaman_cli.commands.spec._specs_changes_dir", lambda r: changes)
+    CH._render_awaiting_tick(root)
+    out = capsys.readouterr().out
+    assert "7 filed task(s)" in out and "spec sweep" in out
+
+
+def test_check_stays_quiet_when_nothing_is_owed(fleet, monkeypatch, capsys):
+    """A healthy fleet must not grow a line that everyone learns to skip."""
+    from otaman_cli.commands import check as CH
+
+    root, _, changes = fleet
+    monkeypatch.setattr(spec_sweep, "awaiting_tick", lambda *a, **k: (0, ""))
+    monkeypatch.setattr("otaman_cli.commands.spec._specs_changes_dir", lambda r: changes)
+    CH._render_awaiting_tick(root)
+    assert capsys.readouterr().out.strip() == ""
+
+
+def test_check_says_not_checked_rather_than_nothing(fleet, monkeypatch, capsys):
+    """Silence and "nothing owed" must not look the same — that equivalence is
+    what kept the pmeets backlog invisible for two weeks."""
+    from otaman_cli.commands import check as CH
+
+    root, _, changes = fleet
+    monkeypatch.setattr(spec_sweep, "awaiting_tick", lambda *a, **k: (None, "reader exploded"))
+    monkeypatch.setattr("otaman_cli.commands.spec._specs_changes_dir", lambda r: changes)
+    CH._render_awaiting_tick(root)
+    out = capsys.readouterr().out
+    assert "NOT CHECKED" in out and "reader exploded" in out
+
+
+def test_check_is_silent_where_there_is_no_specs_repo(fleet, monkeypatch, capsys):
+    from otaman_cli.commands import check as CH
+
+    root, _, _ = fleet
+    monkeypatch.setattr("otaman_cli.commands.spec._specs_changes_dir", lambda r: None)
+    CH._render_awaiting_tick(root)
+    assert capsys.readouterr().out.strip() == ""
+
+
+def test_check_never_dies_on_the_count(fleet, monkeypatch, capsys):
+    """`otaman check` is the fleet's most-run command; a drift counter must
+    never be the reason it fails."""
+    from otaman_cli.commands import check as CH
+
+    root, _, changes = fleet
+
+    def boom(*a, **k):
+        raise RuntimeError("nope")
+
+    monkeypatch.setattr("otaman_cli.commands.spec._specs_changes_dir", boom)
+    CH._render_awaiting_tick(root)  # must not raise
+
+
+def test_both_surfaces_use_one_reader():
+    """The spec says "from the same reader" — two counts that can disagree are
+    worse than one that is sometimes not-checked."""
+    check_src = Path("src/otaman_cli/commands/check.py").read_text(encoding="utf-8")
+    spec_src = Path("src/otaman_cli/commands/spec.py").read_text(encoding="utf-8")
+    assert "spec_sweep.awaiting_tick" in check_src
+    assert "spec_sweep.awaiting_tick" in spec_src
+    for src in (check_src, spec_src):
+        assert "filed_complete_at" not in src, "neither surface may re-derive the count"

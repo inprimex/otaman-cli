@@ -577,6 +577,15 @@ def _cmd_status(root: Path, rest: list[str]) -> int:
     UI.header("Spec lifecycle")
     UI.kv("policy", f"level={policy.process_level}  enforcement={policy.enforcement}")
     UI.kv("ratifications this month", str(ratif_count))
+
+    # tcr 2.2 — the same reader `otaman check` uses, so the two never disagree.
+    from otaman_cli import spec_sweep
+
+    awaiting, note = spec_sweep.awaiting_tick(root, changes_dir, _sweep_config(root))
+    if awaiting is None:
+        UI.kv("awaiting tick", f"NOT CHECKED — {note}")
+    elif awaiting:
+        UI.kv("awaiting tick", f"{awaiting}  (`otaman spec sweep`)")
     if not rows:
         UI.muted("No changes in flight, awaiting authoring, or awaiting archive — all clear.")
         return 0

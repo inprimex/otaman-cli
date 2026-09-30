@@ -19,6 +19,37 @@ from otaman_cli.identity import find_project_root, not_in_project_message, resol
 from otaman_cli.main import UI, C, _get_agent_ack_status, _resolve_bus_paths
 
 
+def _render_awaiting_tick(root: Path) -> None:
+    """Filed task-completes that tasks.md has not caught up with (tcr 2.2).
+
+    Rendered only when non-zero, so a healthy fleet stays quiet — but NEVER as a
+    silent nothing when the count could not be taken. A zero that means "did not
+    look" is the state that hid ~2 weeks of unapplied completes on pmeets while
+    the lens read 5/11 against a real 11/11.
+    """
+    try:
+        from otaman_cli import spec_sweep
+        from otaman_cli.commands.spec import _specs_changes_dir, _sweep_config
+
+        changes_dir = _specs_changes_dir(root)
+        if changes_dir is None:
+            return  # no specs repo here — nothing to be behind on
+        count, note = spec_sweep.awaiting_tick(root, changes_dir, _sweep_config(root))
+    except Exception:  # noqa: BLE001 - a drift counter must never break `check`
+        # Deliberately silent rather than NOT CHECKED: this path means the
+        # counter itself is broken, and `check`'s job is the bus. Shouting here
+        # would bury the messages the operator actually came for.
+        return
+    if count is None:
+        print()
+        UI.warn(f"  Awaiting tick: NOT CHECKED — {note}")
+        return
+    if count:
+        print()
+        UI.warn(f"  Awaiting tick: {count} filed task(s) not yet applied to tasks.md")
+        UI.muted("    `otaman spec sweep` to see them; `--apply` to apply them.")
+
+
 def cmd_check(args: list[str]) -> int:
     """Check messages for an agent."""
     hide_broadcast_hours: int | None = None
@@ -312,6 +343,8 @@ def cmd_check(args: list[str]) -> int:
         UI.header("Your changes awaiting approval/ratification")
         for subject, stem in awaiting:
             UI.bullet(f"{subject}  ({stem})")
+
+    _render_awaiting_tick(root)
 
     # Show blocked tasks (blocked-entry-lifecycle 1.4)
     blocked_file = root / ".agents" / "blocked" / f"{agent}.md"
