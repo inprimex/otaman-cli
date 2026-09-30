@@ -99,10 +99,17 @@ def _console_modules() -> list[Path]:
     return sorted(Path(console_pkg.__file__).parent.glob("*.py"))
 
 
-def _offenders() -> dict[str, set[str]]:
-    """`{"Class.method": {markers}}` for every rendering method doing IO."""
+def _offenders(modules: list[Path] | None = None) -> dict[str, set[str]]:
+    """`{"Class.method": {markers}}` for every rendering method doing IO.
+
+    *modules* is a parameter rather than something a test monkeypatches, because
+    reaching the patch target meant `import tests.test_...`, and a cross-test
+    import passes locally then fails CI collection with "No module named
+    'tests'". That is a trap I have hit before and written down; taking the
+    input as an argument removes the need for the import at all.
+    """
     found: dict[str, set[str]] = {}
-    for path in _console_modules():
+    for path in modules if modules is not None else _console_modules():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.ClassDef):
@@ -169,7 +176,7 @@ def test_the_guard_can_actually_see_io():
     assert set(_offenders()) >= set(_REGISTERED), "the detector lost sites it used to see"
 
 
-def test_the_guard_catches_a_planted_read(tmp_path, monkeypatch):
+def test_the_guard_catches_a_planted_read(tmp_path):
     """The planted-defect check 3.1's gate also runs. Verified against a real
     module written to disk, not a string — the guard parses files."""
     planted = tmp_path / "planted.py"
@@ -180,15 +187,12 @@ def test_the_guard_catches_a_planted_read(tmp_path, monkeypatch):
         "        return self.program.root.read_text()\n",
         encoding="utf-8",
     )
-    import tests.test_console_no_render_path_io as mod
-
-    monkeypatch.setattr(mod, "_console_modules", lambda: [planted])
-    offenders = mod._offenders()
+    offenders = _offenders([planted])
     assert "PlantedScreen.compose" in offenders
     assert "read_text" in offenders["PlantedScreen.compose"]
 
 
-def test_a_worker_is_allowed_to_read(tmp_path, monkeypatch):
+def test_a_worker_is_allowed_to_read(tmp_path):
     """IO belongs on a thread. A guard that flagged workers too would push
     people to do the reading inline, which is the opposite of the point."""
     ok = tmp_path / "ok.py"
@@ -199,7 +203,4 @@ def test_a_worker_is_allowed_to_read(tmp_path, monkeypatch):
         "        return self.path.read_text()\n",
         encoding="utf-8",
     )
-    import tests.test_console_no_render_path_io as mod
-
-    monkeypatch.setattr(mod, "_console_modules", lambda: [ok])
-    assert mod._offenders() == {}
+    assert _offenders([ok]) == {}
