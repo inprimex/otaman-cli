@@ -1692,6 +1692,21 @@ class RegistryDetailScreen(Screen):
         self._reload()
 
     def _reload(self) -> None:
+        """Render the detail OFF the UI thread.
+
+        This ran inline, so opening a detail view blocked the console for the
+        length of the read — ~287ms cold on the live program (role_emphasis
+        27ms + node_detail_text 101ms + accept_cost_candidate 159ms). Every
+        other screen loads through a worker; this one did not, and it is the
+        screen reached by pressing enter on a row, so the block landed exactly
+        where a keypress should have felt instant.
+
+        "Loading…" is already on screen from `compose`, so there is nothing to
+        paint before the worker returns.
+        """
+        self.run_worker(self._reload_worker, thread=True, exclusive=True, group="registry-detail")
+
+    def _reload_worker(self) -> None:
         from otaman_cli.console.registry_detail import node_detail_text, role_emphasis
 
         # 4.2 — the acting hat EMPHASISES its field groups; nothing is hidden.
@@ -1732,6 +1747,9 @@ class RegistryDetailScreen(Screen):
             self._discard_ok, d_note = discard_candidate(self.program, self.node_id)
             if self._discard_ok:
                 text += f"\n\n▶ DISCARD available (press d) — {d_note}"
+        self.app.call_from_thread(self._paint_detail, text)
+
+    def _paint_detail(self, text: str) -> None:
         self.query_one("#registry-detail", Static).update(text)
 
     def _hat_advisory_notify(self) -> None:
