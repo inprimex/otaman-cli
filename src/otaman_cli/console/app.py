@@ -927,13 +927,16 @@ class InboxScreen(_DecisionActions, Screen):
         lv.clear()
         if rows:
             decisions = sum(1 for r in rows if r.is_decision)
+            questions = sum(1 for r in rows if getattr(r, "needs_answer", False))
             for r in rows:
                 lv.append(_ProposalItem(r))
             # The count says what needs ACTING on, not just what arrived — a
             # single list still has to distinguish those.
             self.query_one("#mode-banner", Static).update(
                 f"Messages to you · {self.program.name} — "
-                f"{decisions} awaiting your decision, {len(rows) - decisions} to read\n"
+                f"{decisions} awaiting your decision"
+                + (f", {questions} awaiting your answer" if questions else "")
+                + f", {len(rows) - decisions - questions} to read\n"
                 "enter open · a approve · A approve-auto · x reject · d defer · "
                 "r refresh · esc back · q quit"
             )
@@ -1427,6 +1430,10 @@ class TreeScreen(Screen):
             from otaman_cli.console import artifacts
 
             awaiting |= {c.name for c in artifacts.list_authored_changes(self.program)}
+            # dae 1.2 — a change blocked on a decision-required IS awaiting the
+            # human, and `:a` is the filter that answers "what needs me". From
+            # the projection: a lens may not scan the bus on a render path.
+            awaiting |= self._projections.blocked_by_decision()
         except Exception:  # noqa: BLE001 - unresolvable specs repo → that half is empty
             pass
         return awaiting
@@ -1885,6 +1892,43 @@ class InboxMessageScreen(Screen):
             id="inbox-msg-body",
         )
         yield Footer()
+
+    def action_answer(self) -> None:
+        """Reply to the agent blocked on this decision (dae 1.2).
+
+        Offered only for a `decision-required`: answering anything else would
+        send an agent a message it is not waiting for.
+        """
+        if not getattr(self.message, "needs_answer", False):
+            self.app.notify(
+                f"Only a decision-required can be answered — this is a {self.message.msg_type}.",
+                severity="warning",
+                timeout=5,
+            )
+            return
+        self.app.push_screen(ReasonModal("Your answer", self.message.subject), self._send_answer)
+
+    def _send_answer(self, answer: str | None) -> None:
+        if not answer or not answer.strip():
+            return  # dismissed, or empty — an empty answer unblocks nothing
+        from otaman_cli.console.decision_required import answer_argv, answer_subject
+        from otaman_cli.console.journal import run_decision_action
+        from otaman_cli.console.setup import run_verb
+
+        recipient = self.message.from_agent
+        argv = answer_argv(recipient, answer_subject(self.message.subject), answer.strip())
+
+        def fn():
+            result = run_verb(self.program, argv)
+            return result.ok, result.output
+
+        # Journalled like every other console write: an answer that vanished
+        # would leave the agent blocked with nobody knowing why — which is the
+        # failure this whole type exists to remove.
+        ok, _ = run_decision_action(self.app, action="answer", target=self.message.stem, fn=fn)
+        if ok:
+            self.app.notify(f"Answer sent to {recipient}.", timeout=6)
+            self.app.pop_screen()
 
     def action_back(self) -> None:
         self.app.pop_screen()
