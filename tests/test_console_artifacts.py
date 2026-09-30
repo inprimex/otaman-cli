@@ -177,6 +177,11 @@ def test_browser_lists_authored_changes(program):
             await pilot.pause()
             app.push_screen(ArtifactBrowserScreen(program))
             await pilot.pause()
+            # The scan runs in a worker (crs 2.3). Await it rather than
+            # asserting on whatever happens to be painted — the pre-fix version
+            # of this test passed by reading a placeholder row.
+            await app.workers.wait_for_complete()
+            await pilot.pause()
             lv = app.screen.query_one("#authored-list", ListView)
             assert len(lv.children) == 1
             await app.action_quit()

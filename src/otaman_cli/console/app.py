@@ -2528,10 +2528,15 @@ class ArtifactBrowserScreen(Screen):
         self._load()
 
     def _load(self) -> None:
-        """Scan OFF the UI thread, like every other list here (crs 2.3)."""
-        lv = self.query_one("#authored-list", ListView)
-        lv.clear()
-        lv.append(ListItem(Label("Loading…")))
+        """Scan OFF the UI thread, like every other list here (crs 2.3).
+
+        No "Loading…" placeholder. `ListView.clear()` is deferred, so a
+        placeholder appended here could still be present when the worker's paint
+        lands — two rows, the stale one above the results. Windows CI caught
+        exactly that; on the faster runners the timing hid it. The scan is
+        short and the list simply fills, which is what it did before #221 moved
+        the scan off the thread.
+        """
         self.run_worker(self._load_worker, thread=True, exclusive=True, group="authored")
 
     def _load_worker(self) -> None:
@@ -2576,12 +2581,44 @@ class ChangeReviewScreen(Screen):
             f"Spec review — {self.change.name}",
             "↑↓ files · a approve (→ spec-approved) · c request changes · esc back",
         )
+        # dae 2.2 — the envelope renders BESIDE the artifacts, not behind a key.
+        # It is reviewed as part of spec-approval, so a reviewer who has to go
+        # looking for it is a reviewer who approves it unread.
+        yield Static("", id="change-envelope", markup=False)
         yield ListView(id="artifact-files")
         with VerticalScroll(id="artifact-view-scroll"):
             yield Static("", id="artifact-view", markup=False)
         yield Footer()
 
+    def _render_envelope(self) -> None:
+        """Show what this change asks to be pre-authorized (dae 2.2).
+
+        Read from `.openspec.yaml` here rather than carried on the row: the row
+        came from a listing, and an envelope shown at approval time has to be
+        the one on disk right now. One read when a review screen opens is the
+        lazy-detail shape the render-path guard registers, not a scan.
+        """
+        from otaman_cli import envelope as envelope_mod
+
+        widget = self.query_one("#change-envelope", Static)
+        raw = None
+        try:
+            from otaman_core.spec_lifecycle import read_openspec
+
+            path = getattr(self.change, "path", None)
+            if path is not None:
+                raw = (read_openspec(Path(path) / ".openspec.yaml") or {}).get("authorizes")
+        except Exception:  # noqa: BLE001 - unreadable → say so, never render "none"
+            widget.update("authorizes: NOT READ — .openspec.yaml could not be parsed")
+            return
+        parsed, error = (None, "") if raw is None else envelope_mod.validate_raw(raw)
+        if error:
+            widget.update(f"authorizes: INVALID — {error}")
+            return
+        widget.update("\n".join(envelope_mod.render_lines(parsed)))
+
     def on_mount(self) -> None:
+        self._render_envelope()
         lv = self.query_one("#artifact-files", ListView)
         for f in self.change.files:
             lv.append(_FileItem(f))
