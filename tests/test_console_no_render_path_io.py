@@ -57,6 +57,10 @@ _DERIVATIONS = frozenset(
         "role_emphasis",
         "list_authored_changes",
         "list_programs",
+        # Added when dae 2.2 put a `.openspec.yaml` read on a review screen and
+        # the guard did not see it. A derivation the detector does not know is a
+        # hole in the detector, not an absent defect.
+        "read_openspec",
     }
 )
 
@@ -88,6 +92,12 @@ _REGISTERED = {
     ),
     "TreeScreen._capability_detail": (
         "TRIVIAL PROBE — a single is_file() to decide whether a capability doc exists, not a scan."
+    ),
+    "ChangeReviewScreen._render_envelope": (
+        "LAZY BODY — one `.openspec.yaml` read when a review screen opens, for "
+        "the ONE change being reviewed. Read at review time rather than carried "
+        "on the row because an envelope shown at approval must be the one on "
+        "disk now, not the one a listing saw earlier."
     ),
     "OtamanConsole._open_session_log": (
         "ACTION PATH — opens the session log for the human; the point of the verb is the file."

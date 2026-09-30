@@ -14,9 +14,9 @@ from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.main import UI
+from otaman_cli.main import UI, C
 
-_ACTIONS = ("status", "gate", "approve", "reconcile", "sweep")
+_ACTIONS = ("status", "gate", "approve", "reconcile", "sweep", "envelope")
 _GATES = ("dispatch", "archive", "merge")
 
 #: Valid keys for a per-action ``spec_policy.enforcement`` map (spec-gate-hardening
@@ -64,6 +64,7 @@ def cmd_spec(args: list[str]) -> int:
         )
         UI.muted("  reconcile [--json]                    — contradictory ratified records")
         UI.muted("  sweep [--apply] [--change <name>]     — apply filed task-complete ticks")
+        UI.muted("  envelope [--json]                     — measure runtime-honored per class")
         return 0 if args and args[0] in ("-h", "--help") else 1
     action, *rest = args
     if action not in _ACTIONS:
@@ -82,7 +83,46 @@ def cmd_spec(args: list[str]) -> int:
         return _cmd_reconcile(root, rest)
     if action == "sweep":
         return _cmd_sweep(root, rest)
+    if action == "envelope":
+        return _cmd_envelope(root, rest)
     return _cmd_status(root, rest)
+
+
+def _cmd_envelope(root: Path, rest: list[str]) -> int:
+    """`otaman spec envelope [--json]` — measure runtime-honored per class (dae 2.2, D6).
+
+    D6 is "measurement, not assumption": every class in core's registry starts
+    `limited`, the fail-safe unmeasured value, and only earns `yes` by being
+    measured against the live runtime. An envelope promising autonomy the
+    runtime refuses is worse than no envelope — the agent proceeds believing it
+    is authorized, hits a prompt nobody is watching, and freezes.
+    """
+    from otaman_cli import envelope as envelope_mod
+
+    results = envelope_mod.measure(root)
+    if "--json" in rest:
+        import json
+
+        print(json.dumps({"scope": envelope_mod.MEASUREMENT_SCOPE, "classes": results}, indent=2))
+        return 0
+
+    print()
+    UI.header("Delivery-authorization classes — runtime-honored")
+    if not results:
+        UI.warn("  NOT MEASURED — otaman-core does not carry the class registry.")
+        return 1
+    for name in sorted(results):
+        row = results[name]
+        badge = (
+            UI.badge("YES", C.GREEN) if row["verdict"] == "yes" else UI.badge("LIMITED", C.YELLOW)
+        )
+        print(f"  {badge}  {name}")
+        UI.muted(f"        {row['evidence']}")
+    print()
+    for line in envelope_mod.MEASUREMENT_SCOPE.split(". "):
+        if line.strip():
+            UI.muted(f"  {line.strip().rstrip('.')}.")
+    return 0
 
 
 # ---------------------------------------------------------------------------

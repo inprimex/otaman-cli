@@ -45,6 +45,21 @@ def _parse_desc(args: list[str]) -> tuple[str, list[str]]:
     return desc, positional
 
 
+def _parse_authorizes(args: list[str]) -> tuple[list[str], list[str]]:
+    """Pull `--authorizes VALUE` (repeatable) out of *args* (dae 2.2)."""
+    values: list[str] = []
+    rest: list[str] = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--authorizes" and i + 1 < len(args):
+            values.append(args[i + 1])
+            i += 2
+            continue
+        rest.append(args[i])
+        i += 1
+    return values, rest
+
+
 def _parse_sections(args: list[str]) -> tuple[dict[str, str], str | None, list[str]]:
     """Pull `--<section>` values and `--evidence-level` out of *args*.
 
@@ -81,10 +96,29 @@ def cmd_propose(args: list[str]) -> int:
     """Create a spec-change-request on the bus for human approval."""
     if _help_requested(args):
         UI.muted('Usage: otaman propose "add user pagination" [-d "Detailed description"]')
+        UI.muted("       [--authorizes <class>[:<target>|<target>] ...]  (dae 2.2)")
         return 0
 
     desc, args = _parse_desc(args)
+    authorizes_values, args = _parse_authorizes(args)
     sections, evidence_level, args = _parse_sections(args)
+
+    # dae 2.2 — the envelope is authored HERE, where the proposer knows what the
+    # work needs, and validated before anything is written. A floor action
+    # refuses naming the floor: the proposer has to know WHICH of the six they
+    # touched, not merely that something was rejected.
+    envelope = None
+    if authorizes_values:
+        from otaman_cli import envelope as envelope_mod
+
+        envelope, envelope_error = envelope_mod.validate(authorizes_values)
+        if envelope_error:
+            UI.error("Refusing this proposal — the authorization envelope is invalid:")
+            UI.muted(f"  {envelope_error}")
+            UI.muted("")
+            UI.muted("  An envelope is reviewed as part of spec-approval; it cannot")
+            UI.muted("  carry an action the floor forbids, however scoped.")
+            return 2
 
     if not args:
         UI.error("Title required")
@@ -154,6 +188,17 @@ def cmd_propose(args: list[str]) -> int:
             UI.muted(f"    --{section.key:<11} {section.heading}")
         UI.muted("  Optional: --evidence-level measured|reproduced|observed-once|inferred")
         return 1
+
+    # dae 2.2 — the envelope travels WITH the proposal, so spec-agent carries it
+    # into `.openspec.yaml` at authoring and the reviewer sees at approval time
+    # exactly what was requested. Appended to the body rather than the
+    # frontmatter: a reviewer reads the body, and an envelope nobody reads is
+    # an envelope nobody reviewed.
+    if envelope is not None:
+        from otaman_cli import envelope as envelope_mod
+
+        body = body.rstrip("\n") + "\n\n## Authorizes\n\n"
+        body += "\n".join(envelope_mod.render_lines(envelope)) + "\n"
 
     content = f"""---
 id: {msg_id}
