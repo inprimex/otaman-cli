@@ -68,6 +68,8 @@ class Projections:
         self._unsubscribe = None
         self._fingerprint: tuple | None = None
         self._paths: list | None = None
+        self._details: dict[tuple[str, str], str] = {}
+        self._emphasis: Any = _UNSET
 
     # -- invalidation -----------------------------------------------------
 
@@ -84,6 +86,8 @@ class Projections:
             self._lifecycle = None
             self._awaiting = None
             self._notice = _UNSET
+            self._details.clear()
+            self._emphasis = _UNSET
 
     def bind(self, store: Any) -> None:
         """Invalidate whenever *store* advances a version."""
@@ -177,6 +181,45 @@ class Projections:
         with self._lock:
             self._trees[key] = built
         return built
+
+    def node_detail(self, kind: str, node_id: str, emphasis: Any = None) -> str:
+        """Rendered detail text for one node, built once per generation.
+
+        `_update_panel` called this on every cursor move with the side panel
+        open — node_detail_text 101ms + role_emphasis 27ms, per arrow key. The
+        text depends only on the registry data, which is what a generation
+        tracks, so it is computed once and read thereafter.
+        """
+        self._check_sources()
+        key = (kind, node_id)
+        with self._lock:
+            cached = self._details.get(key)
+        if cached is not None:
+            return cached
+
+        from otaman_cli.console.registry_detail import node_detail_text
+
+        if emphasis is None:
+            emphasis = self.role_emphasis()
+        text = node_detail_text(self.program, kind, node_id, emphasis=emphasis) or ""
+        with self._lock:
+            self._details[key] = text
+        return text
+
+    def role_emphasis(self) -> Any:
+        """The acting hat's emphasis, resolved once — it does not change while
+        the console is open, and it cost 27ms per cursor move."""
+        with self._lock:
+            cached = self._emphasis
+        if cached is not _UNSET:
+            return cached
+
+        from otaman_cli.console.registry_detail import role_emphasis
+
+        value = role_emphasis(self.program)
+        with self._lock:
+            self._emphasis = value
+        return value
 
     def lifecycle_rows(self) -> list:
         self._check_sources()
