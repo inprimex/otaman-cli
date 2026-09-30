@@ -700,13 +700,32 @@ def dispatch_gate_check(
     result appends to the gate-waiver audit trail (spec-gate-hardening 1.3).
     """
     try:
-        from otaman_core.spec_lifecycle import read_openspec
-    except Exception:  # noqa: BLE001 - core unavailable → do not gate
-        return True, []
+        from otaman_core.spec_lifecycle import openspec_is_unreadable, read_openspec
+    except Exception:  # noqa: BLE001 - see below
+        # An unperformed check never renders OK (nss clause 2). Core is a hard
+        # dependency; if its lifecycle module cannot be imported the gate has
+        # not run, and saying "allowed" would be a false green on the surface
+        # whose whole job is refusing.
+        return False, ["cannot verify the gate — otaman_core.spec_lifecycle is unavailable"]
     d = _change_dir(root, change_name)
     if d is None:
         return True, []
-    data = read_openspec(d / ".openspec.yaml")
+
+    # ABSENT and UNPARSEABLE mean opposite things, and `read_openspec` returns
+    # {} for both. Conflating them made this gate wave through exactly what it
+    # exists to stop: measured, an unparseable .openspec.yaml was ALLOWED while
+    # the same file made readable and authored was refused.
+    #
+    # Reported by spec-agent against plugin's map_tasks (20260930T084339) and
+    # found here by running their suggestion across my own gates. Fail closed:
+    # a file that exists and does not parse is a stage nobody can verify.
+    openspec = d / ".openspec.yaml"
+    if openspec_is_unreadable(openspec):
+        return False, [
+            f"cannot verify stage — {openspec} exists but does not parse; "
+            "refusing rather than dispatching unverified"
+        ]
+    data = read_openspec(openspec)
     if not data:
         return True, []  # legacy/unbackfilled change → not gated until it has a stage
     decision = _run_gate(data, _load_policy(root, "dispatch"), "dispatch", change_name=change_name)
@@ -763,7 +782,7 @@ def dispatch_waiver_slug(root: Path, change_name: str) -> str | None:
 
 
 def _cmd_gate(root: Path, rest: list[str]) -> int:
-    from otaman_core.spec_lifecycle import read_openspec
+    from otaman_core.spec_lifecycle import openspec_is_unreadable, read_openspec
 
     pos = [a for a in rest if not a.startswith("--")]
     at = "dispatch"
@@ -782,7 +801,16 @@ def _cmd_gate(root: Path, rest: list[str]) -> int:
     if d is None:
         UI.error(f"No change named {name!r} under the specs repo")
         return 1
-    data = read_openspec(d / ".openspec.yaml")
+    openspec = d / ".openspec.yaml"
+    if openspec_is_unreadable(openspec):
+        # Refused under a blocking policy even before this, but for the WRONG
+        # reason ("approved_by missing"), which sends the operator to add an
+        # approval rather than fix the YAML — and permitted outright under a
+        # non-blocking one.
+        UI.error(f"Cannot verify {name}: {openspec} exists but does not parse.")
+        UI.muted("  Fix the YAML — the gate refuses rather than guessing at a stage.")
+        return 2
+    data = read_openspec(openspec)
     decision = _run_gate(
         data,
         _load_policy(root, at),

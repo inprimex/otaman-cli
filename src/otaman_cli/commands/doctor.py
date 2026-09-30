@@ -276,8 +276,14 @@ def _check_repo_materialization(root: Path) -> tuple[int, list[dict]]:
         # checkout, which is how four of five haulops repos sat unversioned for
         # three weeks while doctor printed OK for each (deploy-agent
         # 20260921T191148). One of them had taken ~36K of agent work by then.
-        if _version_controlled(repo_dir):
+        versioned = _version_controlled(repo_dir)
+        if versioned is True:
             entry: dict = {"name": name, "path": rel, "status": "ok"}
+        elif versioned is None:
+            # Not a pass and not a failure: the check did not run. Surfaced as
+            # its own status so nobody reads a silent OK off a read that failed.
+            any_fail = True
+            entry = {"name": name, "path": rel, "status": "unverifiable"}
         else:
             any_fail = True
             entry = {"name": name, "path": rel, "status": "not-a-git-repo"}
@@ -291,8 +297,19 @@ def _check_repo_materialization(root: Path) -> tuple[int, list[dict]]:
     return (1 if any_fail else 0), results
 
 
-def _version_controlled(repo_dir: Path) -> bool:
+def _version_controlled(repo_dir: Path) -> bool | None:
     """Is *repo_dir* under git — itself, or via an ancestor checkout?
+
+    Tri-state: True / False / **None when the walk could not complete**. The
+    third is not pedantry. This check exists because four of five haulops repos
+    sat unversioned for three weeks while doctor printed OK for each, and an
+    unreadable path used to return True — reporting a repo as version-controlled
+    on the strength of a read that failed, which is that same incident with a
+    different cause.
+
+    Found by auditing my own gates after spec-agent reported the identical
+    fail-open-on-unreadable-input class in plugin's dispatch gate
+    (20260930T084339).
 
     `.git` is accepted as a FILE as well as a directory: worktrees and
     submodules spell it `gitdir: …`, and an `is_dir()` test would report every
@@ -307,8 +324,8 @@ def _version_controlled(repo_dir: Path) -> bool:
         for candidate in (repo_dir, *repo_dir.parents):
             if (candidate / ".git").exists():
                 return True
-    except OSError:  # noqa: BLE001 - unreadable path → let the other checks speak
-        return True
+    except OSError:
+        return None  # cannot tell — the caller must not render this as OK
     return False
 
 
@@ -335,6 +352,13 @@ def _print_repo_materialization_report(results: list[dict]) -> None:
             missing = ", ".join(r.get("missing", []))
             print(f"  {UI.badge('WARN', C.YELLOW)}  {name}  present but missing: {missing}")
             print(f"        fix: {hint}")
+        elif status == "unverifiable":
+            # The check did not run. Rendered as its own line, never as OK: a
+            # silent pass off a failed read is how four haulops repos sat
+            # unversioned for three weeks.
+            print(f"  {UI.badge('FAIL', C.RED)}  {name}  could not verify version control: {path}")
+            print("        the path could not be walked — this is NOT a pass")
+            print(f"        fix: check permissions on {path} and its parents, then re-run")
         elif status == "not-a-git-repo":
             print(f"  {UI.badge('FAIL', C.RED)}  {name}  not a git repository: {path}")
             print("        work dispatched here has no history and no recovery")
