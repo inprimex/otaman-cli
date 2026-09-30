@@ -2528,10 +2528,15 @@ class ArtifactBrowserScreen(Screen):
         self._load()
 
     def _load(self) -> None:
-        """Scan OFF the UI thread, like every other list here (crs 2.3)."""
-        lv = self.query_one("#authored-list", ListView)
-        lv.clear()
-        lv.append(ListItem(Label("Loading…")))
+        """Scan OFF the UI thread, like every other list here (crs 2.3).
+
+        No "Loading…" placeholder. `ListView.clear()` is deferred, so a
+        placeholder appended here could still be present when the worker's paint
+        lands — two rows, the stale one above the results. Windows CI caught
+        exactly that; on the faster runners the timing hid it. The scan is
+        short and the list simply fills, which is what it did before #221 moved
+        the scan off the thread.
+        """
         self.run_worker(self._load_worker, thread=True, exclusive=True, group="authored")
 
     def _load_worker(self) -> None:
