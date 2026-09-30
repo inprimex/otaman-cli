@@ -132,6 +132,12 @@ def test_registry_detail_offers_and_runs_accept_cost(program, monkeypatch):
             await pilot.pause()
             app.push_screen(RegistryDetailScreen(prog, "outcome", "JTBD-1"))
             await pilot.pause()
+            # crs 2.1 — the detail renders through a worker now (it blocked the
+            # UI thread for ~287ms cold). Await it, as every other screen's
+            # tests do; without this the body is still "Loading…" and the
+            # assertion passes or fails on timing — it failed on Windows.
+            await app.workers.wait_for_complete()
+            await pilot.pause()
             from textual.widgets import Static as _Static
 
             body = app.screen.query_one("#registry-detail", _Static)
@@ -216,6 +222,12 @@ def test_registry_detail_offers_accept_cost_on_solution_node(program, monkeypatc
         async with app.run_test() as pilot:
             await pilot.pause()
             app.push_screen(RegistryDetailScreen(prog, "solution", "SOL-2"))
+            await pilot.pause()
+            # crs 2.1 — the detail renders through a worker now (it blocked the
+            # UI thread for ~287ms cold). Await it, as every other screen's
+            # tests do; without this the body is still "Loading…" and the
+            # assertion passes or fails on timing — it failed on Windows.
+            await app.workers.wait_for_complete()
             await pilot.pause()
             from textual.widgets import Static as _Static
 
