@@ -70,6 +70,7 @@ class Projections:
         self._paths: list | None = None
         self._details: dict[tuple[str, str], str] = {}
         self._emphasis: Any = _UNSET
+        self._blocked: set[str] | None = None
 
     # -- invalidation -----------------------------------------------------
 
@@ -88,6 +89,7 @@ class Projections:
             self._notice = _UNSET
             self._details.clear()
             self._emphasis = _UNSET
+            self._blocked = None
 
     def bind(self, store: Any) -> None:
         """Invalidate whenever *store* advances a version."""
@@ -220,6 +222,35 @@ class Projections:
         with self._lock:
             self._emphasis = value
         return value
+
+    def blocked_by_decision(self) -> set[str]:
+        """Changes/tasks blocked on an unanswered `decision-required` (dae 1.2).
+
+        Here rather than on the screen because a lens must not scan the bus on a
+        render path — 2.3's guard forbids exactly that, and `:a` is evaluated on
+        every filter submission. Cached per generation like everything else, so
+        a decision-required landing on the bus advances the store and this
+        rebuilds with it.
+        """
+        self._check_sources()
+        with self._lock:
+            cached = self._blocked
+        if cached is not None:
+            return cached
+
+        refs: set[str] = set()
+        try:
+            from otaman_cli.console.bus import list_human_queue
+            from otaman_cli.console.decision_required import blocked_refs
+
+            for row in list_human_queue(self.program):
+                if getattr(row, "needs_answer", False):
+                    refs |= blocked_refs(getattr(row, "blocks", ""))
+        except Exception:  # noqa: BLE001 - an unreadable bus marks nothing, loudly elsewhere
+            refs = set()
+        with self._lock:
+            self._blocked = refs
+        return refs
 
     def lifecycle_rows(self) -> list:
         self._check_sources()

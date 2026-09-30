@@ -41,6 +41,8 @@ class Proposal:
     path: Path
     body: str
     msg_type: str = "spec-change-request"
+    #: `decision-required` only: the task/change this question is blocking.
+    blocks: str = ""
 
     #: Short human names for the message types the console decides on. A raw
     #: `spec-change-request` in a confirmation prompt is accurate and unreadable.
@@ -88,6 +90,22 @@ class Proposal:
         is what console-ia-consolidation 2.1 removes.
         """
         return self.msg_type in _QUEUE_TYPES
+
+    @property
+    def needs_answer(self) -> bool:
+        """A question to ANSWER, not one to approve/reject (dae 1.2)."""
+        from otaman_cli.console.decision_required import needs_answer
+
+        return needs_answer(self.msg_type)
+
+    @property
+    def is_awaiting(self) -> bool:
+        """Whether this row is waiting on the human at all.
+
+        What the count and the sort key on — wider than `is_decision`, because a
+        decision-required needs them just as much while offering different keys.
+        """
+        return self.is_decision or self.needs_answer
 
 
 # Directories that never hold a distinct PROGRAM root: heavy build dirs, the
@@ -286,6 +304,13 @@ def _frontmatter_head(f: Path, limit: int = 8192) -> str | None:
 
 _QUEUE_TYPES = ("spec-change-request", "outcome-proposal")
 
+#: Types that reach the human's queue REGARDLESS of `to:`, and that count as
+#: awaiting them. `decision-required` joins the decision types here (dae 1.2):
+#: an agent emitting one is blocked on the human by definition, so requiring it
+#: to also be addressed correctly would let a misaddressed emission freeze the
+#: agent silently — the exact failure the type exists to remove.
+_AWAITING_TYPES = (*_QUEUE_TYPES, "decision-required")
+
 
 def _subject_head(path: Path, limit: int = 4096) -> str:
     """The `## Subject:` line from a bounded head of *path*, or ``""``.
@@ -359,7 +384,7 @@ def list_human_queue(program: Program) -> list[Proposal]:
             continue
         # CHEAP tier decides what to skip; the authoritative parse below builds
         # only the rows that survive (~735 of 5473 on the live bus).
-        if entry.tag("to") != "human" and entry.tag("type") not in _QUEUE_TYPES:
+        if entry.tag("to") != "human" and entry.tag("type") not in _AWAITING_TYPES:
             continue
         if entry.flag("x-cc"):
             continue
@@ -378,7 +403,7 @@ def list_human_queue(program: Program) -> list[Proposal]:
         # a surface must not narrow it; the routing question is raised with
         # spec-agent/cofounder separately rather than settled by a filter here.
         msg_type = str(fm.get("type", ""))
-        if fm.get("to") != "human" and msg_type not in _QUEUE_TYPES:
+        if fm.get("to") != "human" and msg_type not in _AWAITING_TYPES:
             continue
         # CC copies are addressed to strategic agents; the human's primary shows once.
         if fm.get("x-cc"):
@@ -398,11 +423,16 @@ def list_human_queue(program: Program) -> list[Proposal]:
                 path=f,
                 body="",  # lazy — see read_body()
                 msg_type=msg_type,
+                # dae 1.2 — what a decision-required is blocking, so the tree
+                # can mark the change that is waiting on this answer.
+                blocks=str(fm.get("blocks", "") or ""),
             )
         )
     # Decisions first — they are the rows that need the human to act; then by
     # recency. A single list still has to say what is urgent.
-    out.sort(key=lambda p: (not p.is_decision, p.timestamp), reverse=False)
+    # Anything AWAITING the human first — a decision-required left below the
+    # read-only traffic would be a question nobody sees.
+    out.sort(key=lambda p: (not p.is_awaiting, p.timestamp), reverse=False)
     return out
 
 
