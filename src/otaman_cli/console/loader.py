@@ -72,6 +72,11 @@ def _fields_of(proposal: Any) -> dict[str, Any]:
     means a cold scan never pays for text nobody is looking at.
     """
     return {
+        # The canonical object itself. `Proposal` IS the entity the console
+        # renders, and it already carries no body on this path — so holding it
+        # lets every existing row widget and decision action keep working
+        # unchanged, which is what "no behavior change" (2.1) requires.
+        "proposal": proposal,
         "stem": proposal.stem,
         "subject": proposal.subject,
         "from_agent": proposal.from_agent,
@@ -102,7 +107,11 @@ class Loader:
         #: plain message would never trip a refresh and the surface would sit
         #: confidently out of date on exactly the rows it was merged to carry.
         self._lister = lister or list_human_queue
+        #: Only a source we CREATED may be stopped. An injected one belongs to
+        #: its caller — that is what lets a screen be tested without a real poll
+        #: thread, and stopping it here would reach into someone else's object.
         self._source = source
+        self._own_source = source is None
         #: Injectable so debounce behaviour can be tested without sleeping.
         #: Wall-clock tests of a 250ms window are flaky on a loaded CI runner —
         #: this one failed on macOS at 60ms margins before the seam existed.
@@ -149,6 +158,7 @@ class Loader:
             from otaman_cli.console.events import make_event_source
 
             self._source = make_event_source(self.program, lister=self._lister)
+            self._own_source = True
         self._stopped = False
         self._source.start(self._on_change)
 
@@ -185,7 +195,7 @@ class Loader:
             if self._timer is not None:
                 self._timer.cancel()
                 self._timer = None
-        if self._source is not None:
+        if self._source is not None and self._own_source:
             try:
                 self._source.stop()
             except Exception:  # noqa: BLE001 - teardown races are normal

@@ -286,7 +286,21 @@ def marshal_to_app(app: Any, callback: Callable[[Snapshot], None]) -> Callable[[
     def marshalled(snapshot: Snapshot) -> None:
         try:
             app.call_from_thread(callback, snapshot)
-        except Exception:  # noqa: BLE001 - app shutting down mid-notify is normal
+            return
+        except Exception:  # noqa: BLE001 - see below; fall through to a direct call
+            pass
+        # `call_from_thread` REFUSES to run on the app's own thread, so a
+        # dispatch made from the UI — an optimistic write (2.2), or a test
+        # driving the store directly — raised here and the repaint was silently
+        # dropped. Swallowing that was the bug: the store had the new version
+        # and the screen never heard about it.
+        #
+        # Already on the app's thread is exactly when calling directly is safe,
+        # so do that. If THAT also fails the app is going away mid-notify, which
+        # is normal during teardown and nothing to surface.
+        try:
+            callback(snapshot)
+        except Exception:  # noqa: BLE001 - teardown race
             return
 
     return marshalled

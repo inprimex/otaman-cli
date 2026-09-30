@@ -35,6 +35,7 @@ from otaman_cli.console.bus import (
     discover_programs,
     read_body,
 )
+from otaman_cli.console.store import marshal_to_app
 
 # A path that can never be a program root — used to resolve the identity badge
 # on the picker (no program picked yet) without a cwd platform.yaml false-match.
@@ -809,21 +810,28 @@ class InboxScreen(_DecisionActions, Screen):
         Binding("q", "app.quit", "Quit", priority=True),
     ]
 
-    def __init__(self, program: Program, *, event_source=None) -> None:
+    def __init__(self, program: Program, *, event_source=None, store=None, loader=None) -> None:
         super().__init__()
         self.program = program
-        # LIVE refresh. The event-source interface (polling now; fswatch/NATS
-        # later, with no console rework) was wired only to PendingListScreen —
-        # the screen 2.1 replaced with this one — and the wiring did not come
-        # across. Measured: with Messages open, a decision landing on the bus
-        # stayed invisible until the human pressed `r`. On the surface Roman
-        # watches for things that need him, that is the surface being wrong
-        # rather than merely stale.
-        self._source = event_source
-        self._own_source = event_source is None
-        # Session cache of the rendered queue: back-navigation paints from this
-        # instantly; only the mount-time load and the event source re-scan.
-        # None = not loaded yet (distinct from "loaded, and empty").
+        # crs 2.1 — this screen no longer reads the filesystem. It renders the
+        # store; the Loader is the only reader (D1), which is what makes coming
+        # back from a message instant instead of a ~500ms re-derivation of 762
+        # rows.
+        #
+        # The store is created here when not injected, so `InboxScreen(program)`
+        # and `InboxScreen(program, event_source=...)` — the two forms eight test
+        # modules already use — keep working, and keep getting the new path.
+        from otaman_cli.console.loader import Loader
+        from otaman_cli.console.store import Store
+
+        self._store = store if store is not None else Store()
+        self._loader = (
+            loader if loader is not None else Loader(program, self._store, source=event_source)
+        )
+        self._own_loader = loader is None
+        self._unsubscribe = None
+        #: None until the first snapshot lands — distinct from "loaded, and
+        #: empty", which is what tells the mount path whether to show Loading…
         self._cache = None
 
     def compose(self) -> ComposeResult:
@@ -841,56 +849,59 @@ class InboxScreen(_DecisionActions, Screen):
         invalidate_read_caches()
         self._load(show_loading=not self._cache)
 
-    def on_mount(self) -> None:
-        if self._source is None:
-            from otaman_cli.console.bus import list_human_queue
-            from otaman_cli.console.events import make_event_source
+    def _rows(self):
+        """The queue as the store holds it — a dict read, never a bus scan."""
+        from otaman_cli.console.loader import KIND_MESSAGE
 
-            # Watch the SAME set this screen renders — the merged queue, not
-            # just the decisions in it.
-            self._source = make_event_source(self.program, lister=list_human_queue)
-        # The provider owns its trigger and calls back when the pending set may
-        # have moved; marshal onto the UI thread, then reuse the SAME load path.
-        self._source.start(lambda: self.app.call_from_thread(self._load))
+        rows = [e.get("proposal") for e in self._store.snapshot().of_kind(KIND_MESSAGE)]
+        return [r for r in rows if r is not None]
+
+    def on_mount(self) -> None:
+        # Repaint whenever a new store version lands, whoever produced it: the
+        # Loader's poll, an external write, or this screen's own refresh. The
+        # subscriber takes the SNAPSHOT, so a missed version costs nothing.
+        self._unsubscribe = self._store.subscribe(
+            marshal_to_app(self.app, lambda _snapshot: self._apply())
+        )
+        # Cold-start off the UI thread: a synchronous scan at mount blocked
+        # first paint (5.1 finding #4), and that constraint did not change just
+        # because the reader moved.
+        self._load(show_loading=True)
+        self._loader.start()
 
     def on_unmount(self) -> None:
-        # Only stop a source we created — an injected one belongs to the caller
+        if self._unsubscribe is not None:
+            self._unsubscribe()
+            self._unsubscribe = None
+        # Only stop a loader we created — an injected one belongs to the caller
         # (that is what makes the screen testable without a real poll thread).
-        if self._source is not None and self._own_source:
-            self._source.stop()
+        if self._own_loader:
+            self._loader.stop()
 
     def on_screen_resume(self) -> None:
-        # Back from a message or a decision: paint the CACHED list synchronously
-        # (no rescan), then reconcile in the background so a just-decided row
-        # drops off. Measured on the live bus: 762 rows cost ~500 ms to re-derive
-        # even with the memoized reads, and this is the console's most-walked
-        # path — list to message and back.
-        if self._cache is not None:
-            self._paint(self._cache)
-        self._load(show_loading=self._cache is None)
+        # Back from a message or a decision. This is the console's most-walked
+        # path, and it is now a dict read: the store already holds the queue, so
+        # there is nothing to re-derive and nothing to wait for. The ~500ms
+        # re-derivation of 762 rows this used to cost is what 2.1 removes.
+        self._apply()
 
     def _load(self, *, show_loading: bool = False) -> None:
-        """(Re)scan the bus OFF the UI thread, updating the cache.
+        """Refill the store OFF the UI thread.
 
-        The scan ran INLINE here, so opening Messages or returning to it froze
-        the console for the length of a full queue derivation — ~1 s cold on the
-        live bus. Both the off-thread scan and the session cache existed on the
-        screen 2.1 replaced and did not come across; `TreeScreen` keeps the same
-        shape, so this restores the house pattern rather than inventing one.
+        The screen no longer scans; it asks the Loader to, and the subscription
+        paints when the new version lands.
         """
-        if show_loading:
+        if show_loading and self._cache is None:
             lv = self.query_one("#inbox-list", ListView)
             lv.clear()
             lv.append(ListItem(Label("Loading messages…")))
         self.run_worker(self._load_worker, thread=True, exclusive=True, group="inbox")
 
     def _load_worker(self) -> None:
-        from otaman_cli.console.bus import list_human_queue
+        self._loader.refresh()  # dispatches; the subscription repaints
 
-        rows = list_human_queue(self.program)  # bus scan, off the UI thread
-        self.app.call_from_thread(self._apply, rows)
-
-    def _apply(self, rows) -> None:
+    def _apply(self, rows=None) -> None:
+        rows = self._rows() if rows is None else rows
         self._cache = rows
         self._paint(rows)
 
@@ -922,7 +933,9 @@ class InboxScreen(_DecisionActions, Screen):
         return row if row is not None and row.is_decision else None
 
     def _after_decision(self) -> None:
-        self._load()  # stay on the list; the decided row disappears
+        # Stay on the list; the decided row disappears once the Loader's rescan
+        # lands. (2.2 replaces this with an optimistic delta applied at once.)
+        self._load()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         row = getattr(event.item, "proposal", None)

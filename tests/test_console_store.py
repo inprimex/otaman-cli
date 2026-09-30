@@ -313,3 +313,31 @@ def test_marshalling_survives_an_app_shutting_down():
 
 def test_entity_key_is_kind_and_id():
     assert Entity(kind="outcome", id="o1").key == ("outcome", "o1")
+
+
+def test_marshalling_falls_back_when_already_on_the_apps_thread():
+    """`call_from_thread` refuses to run on the app's own thread. A dispatch
+    made from the UI — an optimistic write, say — used to raise there and have
+    the repaint silently swallowed: the store had the new version and the
+    screen never heard about it."""
+
+    class SameThreadApp:
+        def call_from_thread(self, fn, *args):
+            raise RuntimeError("must not be called from the same thread")
+
+    got = []
+    marshal_to_app(SameThreadApp(), lambda snap: got.append(snap.version))(Snapshot(version=3))
+    assert got == [3], "a notify from the app thread must still reach the callback"
+
+
+def test_a_callback_raising_on_the_fallback_path_is_swallowed():
+    """Teardown races stay silent — but only after the callback was tried."""
+
+    class SameThreadApp:
+        def call_from_thread(self, fn, *args):
+            raise RuntimeError("same thread")
+
+    def boom(snap):
+        raise RuntimeError("app is gone")
+
+    marshal_to_app(SameThreadApp(), boom)(Snapshot(version=1))
