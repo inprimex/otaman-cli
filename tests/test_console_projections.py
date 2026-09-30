@@ -187,13 +187,83 @@ def test_warm_builds_everything_ahead_of_the_first_render(counted):
     assert calls == {"tree": 2, "lifecycle": 1, "notice": 1}, "warming must fill the cache"
 
 
-def test_the_known_gap_is_stated():
-    """A specs edit with no bus traffic needs `r` until the fswatch provider
-    lands. An unstated gap reads as coverage."""
-    doc = (
-        Projections.__module__
-        and __import__("otaman_cli.console.projections", fromlist=["x"]).__doc__
-    )
-    doc = " ".join((doc or "").split())
-    assert "KNOWN GAP" in doc
-    assert "fswatch" in doc and "tasks.md" in doc
+def test_the_remaining_limit_is_stated():
+    """The gap this layer first opened — a specs edit with no bus traffic — is
+    now closed by the source fingerprint. What remains is narrower: a stat
+    cannot see an edit that leaves mtime AND size unchanged. An unstated limit
+    reads as coverage, so the docstring must keep naming it."""
+    import otaman_cli.console.projections as mod
+
+    doc = " ".join((mod.__doc__ or "").split())
+    assert "KNOWN LIMIT" in doc
+    assert "mtime" in doc and "fswatch" in doc
+
+
+def test_an_edited_source_invalidates_without_a_bus_delta(tmp_path, monkeypatch):
+    """The gap, closed: editing a registry file with no bus traffic at all must
+    still be picked up, because a lens no longer re-reads on every switch."""
+    calls = {"n": 0}
+
+    def fake(program, *, show_closed=False, lens="value"):
+        calls["n"] += 1
+        return ["root"]
+
+    monkeypatch.setattr("otaman_cli.console.tree.build_artifact_tree", fake)
+    source = tmp_path / "outcomes.yaml"
+    source.write_text("outcomes: []\n", encoding="utf-8")
+
+    pr = Projections(program=object())
+    pr._paths = [("outcomes.yaml", source)]
+    pr.tree("value")
+    pr.tree("value")
+    assert calls["n"] == 1
+
+    source.write_text("outcomes: [{id: NEW}]\n", encoding="utf-8")
+    pr.tree("value")
+    assert calls["n"] == 2, "an edited source must invalidate the projection"
+
+
+def test_an_untouched_source_does_not_invalidate(tmp_path, monkeypatch):
+    """The fingerprint must not thrash — otherwise it is a slow rebuild."""
+    calls = {"n": 0}
+
+    def fake(program, *, show_closed=False, lens="value"):
+        calls["n"] += 1
+        return ["root"]
+
+    monkeypatch.setattr("otaman_cli.console.tree.build_artifact_tree", fake)
+    source = tmp_path / "outcomes.yaml"
+    source.write_text("outcomes: []\n", encoding="utf-8")
+    pr = Projections(program=object())
+    pr._paths = [("outcomes.yaml", source)]
+    for _ in range(10):
+        pr.tree("value")
+    assert calls["n"] == 1
+
+
+def test_a_missing_source_is_a_stable_mark(tmp_path, monkeypatch):
+    """An absent registry is normal — a program without one. It must fingerprint
+    to a stable value, or every read would look like a change."""
+    calls = {"n": 0}
+
+    def fake(program, *, show_closed=False, lens="value"):
+        calls["n"] += 1
+        return ["root"]
+
+    monkeypatch.setattr("otaman_cli.console.tree.build_artifact_tree", fake)
+    pr = Projections(program=object())
+    pr._paths = [("gone.yaml", tmp_path / "gone.yaml")]
+    for _ in range(5):
+        pr.tree("value")
+    assert calls["n"] == 1
+
+
+def test_the_source_paths_are_resolved_once(tmp_path):
+    """Resolving them per check cost 172ms — three times the whole budget, for
+    what is supposed to be a few stat calls."""
+    pr = Projections(program=object())
+    pr._paths = [("x", tmp_path / "nope")]
+    before = pr._paths
+    pr._sources_fingerprint()
+    pr._sources_fingerprint()
+    assert pr._paths is before, "paths must not be re-resolved per check"

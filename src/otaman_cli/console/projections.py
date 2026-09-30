@@ -19,14 +19,19 @@ detail view all read a prebuilt structure; none of them touch the filesystem.
 The generation advances when the store does, or when the human explicitly
 refreshes — so a delta rebuilds the index rather than a keypress rebuilding it.
 
-KNOWN GAP, stated because an unstated one reads as coverage: the generation
-advances on a STORE delta (the bus) and on an explicit `r`. A specs-repo edit
-that produces no bus traffic — someone editing tasks.md directly — is not seen
-until one of those. Before this layer every lens switch re-read from disk, so
-that case refreshed by accident; the trade is deliberate (2773ms per switch
-against a 50ms budget), and the escape hatch is one keypress. It closes for
-good when the artifact data itself is ingested and the fswatch provider (1.3)
-watches the specs tree.
+Freshness without a watcher: a read first compares a cheap FINGERPRINT of the
+artifact sources — the registry files' (mtime, size) and the changes directory's
+own mtime. A specs-repo edit that produces no bus traffic (someone editing
+tasks.md directly) therefore still invalidates, which was the gap this layer
+opened when it stopped re-reading on every lens switch. The fingerprint is a
+handful of stat calls, measured below the noise floor against the 50ms budget,
+and it reuses the same (path, mtime, size) idea the YAML read cache already
+keys on.
+
+KNOWN LIMIT, stated because an unstated one reads as coverage: a stat-based
+fingerprint cannot see an edit that leaves mtime AND size unchanged — the same
+blind spot `invalidate_read_caches` exists to cover, and the same reason `r`
+remains. A real watcher (1.3, otaman-fswatch) closes it properly.
 
 Filtering deliberately stays OUTSIDE the cache. `matches`/`matches_tree` run
 over the prebuilt tree in memory, which is microseconds, and caching per query
@@ -61,6 +66,8 @@ class Projections:
         self._awaiting: set[str] | None = None
         self._notice: Any = _UNSET
         self._unsubscribe = None
+        self._fingerprint: tuple | None = None
+        self._paths: list | None = None
 
     # -- invalidation -----------------------------------------------------
 
@@ -94,8 +101,70 @@ class Projections:
 
     # -- the projections --------------------------------------------------
 
+    def _sources_fingerprint(self) -> tuple:
+        """(mtime, size) of the artifact sources — cheap enough to check per read.
+
+        Deliberately shallow: the registry files themselves plus the changes
+        directory's mtime, which moves when a change folder is added or removed.
+        Walking every tasks.md would turn a freshness check back into a scan.
+        """
+        import os
+
+        marks: list[tuple] = []
+        for label, path in self._source_paths():
+            try:
+                st = os.stat(path)
+                marks.append((label, st.st_mtime, st.st_size))
+            except OSError:
+                marks.append((label, None, None))
+        return tuple(marks)
+
+    def _source_paths(self) -> list[tuple[str, Any]]:
+        """Where the artifact sources live, resolved ONCE.
+
+        Resolving them per check cost 172ms — `strategy_repo` and
+        `_specs_changes_dir` each re-parse platform.yaml and re-resolve repos,
+        which is three times the whole budget for a job that is supposed to be a
+        few stat calls. The locations do not move while the console is open;
+        only their contents do, which is what the stats are for.
+        """
+        if self._paths is not None:
+            return self._paths
+
+        paths: list[tuple[str, Any]] = []
+        try:
+            from otaman_cli.registries.loader import strategy_repo
+
+            home = strategy_repo(self.program.root)
+        except Exception:  # noqa: BLE001 - unresolvable home → nothing to fingerprint
+            home = None
+        if home is not None:
+            for name in ("outcomes.yaml", "solutions.yaml", "personas.yaml"):
+                paths.append((name, home / name))
+        try:
+            from otaman_cli.commands.spec import _specs_changes_dir
+
+            changes = _specs_changes_dir(self.program.root)
+            if changes is not None:
+                paths.append(("changes", changes))
+        except Exception:  # noqa: BLE001 - unresolvable specs → skip that mark
+            pass
+        self._paths = paths
+        return paths
+
+    def _check_sources(self) -> None:
+        """Invalidate if the artifact sources moved since the last build."""
+        current = self._sources_fingerprint()
+        with self._lock:
+            known = self._fingerprint
+        if known is not None and current != known:
+            self.invalidate()
+        with self._lock:
+            self._fingerprint = current
+
     def tree(self, lens: str, *, show_closed: bool = False) -> list:
         """The artifact tree for *lens*, built once per generation."""
+        self._check_sources()
         key = (lens, show_closed)
         with self._lock:
             cached = self._trees.get(key)
@@ -110,6 +179,7 @@ class Projections:
         return built
 
     def lifecycle_rows(self) -> list:
+        self._check_sources()
         with self._lock:
             cached = self._lifecycle
         if cached is not None:
