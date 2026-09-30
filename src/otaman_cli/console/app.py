@@ -1008,12 +1008,23 @@ class TreeScreen(Screen):
     ]
 
     def __init__(
-        self, program: Program, *, authored_only: bool = False, lens: str | None = None
+        self,
+        program: Program,
+        *,
+        authored_only: bool = False,
+        lens: str | None = None,
+        projections=None,
     ) -> None:
         super().__init__()
+        from otaman_cli.console.projections import Projections
         from otaman_cli.console.tree import LENS_VALUE
 
         self.program = program
+        # crs 2.1 — lens structures are built once and read thereafter. Before
+        # this, a lens switch rebuilt the tree from disk: 2773ms for `value`,
+        # 1920ms for `delivery`, against a 50ms budget. Nothing about the data
+        # had changed; the screen simply had nowhere to keep it.
+        self._projections = projections if projections is not None else Projections(program)
         self._show_closed = False
         self._panel_open = False
         # 3.1 — Artifacts is ONE door with three lenses over the same objects.
@@ -1079,8 +1090,17 @@ class TreeScreen(Screen):
         # collapse and Enter opens — the default contradicted the contract we
         # advertise.
         self.query_one("#artifact-tree", Tree).auto_expand = False
+        # A bus delta invalidates the lens projections too: an approval landing
+        # elsewhere changes what is awaiting the human, and the marker beside a
+        # row has to move with it.
+        store = getattr(self.app, "store", None)
+        if store is not None:
+            self._projections.bind(store)
         self._apply_lens()
         self._reload()
+
+    def on_unmount(self) -> None:
+        self._projections.unbind()
 
     # ------------------------------------------------------------------ 1.3
     def action_command_mode(self) -> None:
@@ -1201,7 +1221,10 @@ class TreeScreen(Screen):
         )
 
     def action_refresh(self) -> None:
+        # `r` is the human saying "I think this is stale" — it must invalidate
+        # the projections too, or it would repaint the same prebuilt structure.
         invalidate_read_caches()
+        self._projections.invalidate()
         self._reload()
 
     def action_toggle_closed(self) -> None:
@@ -1270,31 +1293,29 @@ class TreeScreen(Screen):
         self.run_worker(self._load, thread=True, exclusive=True, group="tree")
 
     def _load(self) -> None:
-        from otaman_cli.console.tree import (
-            LENS_LIFECYCLE,
-            build_artifact_tree,
-            tree_fallback_notice,
-        )
+        from otaman_cli.console.tree import LENS_LIFECYCLE
 
         if self._lens == LENS_LIFECYCLE:
             from otaman_cli.console.filter_grammar import matches
-            from otaman_cli.console.lifecycle import derive_lifecycle_rows
 
-            rows = derive_lifecycle_rows(self.program)
+            rows = self._projections.lifecycle_rows()
             if self._query is not None and not self._query.is_empty:
                 awaiting = self._awaiting_ids()
                 # A flat table needs no path-preservation — the row IS the hit.
+                # Filtering stays OUT of the cache: it is microseconds over a
+                # prebuilt list, and caching per query would key on text the
+                # human is still typing.
                 rows = [r for r in rows if matches(self._query, r, awaiting=awaiting)]
             self.app.call_from_thread(self._paint_lifecycle, rows)
             return
 
-        roots = build_artifact_tree(self.program, show_closed=self._show_closed, lens=self._lens)
+        roots = self._projections.tree(self._lens, show_closed=self._show_closed)
         if self._authored_only:
             roots = _authored_change_roots(self.program, roots)
         awaiting = self._awaiting_ids()
         count = self._stamp_awaiting(roots, awaiting)
         roots = self._filtered(roots)
-        notice = tree_fallback_notice(self.program)
+        notice = self._projections.notice()
         self.app.call_from_thread(self._populate, roots, notice)
         self.app.call_from_thread(self._set_awaiting_count, count)
 
@@ -1361,9 +1382,10 @@ class TreeScreen(Screen):
         """
         awaiting: set[str] = set()
         try:
-            from otaman_cli.console.lifecycle import derive_lifecycle_rows
-
-            for row in derive_lifecycle_rows(self.program):
+            # The PROJECTION's rows, not a fresh derivation. This ran on every
+            # _load — so a lens switch paid 1468ms here on top of rebuilding the
+            # tree, for a set that changes only when the lifecycle does.
+            for row in self._projections.lifecycle_rows():
                 actor = str(getattr(row, "next_actor", "") or "")
                 if "human" in actor.lower():
                     name = getattr(row, "name", None)

@@ -583,6 +583,11 @@ def test_awaiting_ids_union_the_two_existing_sources(program, monkeypatch):
                 "list_authored_changes",
                 lambda program: [SimpleNamespace(name="approve-me")],
             )
+            # crs 2.1 — the lifecycle rows are a PROJECTION built once per
+            # generation, so patching the derivation after mount is not seen
+            # until the projection is invalidated. That is the same signal `r`
+            # sends, and the same one a bus delta sends.
+            app.screen._projections.invalidate()
             assert app.screen._awaiting_ids() == {"ratify-me", "approve-me"}
             await app.action_quit()
 
