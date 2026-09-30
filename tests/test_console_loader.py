@@ -9,7 +9,6 @@ failed rescan must leave a stale store rather than a dead watcher.
 from __future__ import annotations
 
 import threading
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +26,34 @@ class FakeProposal:
     path: Path = Path("/tmp/x.md")
     body: str = ""
     msg_type: str = "spec-change-request"
+
+
+class FakeTimer:
+    """A timer the test fires by hand.
+
+    The debounce tests used real timers and wall-clock sleeps; one of them
+    failed on a loaded macOS runner because 60ms margins are not something CI
+    guarantees. Controlling the timer makes the SAME assertions deterministic.
+    """
+
+    created: list[FakeTimer] = []
+
+    def __init__(self, delay, fn):
+        self.delay = delay
+        self.fn = fn
+        self.started = False
+        self.cancelled = False
+        FakeTimer.created.append(self)
+
+    def start(self):
+        self.started = True
+
+    def cancel(self):
+        self.cancelled = True
+
+    def fire(self):
+        if not self.cancelled:
+            self.fn()
 
 
 class FakeSource:
@@ -48,15 +75,17 @@ class FakeSource:
         self.on_change()
 
 
-def _loader(items, *, debounce=0.01, source=None):
+def _loader(items, *, debounce=0.01, source=None, timer_factory=None):
     store = Store()
     box = {"items": list(items)}
+    kwargs = {"timer_factory": timer_factory} if timer_factory else {}
     ldr = Loader(
         program=object(),
         store=store,
         source=source,
         lister=lambda program: box["items"],
         debounce=debounce,
+        **kwargs,
     )
     return ldr, store, box
 
@@ -136,30 +165,51 @@ def test_an_acked_message_disappears_rather_than_lingering():
 def test_a_burst_of_events_coalesces_into_one_version():
     """The guarantee the store's versioning exists to give: a render cannot
     land between two halves of one logical change."""
+    FakeTimer.created.clear()
     source = FakeSource()
-    ldr, store, box = _loader([FakeProposal("m1")], debounce=0.05, source=source)
+    ldr, store, box = _loader([FakeProposal("m1")], source=source, timer_factory=FakeTimer)
     ldr.cold_start()
     v = store.version
     ldr.start()
     box["items"] = [FakeProposal("m1"), FakeProposal("m2")]
     for _ in range(5):
         source.fire()
-    time.sleep(0.25)
+
+    # Five events, five timers created — but four cancelled, so only the last
+    # one can fire. That is the coalescing, stated without a sleep.
+    assert len(FakeTimer.created) == 5
+    assert sum(1 for tm in FakeTimer.created if not tm.cancelled) == 1
+    for tm in FakeTimer.created:
+        tm.fire()
+
     assert store.version == v + 1, "five events must produce one batch, not five"
     assert len(store.snapshot().of_kind(KIND_MESSAGE)) == 2
 
 
 def test_a_later_event_restarts_the_quiet_period():
+    """A second event inside the window must cancel the pending flush.
+
+    Deterministic on purpose: the wall-clock version of this test failed on a
+    loaded macOS CI runner, where 60ms margins are not guaranteed.
+    """
+    FakeTimer.created.clear()
     source = FakeSource()
-    ldr, store, box = _loader([], debounce=0.12, source=source)
+    ldr, store, _ = _loader([], source=source, timer_factory=FakeTimer)
     ldr.start()
     v = store.version
+
     source.fire()
-    time.sleep(0.06)
-    source.fire()  # still inside the window — must defer the flush
-    time.sleep(0.06)
-    assert store.version == v, "the flush fired before the burst settled"
-    time.sleep(0.2)
+    first = FakeTimer.created[-1]
+    source.fire()
+    second = FakeTimer.created[-1]
+
+    assert first is not second
+    assert first.cancelled, "the earlier flush must be cancelled, not left to fire"
+    assert not second.cancelled
+
+    first.fire()
+    assert store.version == v, "a cancelled timer must not dispatch"
+    second.fire()
     assert store.version == v + 1
 
 
@@ -184,7 +234,15 @@ def test_a_failing_rescan_leaves_the_store_stale_not_dead():
             raise OSError("bus vanished")
         return [FakeProposal("m1")]
 
-    ldr = Loader(program=object(), store=store, source=source, lister=lister, debounce=0.01)
+    FakeTimer.created.clear()
+    ldr = Loader(
+        program=object(),
+        store=store,
+        source=source,
+        lister=lister,
+        debounce=0.01,
+        timer_factory=FakeTimer,
+    )
     ldr.cold_start()
     v = store.version
     state["fail"] = True
@@ -203,7 +261,7 @@ def test_a_failing_rescan_leaves_the_store_stale_not_dead():
     # ...and the watcher is still live: the next good event applies.
     state["fail"] = False
     source.fire()
-    time.sleep(0.15)
+    FakeTimer.created[-1].fire()
     assert store.version == v + 1, "a failure must not stop later updates"
 
 
@@ -212,13 +270,14 @@ def test_a_failing_rescan_leaves_the_store_stale_not_dead():
 
 
 def test_stop_cancels_a_pending_flush():
+    FakeTimer.created.clear()
     source = FakeSource()
-    ldr, store, box = _loader([], debounce=0.2, source=source)
+    ldr, store, _ = _loader([], source=source, timer_factory=FakeTimer)
     ldr.start()
     v = store.version
     source.fire()
     ldr.stop()
-    time.sleep(0.35)
+    FakeTimer.created[-1].fire()  # a cancelled timer is inert even if it fires
     assert store.version == v, "a flush must not fire after stop"
     assert source.stopped
 
@@ -246,12 +305,14 @@ def test_stop_is_idempotent():
 
 def test_events_after_stop_are_ignored():
     source = FakeSource()
-    ldr, store, _ = _loader([], debounce=0.01, source=source)
+    FakeTimer.created.clear()
+    ldr, store, _ = _loader([], source=source, timer_factory=FakeTimer)
     ldr.start()
     ldr.stop()
     v = store.version
     source.fire()
-    time.sleep(0.1)
+    for tm in FakeTimer.created:
+        tm.fire()
     assert store.version == v
 
 
@@ -270,8 +331,9 @@ def test_the_loader_watches_what_the_store_holds():
 
 
 def test_concurrent_events_do_not_lose_the_final_state():
+    FakeTimer.created.clear()
     source = FakeSource()
-    ldr, store, box = _loader([], debounce=0.05, source=source)
+    ldr, store, box = _loader([], source=source, timer_factory=FakeTimer)
     ldr.start()
 
     def fire_many():
@@ -280,9 +342,10 @@ def test_concurrent_events_do_not_lose_the_final_state():
 
     box["items"] = [FakeProposal("final")]
     threads = [threading.Thread(target=fire_many) for _ in range(3)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    time.sleep(0.3)
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    for tm in FakeTimer.created:
+        tm.fire()  # all cancelled but the last — the final state must win
     assert {e.id for e in store.snapshot().of_kind(KIND_MESSAGE)} == {"final"}

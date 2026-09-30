@@ -93,6 +93,7 @@ class Loader:
         source: Any | None = None,
         lister: Callable[[Program], list] | None = None,
         debounce: float = DEBOUNCE_SECONDS,
+        timer_factory: Callable[[float, Callable[[], None]], Any] = threading.Timer,
     ) -> None:
         self.program = program
         self.store = store
@@ -102,7 +103,11 @@ class Loader:
         #: confidently out of date on exactly the rows it was merged to carry.
         self._lister = lister or list_human_queue
         self._source = source
-        self._timer: threading.Timer | None = None
+        #: Injectable so debounce behaviour can be tested without sleeping.
+        #: Wall-clock tests of a 250ms window are flaky on a loaded CI runner —
+        #: this one failed on macOS at 60ms margins before the seam existed.
+        self._timer_factory = timer_factory
+        self._timer: Any | None = None
         self._lock = threading.Lock()
         self._stopped = False
         store.register_deriver(KIND_MESSAGE, message_deriver)
@@ -154,8 +159,10 @@ class Loader:
                 return
             if self._timer is not None:
                 self._timer.cancel()  # a later event restarts the quiet period
-            self._timer = threading.Timer(self.debounce, self._flush)
-            self._timer.daemon = True
+            self._timer = self._timer_factory(self.debounce, self._flush)
+            daemon = getattr(self._timer, "daemon", None)
+            if daemon is not None:
+                self._timer.daemon = True
             self._timer.start()
 
     def _flush(self) -> None:
