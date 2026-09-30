@@ -145,11 +145,14 @@ def plan(root: Path, changes_dir: Path, change: str, config: dict[str, Any]) -> 
 
     lines = _task_lines(tasks_path)
 
-    # Two task lines can collapse to one id: core's `task_id_of` stops at a word
-    # boundary, so `1.7-bis` reads as `1.7`. A tick aimed at either would land on
-    # both, which is a wrong write, not a display quirk — so those ids are
-    # reported and NEVER applied. Reported to core (2026-09-29); if core learns
-    # the suffix, these simply stop appearing.
+    # Two task lines can still carry the SAME id — a duplicated line in a
+    # hand-edited tasks.md. A tick aimed at that id lands on both, which is a
+    # wrong write, not a display quirk, so it is reported and never applied.
+    #
+    # `1.7-bis` reading as `1.7` used to be the live instance of this; core #88
+    # taught `task_id_of` the suffix (from this sweep's report, 2026-09-29), so
+    # that case is gone. The guard stays because a literal duplicate is still
+    # possible and still writes to the wrong line.
     seen: dict[str, int] = {}
     for tid, _ in lines:
         seen[tid] = seen.get(tid, 0) + 1
@@ -184,3 +187,54 @@ def changes_with_filings(changes_dir: Path) -> list[str]:
         for d in changes_dir.iterdir()
         if d.is_dir() and d.name != "archive" and (d / "tasks.md").is_file()
     )
+
+
+#: How long the awaiting-tick COUNT may spend before it gives up and says so.
+#: `otaman check` is the most-run command in the fleet; a count that makes it
+#: pause is a count nobody keeps. Exceeding this renders not-checked — never a
+#: partial number, which would read as authoritative while being short.
+#:
+#: Deliberately small. On an ordinary tenant the whole count finishes well
+#: inside it and the real figure renders; on a fleet this size it cannot finish
+#: at any budget worth paying on every `check`, so a bigger one would only buy a
+#: slower way to print the same "NOT CHECKED". The fix for that is a batch
+#: reader in core (one bus scan for all changes instead of one per change —
+#: measured 61 scans over 6657 messages, 23s), not a longer wait here.
+COUNT_BUDGET_SECONDS = 1.0
+
+
+def awaiting_tick(
+    root: Path, changes_dir: Path, config: dict[str, Any], budget: float = COUNT_BUDGET_SECONDS
+) -> tuple[int | None, str]:
+    """``(count, note)`` — task ids filed but not yet ticked, fleet-wide.
+
+    ``None`` means NOT CHECKED, with *note* saying why; it is never 0, because a
+    zero that means "did not look" is the failure this whole change exists to
+    end (pmeets: ~2 silent weeks, the lens reading 5/11 against a real 11/11).
+
+    Bounded on purpose. Core's reader is per-change, so N changes cost N full
+    bus scans — 61 changes over 6657 messages measures 23s on this fleet, and
+    `otaman check` cannot pay that. Under the budget the exact figure renders;
+    over it, the caller is told to run `otaman spec sweep`, which has no budget
+    because the operator asked for it directly. Reported to core: a batch reader
+    would remove the cliff entirely.
+    """
+    import time
+
+    core = _core()
+    if core is None:
+        return None, "otaman-core does not carry the filed-completes reader (kv2/tcr 1.1)"
+
+    started = time.monotonic()
+    total = 0
+    for name in changes_with_filings(changes_dir):
+        if time.monotonic() - started > budget:
+            return None, (
+                f"the count exceeded its {budget:g}s budget — run `otaman spec sweep` "
+                "for the exact figure"
+            )
+        try:
+            total += len(plan(root, changes_dir, name, config).owed)
+        except Exception as exc:  # noqa: BLE001 - one bad change must not blank the count
+            return None, f"the reader failed on {name}: {type(exc).__name__}"
+    return total, ""
