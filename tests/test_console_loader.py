@@ -279,7 +279,8 @@ def test_stop_cancels_a_pending_flush():
     ldr.stop()
     FakeTimer.created[-1].fire()  # a cancelled timer is inert even if it fires
     assert store.version == v, "a flush must not fire after stop"
-    assert source.stopped
+    # Whether the SOURCE is stopped depends on who owns it — covered by
+    # test_an_injected_source_is_not_stopped_by_the_loader and its pair.
 
 
 def test_stop_leaves_no_pending_timer():
@@ -349,3 +350,24 @@ def test_concurrent_events_do_not_lose_the_final_state():
     for tm in FakeTimer.created:
         tm.fire()  # all cancelled but the last — the final state must win
     assert {e.id for e in store.snapshot().of_kind(KIND_MESSAGE)} == {"final"}
+
+
+def test_an_injected_source_is_not_stopped_by_the_loader():
+    """An injected source belongs to its caller — stopping it would reach into
+    someone else's object, and is what lets a screen be tested without a real
+    poll thread."""
+    source = FakeSource()
+    ldr, _, _ = _loader([], source=source)
+    ldr.start()
+    ldr.stop()
+    assert source.stopped is False
+
+
+def test_a_source_the_loader_created_is_stopped():
+    created = FakeSource()
+    store = Store()
+    ldr = Loader(program=object(), store=store, lister=lambda p: [])
+    ldr._source = created
+    ldr._own_source = True
+    ldr.stop()
+    assert created.stopped is True

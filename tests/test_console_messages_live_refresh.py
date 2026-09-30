@@ -99,9 +99,21 @@ def _rows(screen) -> int:
 
 
 async def _open(app, pilot, program, source):
-    from otaman_cli.console.app import InboxScreen
+    """Open Messages wired to *source*, with the debounce collapsed.
 
-    screen = InboxScreen(program, event_source=source)
+    crs 2.1 moved the reading into the Loader, which coalesces a burst into one
+    versioned batch after a quiet period. These tests are about "the row appears
+    with no keypress", not about how long the window is — so the window is set
+    to zero here rather than sleeping through it, which is what keeps them
+    deterministic on a loaded CI runner.
+    """
+    from otaman_cli.console.app import InboxScreen
+    from otaman_cli.console.loader import Loader
+    from otaman_cli.console.store import Store
+
+    store = Store()
+    loader = Loader(program, store, source=source, debounce=0)
+    screen = InboxScreen(program, store=store, loader=loader)
     app.push_screen(screen)
     await pilot.pause()
     await app.workers.wait_for_complete()
@@ -200,22 +212,46 @@ def test_an_injected_source_is_not_stopped_by_the_screen(program, tmp_path):
         async with app.run_test() as pilot:
             await pilot.pause()
             screen = InboxScreen(program, event_source=source)
-            assert screen._own_source is False
+            app.push_screen(screen)
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            screen.on_unmount()
+            # The flag moved into the Loader with 2.1; what must hold is the
+            # behaviour it protects — a source the caller supplied is still
+            # theirs to stop.
+            assert source.stopped is False, "the screen stopped a source it did not create"
             await app.action_quit()
 
     asyncio.run(go())
 
 
 def test_the_default_source_watches_the_merged_queue():
-    """Pins the pairing rather than the plumbing: the screen's source must be
-    built with the lister the screen renders from."""
+    """Pins the pairing rather than the plumbing: whatever builds the source
+    must build it with the lister the screen renders from.
+
+    2.1 moved that pairing from `InboxScreen.on_mount` into the Loader — the
+    screen no longer reads anything. The guarantee is unchanged: watch the set
+    you render, or a new plain message never trips a refresh.
+    """
+    import inspect
+
+    from otaman_cli.console.loader import Loader
+
+    src = inspect.getsource(Loader)
+    assert "list_human_queue" in src
+    assert "make_event_source" in src
+
+
+def test_the_screen_itself_no_longer_scans_the_bus():
+    """crs 2.1: the render path holds no filesystem read. 2.3 turns this into a
+    repo-wide guard; here it is pinned for the surface that had it worst."""
     import inspect
 
     from otaman_cli.console.app import InboxScreen
 
-    src = inspect.getsource(InboxScreen.on_mount)
-    assert "list_human_queue" in src
-    assert "make_event_source" in src
+    src = inspect.getsource(InboxScreen)
+    assert "list_human_queue" not in src, "the screen is scanning the bus again"
+    assert "read_text" not in src
 
 
 def test_the_provider_still_defaults_to_pending_decisions():
