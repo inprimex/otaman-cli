@@ -2030,10 +2030,16 @@ class LifecycleScreen(Screen):
     # lifecycle lens (3.1), so "verbatim" is structural rather than a promise.
     from otaman_cli.console.lifecycle import LIFECYCLE_COLUMNS as _COLUMNS
 
-    def __init__(self, program: Program) -> None:
+    def __init__(self, program: Program, *, projections=None) -> None:
         super().__init__()
         self.program = program
         self._rows: list = []  # ChangeRow in table order, indexed by cursor_row
+        # crs 2.1 — the SAME projection the lifecycle lens reads. Deriving
+        # separately here would be a second source of truth for one table, and
+        # the standalone screen and the lens could then disagree about a row.
+        from otaman_cli.console.projections import Projections
+
+        self._projections = projections if projections is not None else Projections(program)
 
     def compose(self) -> ComposeResult:
         yield _header()
@@ -2054,7 +2060,10 @@ class LifecycleScreen(Screen):
         self._load()
 
     def action_refresh(self) -> None:
+        # `r` must invalidate the projection too, or it would repaint the same
+        # prebuilt rows — the same rule TreeScreen's refresh follows.
         invalidate_read_caches()
+        self._projections.invalidate()
         self._load()
 
     def action_back(self) -> None:
@@ -2064,9 +2073,7 @@ class LifecycleScreen(Screen):
         self.run_worker(self._worker, thread=True, exclusive=True, group="lifecycle")
 
     def _worker(self) -> None:
-        from otaman_cli.console.lifecycle import derive_lifecycle_rows
-
-        self.app.call_from_thread(self._paint, derive_lifecycle_rows(self.program))
+        self.app.call_from_thread(self._paint, self._projections.lifecycle_rows())
 
     def _paint(self, rows: list) -> None:
         self._rows = rows

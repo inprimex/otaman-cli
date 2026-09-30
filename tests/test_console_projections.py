@@ -16,6 +16,7 @@ never blocking a keypress on a rebuild.
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -267,3 +268,44 @@ def test_the_source_paths_are_resolved_once(tmp_path):
     pr._sources_fingerprint()
     pr._sources_fingerprint()
     assert pr._paths is before, "paths must not be re-resolved per check"
+
+
+def test_the_standalone_lifecycle_screen_reads_the_same_projection():
+    """Two surfaces show the lifecycle: the lens inside Artifacts, and the
+    standalone screen. Deriving separately would let them disagree about a row,
+    which is the identity-mapping failure the store exists to prevent."""
+    import inspect
+
+    from otaman_cli.console.app import LifecycleScreen
+
+    src = inspect.getsource(LifecycleScreen)
+    assert "self._projections.lifecycle_rows()" in src
+    assert "derive_lifecycle_rows" not in src, "a second derivation is a second truth"
+
+
+def test_the_lifecycle_screen_refresh_invalidates():
+    """`r` that repainted prebuilt rows would be a refresh that refreshes
+    nothing — the same rule TreeScreen's refresh follows."""
+    import inspect
+
+    from otaman_cli.console.app import LifecycleScreen
+
+    src = inspect.getsource(LifecycleScreen.action_refresh)
+    assert "_projections.invalidate()" in src
+
+
+def test_no_console_screen_derives_on_a_render_path():
+    """The property 2.3 turns into a repo-wide guard. Pinned here for app.py,
+    which held every one of these until 2.1."""
+    # Resolved from the module itself, not the cwd — a cwd-relative path makes
+    # the guard pass vacuously from the wrong directory.
+    import otaman_cli.console.app as app_mod
+
+    src = Path(app_mod.__file__).read_text(encoding="utf-8")
+    for derivation in (
+        "list_human_queue",
+        "build_artifact_tree",
+        "derive_lifecycle_rows",
+        "tree_fallback_notice",
+    ):
+        assert derivation not in src, f"app.py derives {derivation} instead of reading a projection"
