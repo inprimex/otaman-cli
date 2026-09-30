@@ -406,3 +406,80 @@ def test_both_surfaces_use_one_reader():
     assert "spec_sweep.awaiting_tick" in spec_src
     for src in (check_src, spec_src):
         assert "filed_complete_at" not in src, "neither surface may re-derive the count"
+
+
+# ---------------------------------------------------------------------------
+# core #89's batch reader — one bus pass instead of one per change
+
+
+def test_the_batch_reader_is_probed_not_version_pinned():
+    """The same core version exists with and without it; a version compare is
+    false assurance."""
+    src = Path(spec_sweep.__file__).read_text(encoding="utf-8")
+    assert 'getattr(core, "filed_complete_by_change", None)' in src
+    assert "__version__" not in src
+
+
+def test_the_count_uses_one_bus_pass_not_one_per_change(fleet, monkeypatch):
+    """The defect the batch reader removes: N changes cost N whole-bus scans,
+    measured at 23s for 61 changes over 6657 messages."""
+    root, bus, changes = fleet
+    for name in ("demo", "second", "third"):
+        d = changes / name
+        d.mkdir(exist_ok=True)
+        (d / "tasks.md").write_text("- [ ] 1.1 @otaman-cli x\n", encoding="utf-8")
+    _filing(bus, "demo", "tasks 1.1")
+
+    calls = {"batch": 0, "per_change": 0}
+    core = spec_sweep._core()
+    real_batch = core.filed_complete_by_change
+    real_single = core.filed_complete_at
+
+    def batch(rootp, cfg):
+        calls["batch"] += 1
+        return real_batch(rootp, cfg)
+
+    def single(rootp, change, cfg):
+        calls["per_change"] += 1
+        return real_single(rootp, change, cfg)
+
+    monkeypatch.setattr(core, "filed_complete_by_change", batch)
+    monkeypatch.setattr(core, "filed_complete_at", single)
+    spec_sweep.awaiting_tick(root, changes, {}, budget=600)
+    assert calls["batch"] == 1, "the bus must be read once"
+    assert calls["per_change"] == 0, "no per-change rescan once the batch reader exists"
+
+
+def test_an_older_core_still_counts_by_the_slower_path(fleet, monkeypatch):
+    """Degrading to slower is acceptable; degrading to wrong or to silence is
+    not."""
+    root, bus, changes = fleet
+    _filing(bus, "demo", "tasks 1.1")
+    monkeypatch.setattr(spec_sweep, "_batch_reader", lambda core: None)
+    count, note = spec_sweep.awaiting_tick(root, changes, {}, budget=600)
+    assert count == 1 and note == ""
+
+
+def test_the_filings_are_read_once_for_every_change(fleet):
+    """Reading each message once matters as much as globbing once — it is the
+    same files either way."""
+    root, bus, changes = fleet
+    _filing(bus, "demo", "live-test", stem="20260930T130000-a-to-b-task-complete")
+    filings = spec_sweep._all_filings(root, {})
+    assert filings and isinstance(filings[0], tuple) and len(filings[0]) == 2
+
+
+def test_the_budget_note_says_which_half_is_expensive(fleet):
+    """ "exceeded its budget" without a cause sends the reader to the wrong half
+    — the bus side is now about a second; the git retraction scan is the 50."""
+    root, bus, changes = fleet
+    _filing(bus, "demo", "tasks 1.1")
+    _, note = spec_sweep.awaiting_tick(root, changes, {}, budget=-1.0)
+    assert "retraction" in note and "git" in note
+
+
+def test_the_count_is_never_computed_without_retraction():
+    """115-that-might-be-113 rendered confidently is the failure this change
+    exists to remove. NOT CHECKED is the honest answer, not an approximation."""
+    doc = " ".join((spec_sweep.awaiting_tick.__doc__ or "").split())
+    assert "NOT computed without retraction" in doc

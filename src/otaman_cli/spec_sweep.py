@@ -67,6 +67,16 @@ def _core() -> Any | None:
     return task_complete if all(hasattr(task_complete, n) for n in needed) else None
 
 
+def _batch_reader(core: Any):
+    """core's one-pass reader, or None on an install that predates it (core #89).
+
+    Probed, never version-pinned: the same core version exists with and without
+    it. Absent, the per-change path still works — slower, and the count says so
+    rather than lying about it.
+    """
+    return getattr(core, "filed_complete_by_change", None)
+
+
 def _task_lines(tasks_path: Path) -> list[tuple[str, bool]]:
     """`(task_id, is_ticked)` for every task line, via core's id parser."""
     core = _core()
@@ -85,7 +95,35 @@ def _task_lines(tasks_path: Path) -> list[tuple[str, bool]]:
     return out
 
 
-def _unparseable_filings(root: Path, change: str, config: dict[str, Any], recognised) -> list[str]:
+def _all_filings(root: Path, config: dict[str, Any]) -> list[tuple[str, str]]:
+    """Every task-complete message once, as `(stem, text)`.
+
+    The per-change path re-globbed AND re-read the bus for each change — the
+    same O(changes x messages) shape core #89's batch reader removes on its
+    side, and pointless to leave here. Reading the text once matters as much as
+    globbing once: it is the same files either way.
+    """
+    from otaman_cli.bus_message_types import messages_of_type
+
+    bus_rel = (config.get("communication") or {}).get("bus_path", ".agents/bus")
+    out: list[tuple[str, str]] = []
+    for sub in ("active", "archive"):
+        for path in messages_of_type(root / bus_rel / sub, "task-complete"):
+            try:
+                out.append((path.stem, path.read_text(encoding="utf-8")))
+            except OSError:
+                continue
+    return out
+
+
+def _unparseable_filings(
+    root: Path,
+    change: str,
+    config: dict[str, Any],
+    recognised,
+    *,
+    filings: list[Any] | None = None,
+) -> list[str]:
     """Stems of task-complete filings for *change* that named nothing readable.
 
     Detected from what core recognised rather than by re-parsing: a message with
@@ -94,30 +132,36 @@ def _unparseable_filings(root: Path, change: str, config: dict[str, Any], recogn
     another filing's id verbatim — stated, because a silent miss here is the
     failure this surfacing exists to prevent.
     """
-    from otaman_cli.bus_message_types import messages_of_type
-
-    bus_rel = (config.get("communication") or {}).get("bus_path", ".agents/bus")
     stems: list[str] = []
-    for sub in ("active", "archive"):
-        directory = root / bus_rel / sub
-        for path in messages_of_type(directory, "task-complete"):
-            try:
-                text = path.read_text(encoding="utf-8")
-            except OSError:
-                continue
-            if not re.search(rf"^change:\s*{re.escape(change)}\s*$", text, re.MULTILINE):
-                continue
-            specs = _COMPLETED_LINE.findall(text)
-            if not specs:
-                continue  # no Completed line at all — not a tick claim, not a defect
-            if any(any(rid in spec for rid in recognised) for spec in specs):
-                continue
-            stems.append(path.stem)
+    for stem, text in filings if filings is not None else _all_filings(root, config):
+        if not re.search(rf"^change:\s*{re.escape(change)}\s*$", text, re.MULTILINE):
+            continue
+        specs = _COMPLETED_LINE.findall(text)
+        if not specs:
+            continue  # no Completed line at all — not a tick claim, not a defect
+        if any(any(rid in spec for rid in recognised) for spec in specs):
+            continue
+        stems.append(stem)
     return stems
 
 
-def plan(root: Path, changes_dir: Path, change: str, config: dict[str, Any]) -> ChangeOutcome:
-    """What *change* is owed, without writing anything."""
+def plan(
+    root: Path,
+    changes_dir: Path,
+    change: str,
+    config: dict[str, Any],
+    *,
+    filed: dict[str, Any] | None = None,
+    filings: list[Any] | None = None,
+) -> ChangeOutcome:
+    """What *change* is owed, without writing anything.
+
+    *filed* and *filings* let a fleet-wide caller hand in what it already read.
+    Core's reader is per-change, so asking about N changes cost N whole-bus
+    scans — 61 changes over 6657 messages measured 23s, which is why the
+    awaiting-tick count had a budget it could not meet. core #89's batch reader
+    collapses that to one pass; these parameters are how it reaches here.
+    """
     outcome = ChangeOutcome(change=change)
     core = _core()
     if core is None:
@@ -131,14 +175,15 @@ def plan(root: Path, changes_dir: Path, change: str, config: dict[str, Any]) -> 
     if not tasks_path.is_file():
         return outcome
 
-    filed = core.filed_complete_at(root, change, config)
+    if filed is None:
+        filed = core.filed_complete_at(root, change, config)
     recognised = {k for k in filed if k != core.COMPLETED_ALL}
 
     # Surfaced BEFORE the empty-filed shortcut. When nothing parses, `filed` is
     # empty — and returning early there would drop precisely the filings that
     # need surfacing most: a change whose every filing was unreadable would
     # report "nothing owed", which is the silent drop this exists to prevent.
-    outcome.unparseable = _unparseable_filings(root, change, config, recognised)
+    outcome.unparseable = _unparseable_filings(root, change, config, recognised, filings=filings)
     if not filed:
         return outcome
     all_filed = core.COMPLETED_ALL in filed
@@ -212,12 +257,21 @@ def awaiting_tick(
     zero that means "did not look" is the failure this whole change exists to
     end (pmeets: ~2 silent weeks, the lens reading 5/11 against a real 11/11).
 
-    Bounded on purpose. Core's reader is per-change, so N changes cost N full
-    bus scans — 61 changes over 6657 messages measures 23s on this fleet, and
-    `otaman check` cannot pay that. Under the budget the exact figure renders;
-    over it, the caller is told to run `otaman spec sweep`, which has no budget
-    because the operator asked for it directly. Reported to core: a batch reader
-    would remove the cliff entirely.
+    Bounded on purpose, and the bound now bites for a DIFFERENT reason than it
+    did. Core #89's batch reader collapsed the bus side from 61 whole-bus scans
+    (23s) to one pass — measured here at 666ms for the reader plus 370ms for the
+    filings, about a second.
+
+    What remains is the retraction rule: `is_effectively_complete` calls
+    `last_untick_at`, which runs `git log` plus a `git show` per commit, PER
+    TASK. Core batched the bus deliberately and left git alone — the right call,
+    since that is the path whose exactness I tested hardest and asked them not to
+    touch. With 115 filed tasks on this fleet the full count measures 51s.
+
+    So the count still renders NOT CHECKED here, and says which half is
+    expensive. It is NOT computed without retraction and shown as an
+    approximation: an over-count rendered confidently is the failure this whole
+    change exists to remove, and 115-that-might-be-113 is exactly that.
     """
     import time
 
@@ -227,14 +281,34 @@ def awaiting_tick(
 
     started = time.monotonic()
     total = 0
+
+    # ONE pass over the bus, then dict lookups per change (core #89). The
+    # per-change reader cost 61 whole-bus scans over 6657 messages — 23s — which
+    # is why this count used to render NOT CHECKED on the largest tenant it was
+    # built for. Probed, so an older core still works by the slower path.
+    batch = _batch_reader(core)
+    try:
+        by_change = batch(root, config) if batch is not None else None
+        filings = _all_filings(root, config)
+    except Exception as exc:  # noqa: BLE001 - an unreadable bus is not zero
+        return None, f"the reader failed: {type(exc).__name__}"
+
     for name in changes_with_filings(changes_dir):
         if time.monotonic() - started > budget:
             return None, (
-                f"the count exceeded its {budget:g}s budget — run `otaman spec sweep` "
-                "for the exact figure"
+                f"the count exceeded its {budget:g}s budget (the per-task retraction "
+                "scan reads git) — run `otaman spec sweep` for the exact figure"
             )
         try:
-            total += len(plan(root, changes_dir, name, config).owed)
+            owed = plan(
+                root,
+                changes_dir,
+                name,
+                config,
+                filed=(by_change or {}).get(name, {}) if by_change is not None else None,
+                filings=filings,
+            ).owed
+            total += len(owed)
         except Exception as exc:  # noqa: BLE001 - one bad change must not blank the count
             return None, f"the reader failed on {name}: {type(exc).__name__}"
     return total, ""
