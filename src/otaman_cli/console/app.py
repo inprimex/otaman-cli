@@ -693,7 +693,11 @@ class _DecisionActions:
     def _decision_target(self):  # pragma: no cover - overridden
         raise NotImplementedError
 
-    def _after_decision(self) -> None:  # pragma: no cover - overridden
+    def _after_decision(self, target=None) -> None:  # pragma: no cover - overridden
+        """Called after a SUCCEEDED decision. *target* is the row that was
+        decided — passed rather than re-derived, for the same reason
+        `_apply_decision` takes it: the highlight has already moved by the time
+        this runs (gate 6.1 F2)."""
         raise NotImplementedError
 
     def _apply_decision(
@@ -752,7 +756,7 @@ class _DecisionActions:
         label = f"{verb}-auto" if delivery == "auto" else verb
         ok, _ = run_decision_action(self.app, action=label, target=target.stem, fn=fn)
         if ok:
-            self._after_decision()
+            self._after_decision(target)
 
     def _prompt_and_decide(self, verb: str, *, delivery: str | None = None) -> None:
         target = self._decision_target()
@@ -830,6 +834,9 @@ class InboxScreen(_DecisionActions, Screen):
         )
         self._own_loader = loader is None
         self._unsubscribe = None
+        from otaman_cli.console.optimistic import OptimisticWrites
+
+        self._optimistic = OptimisticWrites(self._store)
         #: None until the first snapshot lands — distinct from "loaded, and
         #: empty", which is what tells the mount path whether to show Loading…
         self._cache = None
@@ -860,16 +867,26 @@ class InboxScreen(_DecisionActions, Screen):
         # Repaint whenever a new store version lands, whoever produced it: the
         # Loader's poll, an external write, or this screen's own refresh. The
         # subscriber takes the SNAPSHOT, so a missed version costs nothing.
-        self._unsubscribe = self._store.subscribe(
-            marshal_to_app(self.app, lambda _snapshot: self._apply())
-        )
+        self._unsubscribe = self._store.subscribe(marshal_to_app(self.app, self._on_snapshot))
         # Cold-start off the UI thread: a synchronous scan at mount blocked
         # first paint (5.1 finding #4), and that constraint did not change just
         # because the reader moved.
         self._load(show_loading=True)
         self._loader.start()
 
+    def _on_snapshot(self, snapshot) -> None:
+        """Repaint, and check whether the watcher's echo agreed with us."""
+        from otaman_cli.console.optimistic import journal_divergence
+
+        for divergence in self._optimistic.reconcile(snapshot):
+            # Loud AND journalled. A toast the human dismisses leaves no trace,
+            # and "did my approval land?" has to be answerable an hour later.
+            journal_divergence(self.app, divergence)
+            self.app.notify(divergence.message, severity="error", timeout=15)
+        self._apply()
+
     def on_unmount(self) -> None:
+        self._optimistic.forget()
         if self._unsubscribe is not None:
             self._unsubscribe()
             self._unsubscribe = None
@@ -932,10 +949,25 @@ class InboxScreen(_DecisionActions, Screen):
         row = self._highlighted_proposal()
         return row if row is not None and row.is_decision else None
 
-    def _after_decision(self) -> None:
-        # Stay on the list; the decided row disappears once the Loader's rescan
-        # lands. (2.2 replaces this with an optimistic delta applied at once.)
-        self._load()
+    def _after_decision(self, target=None) -> None:
+        """crs 2.2 — apply the expected delta; do NOT rescan.
+
+        A decided item leaves the pending queue, and the store already knows
+        that. Re-reading the bus to discover what the write just did is the
+        cost this removes — the row disappears now, and the watcher's echo
+        confirms it. If the echo disagrees, `_reconcile` says so loudly rather
+        than snapping the row back without explanation.
+        """
+        from otaman_cli.console.loader import KIND_MESSAGE
+
+        if target is None:
+            return
+        self._optimistic.expect_decided(
+            KIND_MESSAGE,
+            target.stem,
+            action="decision",
+            label=getattr(target, "subject", "") or target.stem,
+        )
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         row = getattr(event.item, "proposal", None)
@@ -1992,8 +2024,11 @@ class ProposalScreen(_DecisionActions, Screen):
     def _decision_target(self):
         return self.proposal
 
-    def _after_decision(self) -> None:
-        self.app.pop_screen()  # the caller's on_screen_resume refreshes
+    def _after_decision(self, target=None) -> None:
+        # Pop back to the list, which repaints from the STORE — its
+        # on_screen_resume no longer rescans (2.1), and the row it must lose is
+        # removed by the list's own optimistic delta (2.2).
+        self.app.pop_screen()
 
     def action_back(self) -> None:
         self.app.pop_screen()
