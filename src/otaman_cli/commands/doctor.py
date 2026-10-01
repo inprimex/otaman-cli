@@ -1375,6 +1375,7 @@ def cmd_doctor(args: list[str]) -> int:
         "tmux_global_agent_env": "Agent Identity Scope (tmux)",
         "orphan_status_files": "Status Files (orphans)",
         "knowledge_health": "Knowledge Vault (decay/drift/ownership)",
+        "security_gates": "Security Ladder (Hook C layers + suppressions)",
     }
 
     for check in checks:
