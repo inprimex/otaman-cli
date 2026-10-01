@@ -315,3 +315,128 @@ def test_the_label_is_true_by_construction_not_by_cores_state():
             "the surface now names a proposer, so what it shows is POST-exclusion for "
             "that agent — PRE_EXCLUSION_NOTE is then a false label, not a cautious one"
         )
+
+
+# ---------------------------------------------------------------------------
+# Whether the installed engine actually KEEPS the invariant the note asserts.
+
+
+def test_the_invariant_is_enforced_by_the_installed_engine():
+    """core #104 landed it. Probed on `SelectionResult.excluded_proposer` rather than a
+    version, per attribute-probe adoption: that field exists because core records the
+    exclusion as a fact, so its presence is the engine's own statement that it does."""
+    assert critic_policy.invariant_enforced() is True
+
+
+def test_a_bundle_without_the_invariant_is_reported_not_assumed(monkeypatch):
+    """The gap the note would otherwise hide. `PRE_EXCLUSION_NOTE` states CANON; before
+    core #104 nothing applied it, so a reader trusting the note on an older bundle would
+    believe an exclusion that never happens — the same shape as the generation-stamp
+    absence and the security-gate-record probe."""
+    from otaman_cli.doctor import check_critic_policy
+
+    monkeypatch.setattr(critic_policy, "invariant_enforced", lambda: False)
+    import tempfile
+
+    root = _program(
+        __import__("pathlib").Path(tempfile.mkdtemp()),
+        _PLATFORM_TWO_OWNERS,
+        _GATES_WITH_FALLBACK,
+    )
+    result = check_critic_policy(root)
+
+    assert result["status"] == "warn"
+    assert critic_policy.INVARIANT_NOT_ENFORCED in result["details"]["proposer_exclusion"]
+    assert any(i["severity"] == "high" for i in result["issues"])
+
+
+def test_the_not_enforced_path_does_not_crash(monkeypatch, tmp_path):
+    """Written because the first version appended to `issues` three lines before it was
+    declared — an UnboundLocalError on exactly the old-bundle path the check exists to
+    report. A reporting path that crashes reports nothing."""
+    from otaman_cli.doctor import check_critic_policy
+
+    monkeypatch.setattr(critic_policy, "invariant_enforced", lambda: False)
+    result = check_critic_policy(_program(tmp_path, _PLATFORM_TWO_OWNERS, _GATES_WITH_FALLBACK))
+
+    assert isinstance(result.get("issues"), list) and result["issues"]
+
+
+def test_the_command_says_when_the_engine_does_not_enforce_it(monkeypatch, tmp_path, capsys):
+    from otaman_cli.commands import policy as policy_cmd
+
+    root = _program(tmp_path, _PLATFORM_TWO_OWNERS, _GATES_WITH_FALLBACK)
+    monkeypatch.setattr(policy_cmd, "find_project_root", lambda: root)
+    monkeypatch.setattr(critic_policy, "invariant_enforced", lambda: False)
+
+    policy_cmd.cmd_policy(["critics"])
+    out = capsys.readouterr().out
+
+    assert "does not implement proposer exclusion" in out
+
+
+def test_the_enforced_case_is_quiet(monkeypatch, tmp_path, capsys):
+    """A line on every healthy run is noise — the enforcement note belongs in doctor's
+    details, not in the operator's face."""
+    from otaman_cli.commands import policy as policy_cmd
+
+    root = _program(tmp_path, _PLATFORM_TWO_OWNERS, _GATES_WITH_FALLBACK)
+    monkeypatch.setattr(policy_cmd, "find_project_root", lambda: root)
+    monkeypatch.setattr(critic_policy, "invariant_enforced", lambda: True)
+
+    policy_cmd.cmd_policy(["critics"])
+
+    assert "does not implement" not in capsys.readouterr().out
+
+
+def test_an_absent_core_is_not_enforcement(monkeypatch):
+    """No engine is not a compliant engine — the same absent-vs-unreadable rule this
+    repo has applied at five other sites."""
+    monkeypatch.setattr(critic_policy, "_core", lambda: None)
+
+    assert critic_policy.invariant_enforced() is False
+
+
+def test_the_probe_reads_the_engine_rather_than_asserting_the_answer(monkeypatch):
+    """The guard the others could not give.
+
+    Every "not enforced" test above monkeypatches `invariant_enforced` itself, so none
+    of them exercises the probe — replacing its body with `return True` left all twenty
+    passing. This drives a STUB ENGINE through the real probe: one whose result carries
+    `excluded_proposer` and one whose does not, which is the difference between a core
+    that records the exclusion and a core that predates it.
+    """
+    from dataclasses import dataclass
+
+    @dataclass
+    class _Old:
+        policy: str = ""
+        fell_back: bool = False
+
+    @dataclass
+    class _New:
+        policy: str = ""
+        fell_back: bool = False
+        excluded_proposer: bool = False
+
+    class _Engine:
+        def __init__(self, result):
+            self.SelectionResult = result
+
+    monkeypatch.setattr(critic_policy, "_core", lambda: _Engine(_Old))
+    assert critic_policy.invariant_enforced() is False, "a pre-#104 engine reads as enforcing"
+
+    monkeypatch.setattr(critic_policy, "_core", lambda: _Engine(_New))
+    assert critic_policy.invariant_enforced() is True
+
+
+def test_an_engine_with_no_result_type_is_not_enforcement(monkeypatch):
+    """A bundle whose module exists but carries no `SelectionResult` cannot be read as
+    compliant — unreadable is not finished, here as everywhere else today."""
+
+    class _Engine:
+        pass
+
+    monkeypatch.setattr(critic_policy, "_core", lambda: _Engine())
+
+    assert critic_policy.invariant_enforced() is False

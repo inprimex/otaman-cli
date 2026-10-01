@@ -46,6 +46,32 @@ _LOCALLY_EVALUABLE = ("stakeholder-affected", "role-based")
 #: forbids, read off a surface that never claimed it.
 PRE_EXCLUSION_NOTE = "before proposer exclusion — the proposing agent is never its own critic"
 
+#: Said when the installed engine does NOT implement the invariant the note above
+#: asserts. The note states CANON; whether this bundle enforces it is a separate fact,
+#: and before core #104 nothing did — so a reader trusting the note on an older bundle
+#: would believe an exclusion that never happens. Same shape as the generation-stamp
+#: absence and the security-gate-record probe: a claim the surface makes, checked
+#: against the code that would have to keep it.
+INVARIANT_NOT_ENFORCED = (
+    "this bundle's selection engine does not implement proposer exclusion "
+    "(core #104) — the rule is canon and nothing applies it here"
+)
+
+
+def invariant_enforced() -> bool:
+    """Whether the installed engine removes the proposer from a selection.
+
+    Probed on the RESULT's `excluded_proposer` marker rather than on a version, per
+    attribute-probe adoption: that field exists precisely because core records the
+    exclusion as a fact, so its presence is the engine's own statement that it does.
+    """
+    core = _core()
+    if core is None:
+        return False
+    result = getattr(core, "SelectionResult", None)
+    fields = getattr(result, "__dataclass_fields__", {}) if result is not None else {}
+    return "excluded_proposer" in fields
+
 
 @dataclass
 class HookView:

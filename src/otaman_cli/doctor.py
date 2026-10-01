@@ -1365,6 +1365,24 @@ def check_critic_policy(project_root: Path) -> dict[str, Any]:
     result["details"]["cleared_agents"] = len(surface.roster.rows)
     issues: list[dict[str, Any]] = []
 
+    # The `critics_are` note above asserts CANON. Whether this bundle keeps it is a
+    # different fact, and before core #104 nothing did — so a reader trusting the note
+    # on an older bundle would believe an exclusion that never happens. Placed after
+    # `issues` exists: the first version appended to it three lines early, which would
+    # have raised UnboundLocalError on exactly the old-bundle path it reports.
+    if critic_policy.invariant_enforced():
+        result["details"]["proposer_exclusion"] = "enforced by the selection engine"
+    else:
+        result["status"] = "warn"
+        result["details"]["proposer_exclusion"] = critic_policy.INVARIANT_NOT_ENFORCED
+        issues.append(
+            {
+                "severity": "high",
+                "message": critic_policy.INVARIANT_NOT_ENFORCED,
+                "fix": "update the bundle — a proposer can currently be its own critic",
+            }
+        )
+
     if not surface.roster.rows:
         # sensitivity-scoped selection with no clearances drops every critic,
         # which renders as a gate that silently selects nobody.

@@ -1,6 +1,6 @@
 """llm-router-backend 1.4 (cli half) — the route surfaces over core's resolution.
 
-Core owns everything that decides: the `router:` block parse, the HarnessBackend
+Core owns everything that decides: the `router:` block parse, the ModelBackend
 seam, and — answering the question I asked before building (20261001T135210) —
 ROUTE RESOLUTION. `effective_route(config, agent)` is the single resolution point,
 so this surface and the bridge's dispatch cannot disagree about which route an
