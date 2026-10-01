@@ -206,8 +206,49 @@ def _canonical_meta_dirs(search_root: Path) -> list[Path]:
     return out
 
 
+def _is_canonical_layout(meta_root: Path) -> bool:
+    """Whether *meta_root* sits in the canonical CE layout.
+
+    ``<base>/orgs/<org>/programs/<program>/<meta>`` — matched on the two fixed
+    segment names at their fixed depths, which is what makes a candidate canonical
+    rather than merely deep.
+    """
+    parts = meta_root.resolve().parts
+    if len(parts) < 5:
+        return False
+    return parts[-5] == "orgs" and parts[-3] == "programs"
+
+
+def _declared_repo_dirs(meta_root: Path, meta: dict) -> set[Path]:
+    """The directories a program DECLARES as its repos, resolved.
+
+    This is what "inside another candidate's own repos tree" means
+    (picker-canonical-precedence). The old rule used physical nesting anywhere
+    beneath an ancestor, which cannot tell a stray copy under a program's repos/
+    from a stale ancestor sitting above every program on the tenant — and on
+    riseapps (2026-09-11) it picked the wrong one, showing ONE program instead of
+    five.
+    """
+    out: set[Path] = set()
+    for repo in meta.get("repos") or []:
+        if not isinstance(repo, dict):
+            continue
+        rel = str(repo.get("path") or "").strip()
+        if rel:
+            out.add((meta_root / rel).resolve())
+    return out
+
+
+def _within(child: Path, parent: Path) -> bool:
+    return child == parent or parent in child.parents
+
+
 def discover_programs(
-    search_root: Path, *, max_depth: int = 4, cwd: Path | None = None
+    search_root: Path,
+    *,
+    max_depth: int = 4,
+    cwd: Path | None = None,
+    warnings: list[str] | None = None,
 ) -> list[Program]:
     """Distinct PROGRAM roots for the picker, deduped by identity.
 
@@ -227,14 +268,25 @@ def discover_programs(
     Every candidate must pass the full-shape + bus gate (`_program_meta`);
     candidates are deduped by program IDENTITY (`project`), keeping the
     shallowest root — so one program never appears twice.
+
+    *warnings*, when given, collects messages about candidates that were EXCLUDED
+    and why — today, pre-migration leftovers that would otherwise shadow real
+    programs. Append-only and optional, so the eighteen existing call sites and
+    tests keep working; a picker that silently drops a file is how the riseapps
+    incident took a live debugging session to explain.
     """
-    candidates: list[Program] = []
+    candidates: list[tuple[Program, dict]] = []
     root = search_root.resolve()
+    seen_roots: set[Path] = set()
 
     def _add(meta_root: Path) -> None:
-        meta = _program_meta(meta_root / "platform.yaml")
+        resolved = meta_root.resolve()
+        if resolved in seen_roots:
+            return
+        meta = _program_meta(resolved / "platform.yaml")
         if meta is not None:
-            candidates.append(Program(name=str(meta["project"]), root=meta_root.resolve()))
+            seen_roots.add(resolved)
+            candidates.append((Program(name=str(meta["project"]), root=resolved), meta))
 
     def walk(d: Path, depth: int) -> None:
         if depth > max_depth:
@@ -270,16 +322,52 @@ def discover_programs(
         if cwd_root is not None:
             _add(cwd_root)
 
-    # Drop any candidate nested inside another candidate's tree (a stray copy
-    # under a program's repos/subdirs is not its own program).
-    roots = {p.root for p in candidates}
-    candidates = [
-        p for p in candidates if not any(o != p.root and o in p.root.parents for o in roots)
-    ]
+    # picker-canonical-precedence 1.1. Two rules, in this order, because the old
+    # single rule conflated the cases they separate.
+    #
+    # (a) A non-canonical candidate that sits ABOVE a canonical one is a stale
+    #     ancestor. It is excluded and NAMED — never the other way round. On
+    #     riseapps a June-2026 `orgs/<org>/platform.yaml` with `repos: []` passed
+    #     the shape gate, and because every real program sits physically under
+    #     `orgs/<org>/`, the nested-drop discarded all five of them and the picker
+    #     showed the leftover alone. Worked around live by renaming the file; any
+    #     tenant carrying the same leftover hit it again.
+    #
+    #     The trade-off, stated: a LEGITIMATE program parked above canonical
+    #     programs is also excluded. That is deliberate — org-level roots are dead
+    #     by canon (uniform-ce-directory-layout), and the warning is how a
+    #     misplaced one gets noticed instead of silently shadowing five programs.
+    canonical = [p.root for p, _ in candidates if _is_canonical_layout(p.root)]
+    stale: set[Path] = set()
+    for program, _meta in candidates:
+        if _is_canonical_layout(program.root):
+            continue
+        if any(program.root in c.parents for c in canonical):
+            stale.add(program.root)
+            if warnings is not None:
+                warnings.append(
+                    f"ignored {program.root / 'platform.yaml'}: it sits above "
+                    f"canonical programs and would shadow them "
+                    f"(pre-migration leftover — remove or move it)"
+                )
+    candidates = [(p, m) for p, m in candidates if p.root not in stale]
+
+    # (b) The nested-drop, now scoped to what it was always FOR: a stray copy
+    #     inside another program's own declared repos tree is not its own program.
+    #     Physical nesting anywhere beneath an ancestor is not sufficient.
+    repos_by_root = {p.root: _declared_repo_dirs(p.root, m) for p, m in candidates}
+    kept: list[Program] = []
+    for program, _meta in candidates:
+        inside_other = any(
+            other != program.root and any(_within(program.root, d) for d in dirs)
+            for other, dirs in repos_by_root.items()
+        )
+        if not inside_other:
+            kept.append(program)
 
     # Dedupe by program identity; the shallowest root wins (the canonical one).
     by_name: dict[str, Program] = {}
-    for p in sorted(candidates, key=lambda x: len(x.root.parts)):
+    for p in sorted(kept, key=lambda x: len(x.root.parts)):
         by_name.setdefault(p.name, p)
     return sorted(by_name.values(), key=lambda p: p.name.lower())
 
