@@ -1331,6 +1331,84 @@ def check_git_host(project_root: Path) -> dict[str, Any]:
     return result
 
 
+def check_security_gates(project_root: Path) -> dict[str, Any]:
+    """Hook C's ladder: layers configured/effective per repo (sghc 1.2).
+
+    Verdicts use the runtime-freshness vocabulary so one doctor run does not
+    speak two dialects, plus `skipped` for an opt-out repo — which the spec
+    requires be visible, because a repo missing from the report cannot be told
+    from a repo nobody configured.
+
+    A `security-gates:` block that exists and does not parse reports NOT CHECKED,
+    never "no gates": that conflation is the fail-open class this repo fixed
+    twice in cli #223.
+    """
+    result: dict[str, Any] = {"check": "security_gates", "status": "ok", "details": {}}
+    try:
+        from otaman_cli.security_gates import (
+            NOT_CHECKED,
+            SKIPPED,
+            STALE,
+            evaluate,
+            python_sources,
+            scan_suppressions,
+        )
+    except Exception as exc:  # noqa: BLE001 - old bundle → not-checked, not "clean"
+        result["status"] = "warn"
+        result["details"]["skipped"] = f"security-gates support unavailable: {exc}"
+        return result
+
+    report = evaluate(project_root)
+    if report.error:
+        result["status"] = "warn"
+        result["details"]["gates"] = f"NOT CHECKED — {report.error}"
+        return result
+
+    if not report.repos:
+        result["details"]["gates"] = "no `security-gates:` block — no ladder declared"
+    else:
+        counts: dict[str, int] = {}
+        for repo in report.repos:
+            counts[repo.verdict] = counts.get(repo.verdict, 0) + 1
+        result["details"]["repos"] = len(report.repos)
+        result["details"]["verdicts"] = ", ".join(f"{n} {v}" for v, n in sorted(counts.items()))
+        issues: list[dict[str, Any]] = []
+        for repo in report.repos:
+            if repo.verdict in (NOT_CHECKED, STALE):
+                result["status"] = "warn"
+                issues.append(
+                    {
+                        "severity": "medium" if repo.verdict == STALE else "low",
+                        "message": f"{repo.repo}: {repo.verdict} — {repo.reason}",
+                        "fix": (
+                            "declare the layer in `security-gates:`, or opt the repo out explicitly"
+                        ),
+                    }
+                )
+            elif repo.verdict == SKIPPED:
+                result["details"].setdefault("skipped_repos", []).append(repo.repo)
+        if issues:
+            result["issues"] = issues
+
+    # The suppression policy: a security suppression needs a justification, and a
+    # bare marker fails the gate (spec scenario 3).
+    unjustified, coded_only, justified = scan_suppressions(python_sources(project_root))
+    result["details"]["suppressions"] = f"{justified} justified, {coded_only} code-only"
+    if coded_only:
+        result["details"]["suppressions_code_only"] = coded_only
+    if unjustified:
+        result["status"] = "fail"
+        result.setdefault("issues", []).extend(
+            {
+                "severity": "high",
+                "message": f"unjustified suppression at {s.path}:{s.line} — {s.text}",
+                "fix": "add the reason after the marker; a bare marker fails the gate",
+            }
+            for s in unjustified[:10]
+        )
+    return result
+
+
 def check_knowledge_health(project_root: Path) -> dict[str, Any]:
     """Knowledge vault health — decay, out-of-band edits, ownership (kv2 2.2).
 
@@ -1990,6 +2068,7 @@ def run_doctor(project_root: Path) -> dict[str, Any]:
         check_orphan_status_files(project_root, known_agents),
         check_plugin_doctor(project_root),
         check_knowledge_health(project_root),
+        check_security_gates(project_root),
         check_human_roster(config),
         check_edition_consistency(),
         check_branch_policy(config, project_root),
