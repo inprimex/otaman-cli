@@ -9,7 +9,8 @@ Usage:
     otaman init [<config>] [--dry-run] [--skip-doctor] [--update] [--shell]   Initialize an otaman project. Creates platform.yaml if none exists.
     otaman migrate [<name>]           Migrate to dedicated otaman folder
     otaman launcher <target>          Scaffold a launcher folder with connection profiles
-    otaman install-cli [--apply]      Put `otaman` on PATH (symlink on POSIX, setx on Windows)
+    otaman cli install [--apply]      Put `otaman` on PATH (symlink on POSIX, setx on Windows)
+    otaman cli interactive            Open the interactive human console (alias: `otaman -i`)
     otaman git-host [detect|list|check|add|pr|post-review]  Git host integration (PRs, comments)
     otaman models [--diff|--suggest]  Show model/effort defaults; --diff vs platform.yaml overrides
     otaman clone <source>             Clone all repos + init + doctor
@@ -40,7 +41,7 @@ Usage:
     otaman pm <init|configure|status> [args]  PM tool sync (Easy8 / Redmine)
     otaman mcp-config --bridge-url URL  Emit Claude Code .mcp.json for the bridge
     otaman session spawn --agent A --repo R  Spawn a session under the logged-in user
-    otaman -i / --interactive          Open the interactive human console (TUI; needs the 'console' extra)
+    otaman -i / --interactive          Alias for `otaman cli interactive` (permanent; needs the 'console' extra)
     otaman help                        Show this help
 
 Options:
@@ -614,7 +615,9 @@ def cmd_help() -> int:
   {C.GREEN}validate{C.RESET} [config]             Validate platform.yaml against the schema
   {C.GREEN}validate docs{C.RESET} [--fix|--align] <t...>  Lint/fix markdown tables (R1-R4, fence+span-aware, backtick-first; explicit targets)
   {C.GREEN}validate-messages{C.RESET} [file]      Validate bus message files
-  {C.GREEN}install-cli{C.RESET} [--prefix DIR]     Install ``otaman`` shim on PATH (so launchers find it)
+  {C.GREEN}cli install{C.RESET} [--prefix DIR]     Install ``otaman`` shim on PATH (so launchers find it)
+  {C.GREEN}cli interactive{C.RESET}                Open the interactive human console (alias: {C.GREEN}otaman -i{C.RESET})
+  {C.DIM}install-cli{C.RESET}                     DEPRECATED alias for {C.GREEN}otaman cli install{C.RESET}
   {C.GREEN}upgrade{C.RESET} [--dry-run] [--yes]    Walk launcher registry: git pull + otaman init each
   {C.GREEN}sync-repos{C.RESET} [--dry-run]          Clone registered-but-absent repos + regenerate their agent artifacts
   {C.GREEN}compliance{C.RESET} [--format F]        Generate compliance audit report (HIPAA / ISO / GDPR)
@@ -769,10 +772,17 @@ def main() -> int:
 
     # interactive-human-console: `otaman -i` opens the TTY human console (a
     # human seat with no LLM in the loop). Optional `console` extra (Textual).
+    #
+    # cli-component-namespacing 1.2: the HOME is `otaman cli interactive`, and this
+    # is a PERMANENT alias, not a deprecation — it is baked into every generated
+    # CLAUDE.local.md on the fleet. So it prints no notice: warning someone about a
+    # spelling that is not going anywhere teaches them to ignore warnings. It routes
+    # through the namespaced verb rather than calling `run_console` itself, so the
+    # two spellings cannot drift — which is the failure the scattered shapes caused.
     if args[0] in ("-i", "--interactive"):
-        from otaman_cli.console.launch import run_console
+        from otaman_cli.commands.cli_group import cmd_cli
 
-        return run_console(args[1:])
+        return cmd_cli(["interactive", *args[1:]])
 
     command = args[0]
     rest = args[1:]

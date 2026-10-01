@@ -148,12 +148,33 @@ def cmd_install_cli(args: list[str]) -> int:
     Delegates to scripts/install_cli.py. Default mode is dry-run: the
     command prints what it *would* change. Pass ``--apply`` to actually
     edit PATH / create the symlink.
+
+    cli-component-namespacing 1.1: the HOME of this behavior is now
+    `otaman cli install`. This function stays as the one implementation — the new
+    verb calls it — so the two spellings cannot diverge while both exist. The
+    top-level `install-cli` entry point prints the deprecation notice before
+    getting here (see `cmd_install_cli_deprecated`); the namespaced verb does not,
+    because there is nothing deprecated about it.
     """
     UI.header("Otaman Install CLI")
     try:
         return run_script("install_cli.py", *args).returncode
     except SystemExit as e:
         return int(e.code) if e.code is not None else 1
+
+
+def cmd_install_cli_deprecated(args: list[str]) -> int:
+    """`otaman install-cli` — the deprecated top-level spelling (1.1).
+
+    Still WORKS, and that is the point: a tenant mid-install must not get a broken
+    command because a name moved. The notice goes to stderr via UI.warn so it cannot
+    corrupt anything parsing stdout, and it names the new home — a deprecation notice
+    that does not say what to run instead only tells the reader they are wrong.
+    """
+    from otaman_cli.commands.cli_group import DEPRECATION_NOTICE
+
+    UI.warn(DEPRECATION_NOTICE)
+    return cmd_install_cli(args)
 
 
 def cmd_onboard(args: list[str]) -> int:
@@ -237,7 +258,11 @@ register(
     )
 )
 register(
-    CommandSpec(name="install-cli", handler=cmd_install_cli, help="Install `otaman` shim on PATH")
+    CommandSpec(
+        name="install-cli",
+        handler=cmd_install_cli_deprecated,
+        help="DEPRECATED alias for `otaman cli install`",
+    )
 )
 register(CommandSpec(name="onboard", handler=cmd_onboard, help="User / project provisioning"))
 register(

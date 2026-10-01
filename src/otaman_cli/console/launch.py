@@ -8,8 +8,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+#: cli-component-namespacing 1.2 requires this to name BOTH invocations. It named
+#: neither: Roman hit a missing extra on the sunflowers fresh tenant and reported it
+#: separately from the install-cli breakage, because nothing connected the message to
+#: the command that produced it. A reader who typed `otaman -i` and is told about
+#: "the interactive console" has to infer that those are the same thing.
 _INSTALL_HINT = (
-    "The interactive console needs the 'console' extra (Textual):\n"
+    "The interactive console needs the 'console' extra (Textual).\n"
+    "Invoked as `otaman cli interactive` or `otaman -i` — both need it.\n"
     "    pip install 'otaman-cli[console]'\n"
     "(or `uv sync --extra console`)."
 )
