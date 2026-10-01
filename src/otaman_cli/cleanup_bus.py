@@ -6,7 +6,11 @@ Usage:
 
 Archives messages that are fully acked and older than archive-days (default: from
 platform.yaml communication.max_age_days, or 30).
-Deletes archived messages older than delete-days (default: 90).
+
+With --purge, ALSO deletes whole archive months older than delete-days (default: 90).
+Irreversible, and opt-in since 20261001: without the flag those months are reported
+and kept. A month this run archived into is never purged in the same invocation —
+`delete_days` measures time spent AS an archived message.
 
 Outputs JSON report of actions taken.
 """
@@ -197,8 +201,17 @@ def cleanup(
     archive_days: int = 30,
     delete_days: int = 90,
     dry_run: bool = False,
+    purge: bool = False,
 ) -> dict[str, Any]:
-    """Run cleanup on the bus. Returns a report dict."""
+    """Run cleanup on the bus. Returns a report dict.
+
+    *purge* opts into Step 3, the IRREVERSIBLE deletion of whole archive months.
+    Default False, and the default is the fix: `cleanup` reads as hygiene, and on
+    2026-10-01 it destroyed 591 messages on its first successful run in four months
+    (deploy-agent 20261001T220034) — recovered only because that bus happened to be a
+    git repo with the deletions uncommitted. The capability is unchanged; what changed
+    is that it no longer happens because somebody ran the tidy-up command.
+    """
     report: dict[str, Any] = {
         "migrated": 0,
         "archived": [],
@@ -219,6 +232,21 @@ def cleanup(
         # that the question after this fix ("why are these still here?") arrives
         # answered instead of becoming the next four-month mystery.
         "held_unacked": 0,
+        # Step 3 (purge) accounting. `deleted` keeps its old shape for callers that
+        # read it; these are what make the destruction legible:
+        #   deleted_months        — the month directories involved
+        #   deleted_message_count — MESSAGES, the number that matters. The old report
+        #                           counted DIRECTORIES, so 591 destroyed messages
+        #                           rendered as "Deleted: 2 archive(s)" and was read as
+        #                           two directories being tidied (20261001T220034).
+        #   purge_withheld        — identified and NOT performed, because purging now
+        #                           requires an explicit opt-in.
+        #   purge_skipped_fresh   — months THIS run archived into, which it refuses to
+        #                           purge in the same invocation.
+        "deleted_months": [],
+        "deleted_message_count": 0,
+        "purge_withheld": False,
+        "purge_skipped_fresh": [],
     }
 
     # identity-divergence 1.4: reap status files with no agents.yaml entry. Runs
@@ -263,6 +291,11 @@ def cleanup(
     archive_cutoff = now - timedelta(days=archive_days)
     delete_cutoff = now - timedelta(days=delete_days)
 
+    # Months this invocation archives into, and how many messages it puts in each.
+    # Step 3 will not purge them — see there. A COUNT rather than a set, because a dry
+    # run has to report the size of a month it has not created.
+    archived_into: dict[str, int] = {}
+
     # Step 2: Archive old, fully-acked messages from active/
     for msg_file in sorted(active_dir.glob("*.md")):
         fm = parse_frontmatter(msg_file)
@@ -288,6 +321,10 @@ def cleanup(
             continue
 
         month_dir = archive_dir / ts.strftime("%Y-%m")
+        # Recorded whether or not this is a dry run: Step 3 must refuse the months
+        # THIS invocation archived into, and a dry run has to predict that refusal or
+        # its preview is of a different operation than the real one.
+        archived_into[month_dir.name] = archived_into.get(month_dir.name, 0) + 1
         if not dry_run:
             month_dir.mkdir(parents=True, exist_ok=True)
             dest = month_dir / msg_file.name
@@ -300,22 +337,58 @@ def cleanup(
                 shutil.move(str(ack_file), str(ack_dest / ack_file.name))
         report["archived"].append(msg_file.name)
 
-    # Step 3: Delete old archives
-    for month_subdir in sorted(archive_dir.iterdir()):
-        if not month_subdir.is_dir():
-            continue
+    # Step 3: PURGE old archive months — irreversible, and opt-in since 20261001.
+    #
+    # Two defects, one invocation, 591 messages destroyed (deploy-agent
+    # 20261001T220034):
+    #
+    # (a) Step 3's implicit premise is that an archived month has already had
+    #     `delete_days` of life AS AN ARCHIVED MONTH. That is false the first time the
+    #     archiver runs after an outage: on a bus that had not archived in four months,
+    #     Step 2 created 2026-05 and 2026-06 and Step 3 purged them seconds later. So
+    #     a month this run archived into is skipped and SAID, not silently kept.
+    #
+    # (b) It happened at all because `cleanup` deletes by default. The command reads as
+    #     hygiene; destroying 591 messages is not what an operator expects from it. Now
+    #     it requires `purge=True`, and without it the months are reported as withheld.
+    # Candidates are the months on disk UNION the months Step 2 would create. The union
+    # matters only in a dry run — there, Step 2 writes nothing, so a month it would
+    # create is not on disk and Step 3 could not see it. Without the union the preview
+    # describes a different operation than the real run, which is how this incident was
+    # read as safe in the first place.
+    existing = {d.name for d in archive_dir.iterdir() if d.is_dir()}
+    for month_name in sorted(existing | set(archived_into)):
+        month_subdir = archive_dir / month_name
         # Parse month from dirname (YYYY-MM)
         try:
-            month_dt = datetime.strptime(month_subdir.name, "%Y-%m").replace(tzinfo=timezone.utc)
+            month_dt = datetime.strptime(month_name, "%Y-%m").replace(tzinfo=timezone.utc)
         except ValueError:
             continue
 
-        # If the entire month is older than delete cutoff, remove it
-        if month_dt + timedelta(days=31) < delete_cutoff:
-            count = len(list(month_subdir.glob("*.md")))
-            if not dry_run:
-                shutil.rmtree(str(month_subdir))
-            report["deleted"].append(f"{month_subdir.name} ({count} messages)")
+        # If the entire month is older than delete cutoff, it is a purge candidate.
+        if month_dt + timedelta(days=31) >= delete_cutoff:
+            continue
+
+        on_disk = len(list(month_subdir.glob("*.md"))) if month_subdir.is_dir() else 0
+        # In a real run Step 2 has already moved the files, so they are counted on disk;
+        # in a dry run they are not there yet and the archived count supplies them.
+        count = on_disk if not dry_run else on_disk + archived_into.get(month_name, 0)
+
+        if month_name in archived_into:
+            # (a) — this run put messages here. Their retention window starts now.
+            report["purge_skipped_fresh"].append(f"{month_name} ({count} messages)")
+            continue
+
+        report["deleted_months"].append(month_name)
+        report["deleted_message_count"] += count
+        report["deleted"].append(f"{month_name} ({count} messages)")
+
+        if not purge:
+            # (b) — identified, not performed. The caller is told, and nothing is lost.
+            report["purge_withheld"] = True
+            continue
+        if not dry_run:
+            shutil.rmtree(str(month_subdir))
 
     # Counts
     report["active_count"] = len(list(active_dir.glob("*.md")))
@@ -333,7 +406,7 @@ def main() -> int:
         project_root = find_maestro_root()
         if not project_root:
             print(
-                "Usage: cleanup-bus.py [project-root] [--dry-run] "
+                "Usage: cleanup-bus.py [project-root] [--dry-run] [--purge] "
                 "[--archive-days N] [--delete-days N]",
                 file=sys.stderr,
             )
@@ -341,6 +414,7 @@ def main() -> int:
     else:
         project_root = Path(sys.argv[1]).resolve()
     dry_run = "--dry-run" in sys.argv
+    purge = "--purge" in sys.argv
     archive_days = 30
     delete_days = 90
 
@@ -350,7 +424,7 @@ def main() -> int:
         if arg == "--delete-days" and i + 1 < len(sys.argv):
             delete_days = int(sys.argv[i + 1])
 
-    report = cleanup(project_root, archive_days, delete_days, dry_run)
+    report = cleanup(project_root, archive_days, delete_days, dry_run, purge=purge)
     print(json.dumps(report, indent=2))
     return 0
 
