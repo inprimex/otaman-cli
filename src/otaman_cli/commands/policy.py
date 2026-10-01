@@ -1199,6 +1199,12 @@ def _cmd_critics(rest: list[str]) -> int:
         if h.note:
             UI.muted(f"        {h.note}")
 
+    if not critic_policy.invariant_enforced():
+        # The label above states the rule; this says the installed engine does not
+        # apply it. Printed once for the surface rather than per hook — it is a
+        # property of the bundle, not of any one gate.
+        UI.error(f"  {critic_policy.INVARIANT_NOT_ENFORCED}")
+
     print()
     UI.header("Clearance roster")
     if not surface.roster.rows:
