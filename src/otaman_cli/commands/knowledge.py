@@ -207,8 +207,15 @@ def _add(argv: list[str], root: Path, core) -> int:
         return 2
 
     if args.anchor and not core.anchor_is_recognized(args.anchor):
-        # Advisory, not a refusal: the hard rule is presence.
+        # Advisory, not a refusal: the hard rule is presence. But the warning now
+        # NAMES the shapes, per spec-agent's kv2 gate note — "not a recognised
+        # shape" without saying which shapes are recognised tells the author that
+        # something is wrong and nothing about what would be right. The three come
+        # from core's `anchor_is_recognized` contract, which is the rule being
+        # applied.
         UI.warn(f"anchor {args.anchor!r} is not a recognised shape — recording it anyway.")
+        UI.muted("  Recognised: a file:line (loader.py:41), a bus message stem")
+        UI.muted("  (20260921T111327-...), or a measured number.")
 
     path = core.write_entry(_knowledge_dir(root), entry)
 
@@ -243,9 +250,16 @@ def _add(argv: list[str], root: Path, core) -> int:
         return 2
 
     UI.ok(f"Recorded: {path.relative_to(root)}")
-    UI.muted(
-        f"  {entry.type} · {entry.function} · review by {entry.review_by} · anchor {entry.anchor}"
-    )
+    # `domain` is echoed because it was NOT, and spec-agent's kv2 gate read that
+    # absence exactly as it looks — "output showed the function field, nothing for
+    # domain", so had the flag's value even been consumed? It had. A recorded field
+    # that the confirmation does not mention is indistinguishable from a dropped
+    # one, and `function` sitting right beside it made the omission look deliberate.
+    summary = f"  {entry.type} · {entry.function}"
+    if entry.domain:
+        summary += f" · domain {entry.domain}"
+    summary += f" · review by {entry.review_by} · anchor {entry.anchor}"
+    UI.muted(summary)
     if fn_note:
         UI.warn(f"  {fn_note}")
     if domain_note:
