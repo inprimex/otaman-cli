@@ -37,10 +37,13 @@ def _examined_remainder(report: dict) -> int:
 def cmd_cleanup(args: list[str]) -> int:
     """Archive old bus messages and clean up."""
     dry_run = False
+    purge = False
     positional: list[str] = []
     for a in args:
         if a == "--dry-run":
             dry_run = True
+        elif a == "--purge":
+            purge = True
         else:
             positional.append(a)
 
@@ -52,7 +55,11 @@ def cmd_cleanup(args: list[str]) -> int:
     UI.header("Otaman Bus Cleanup")
 
     result = run_script(
-        "cleanup-bus.py", str(root), *(["--dry-run"] if dry_run else []), capture=True
+        "cleanup-bus.py",
+        str(root),
+        *(["--dry-run"] if dry_run else []),
+        *(["--purge"] if purge else []),
+        capture=True,
     )
     if result.returncode != 0:
         UI.error(result.stderr or result.stdout)
@@ -69,19 +76,44 @@ def cmd_cleanup(args: list[str]) -> int:
     if report.get("migrated"):
         UI.ok(f"Migrated: {report['migrated']} message(s) from flat bus/ to bus/active/")
 
+    # MOVED and DESTROYED are reported as different operations, in that order, with the
+    # destruction last so it is the thing left on screen.
+    #
+    # The old output said `Deleted: 2 archive(s)` for 591 destroyed messages, under a
+    # truncated `Archived:` block, in the past tense during a dry run. deploy-agent read
+    # it as two directories being tidied, told Roman the operation was recoverable, and
+    # was wrong (20261001T220034). The count was of DIRECTORIES; the number that matters
+    # is messages, and the word that was missing is "permanently".
+    verb = "Would archive" if dry_run else "Archived"
     archived = report.get("archived", [])
     if archived:
-        UI.ok(f"Archived: {len(archived)} message(s)")
+        UI.ok(f"{verb}: {len(archived)} message(s) (moved, recoverable)")
         for name in archived[:10]:
             UI.muted(name)
         if len(archived) > 10:
             UI.muted(f"... and {len(archived) - 10} more")
 
-    deleted = report.get("deleted", [])
-    if deleted:
-        UI.error(f"Deleted: {len(deleted)} archive(s)")
-        for d in deleted:
-            UI.muted(d)
+    fresh = report.get("purge_skipped_fresh", [])
+    if fresh:
+        UI.muted(
+            f"Kept {len(fresh)} month(s) this run archived into — their retention "
+            "starts now: " + ", ".join(fresh)
+        )
+
+    months = report.get("deleted_months", [])
+    n_msgs = report.get("deleted_message_count", 0)
+    if months:
+        where = ", ".join(months)
+        if report.get("purge_withheld"):
+            UI.warn(
+                f"WITHHELD: {n_msgs} message(s) in {len(months)} month(s) are past "
+                f"--delete-days and were NOT deleted: {where}"
+            )
+            UI.muted("  Pass --purge to delete them. This is irreversible.")
+        else:
+            destroyed = "Would DELETE PERMANENTLY" if dry_run else "DELETED PERMANENTLY"
+            UI.error(f"{destroyed}: {n_msgs} message(s) in {len(months)} month(s): {where}")
+            UI.muted("  Unrecoverable unless this directory is version-controlled.")
 
     # identity-divergence 1.4 — name every reaped phantom; a status file with no
     # agents.yaml entry must never vanish silently any more than it should persist.
@@ -113,7 +145,7 @@ def cmd_cleanup(args: list[str]) -> int:
         # The question that arrives right after the parse fix lands.
         UI.muted(f"Old enough to archive but waiting on an ack: {held}")
 
-    if not archived and not deleted and not orphans and not report.get("migrated"):
+    if not archived and not months and not orphans and not report.get("migrated"):
         if skipped or no_fm:
             # Never the bare sentence when input was discarded: "nothing to do"
             # and "could not look at most of it" are opposite facts.
@@ -158,5 +190,9 @@ def cmd_cleanup(args: list[str]) -> int:
 
 
 register(
-    CommandSpec(name="cleanup", handler=cmd_cleanup, help="Archive old, fully-acked bus messages")
+    CommandSpec(
+        name="cleanup",
+        handler=cmd_cleanup,
+        help="Archive old, fully-acked bus messages (--purge also DELETES old archive months)",
+    )
 )
