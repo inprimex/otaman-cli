@@ -632,6 +632,12 @@ def _cmd_status(root: Path, rest: list[str]) -> int:
 
     from otaman_cli.gate_audit import annotate as _waiver_annotation
 
+    # JTBD-57 1.3 / D5 — the proposal gate's verdicts, read once for every change
+    # rather than per row: the critique messages live on the bus and one scan beats
+    # N. D1 means this is information only — nothing below branches on a score, and
+    # the exit code is unchanged by any verdict.
+    critiques = _critiques_by_change(active_bus)
+
     for r in rows:
         stage = f"stage={r.stage} " if r.stage else ""
         badge = "  [auto-delivery]" if getattr(r, "delivery", None) == "auto" else ""
@@ -640,11 +646,59 @@ def _cmd_status(root: Path, rest: list[str]) -> int:
         UI.bullet(f"{r.change}{_SEV_MARK.get(r.severity, '')}{badge}{waived}")
         UI.kv("  state", f"{stage}{r.state} ({r.age} in state)")
         UI.kv("  next", r.next_actor)
+        critique = critiques.get(r.change)
+        if critique is not None and critique.ran:
+            where = f" by {critique.critic}" if critique.critic else ""
+            UI.kv("  critique", f"{critique.verdict}{where} (pass {critique.pass_index})")
+            UI.muted("  the gate comments; it does not block")
     n_err = sum(1 for r in rows if r.severity == "error")
     n_warn = sum(1 for r in rows if r.severity == "warn")
     if n_err or n_warn:
         UI.muted(f"({n_err} ERROR, {n_warn} WARN — stalled ≥3d / ≥1d)")
     return 1 if n_err else 0
+
+
+def _critiques_by_change(active_bus) -> dict:
+    """`{change: Critique}` from the `spec-proposal-critique-result` messages on the bus.
+
+    Keyed off the subject plugin emits — `Critique: <change> — <verdict>` — because
+    D6 forbids a parallel state store, so the change name has to come out of the
+    message itself. One bounded frontmatter read per candidate file, and only files
+    whose name could carry a critique are opened.
+
+    An unreadable or unparseable message is SKIPPED, not guessed at: a verdict a
+    reviewer acts on must come from a message that actually said it.
+    """
+    from otaman_cli.spec_gate_surface import CRITIQUE_RESULT_TYPE, parse_critique
+
+    out: dict = {}
+    if active_bus is None:
+        return out
+    import re as _re
+
+    subject_re = _re.compile(r"^##\s*Subject:\s*Critique:\s*(?P<change>.+?)\s+—\s", _re.M)
+    try:
+        candidates = sorted(active_bus.glob("*critique*.md"))
+    except OSError:
+        return out
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if CRITIQUE_RESULT_TYPE not in text:
+            continue
+        match = subject_re.search(text)
+        if match is None:
+            continue
+        change = match.group("change").strip()
+        parsed = parse_critique(text)
+        if not parsed.ran:
+            continue
+        existing = out.get(change)
+        if existing is None or parsed.pass_index >= existing.pass_index:
+            out[change] = parsed
+    return out
 
 
 def _bus_active(root: Path):

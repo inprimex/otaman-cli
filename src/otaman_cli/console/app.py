@@ -97,9 +97,15 @@ def queue_row_label(proposal: Proposal) -> str:
     tag = _TYPE_TAG.get(proposal.msg_type, proposal.msg_type or "msg")
     mark = "* " if proposal.is_decision else "  "
     keys = "   [a/A/x/d]" if proposal.is_decision else ""
+    # JTBD-57 1.3 / D5 — the gate's verdict rides the row a reviewer triages from.
+    # Appended, never substituted: the existing text is what identifies WHICH
+    # proposal, and a reviewer who cannot tell the items apart cannot triage them by
+    # number either. Read off the proposal the store already holds — the score and
+    # verdict are derived at ingest (crs D1: no IO on the render path).
+    gate = getattr(proposal, "gate_suffix", "") or ""
     return (
         f"{mark}[{tag}] [{proposal.priority}] {proposal.subject}"
-        f"  —  from {proposal.from_agent}{keys}"
+        f"  —  from {proposal.from_agent}{keys}{gate}"
     )
 
 
