@@ -40,6 +40,12 @@ CONFIG_NAME = "verification-gates.yaml"
 #: Policies whose inputs this surface can derive from the program itself.
 _LOCALLY_EVALUABLE = ("stakeholder-affected", "role-based")
 
+#: Said wherever an evaluated critic set is shown. The set is proposal-independent and
+#: the invariant is proposal-dependent, so a reader who takes one for the other
+#: concludes that an agent reviews its own proposals — the exact outcome the invariant
+#: forbids, read off a surface that never claimed it.
+PRE_EXCLUSION_NOTE = "before proposer exclusion — the proposing agent is never its own critic"
+
 
 @dataclass
 class HookView:
@@ -51,9 +57,28 @@ class HookView:
     overrides: dict[str, str] = field(default_factory=dict)
     #: Critics this surface could actually resolve, when the policy's inputs are
     #: derivable locally. Empty with a stated reason otherwise.
+    #:
+    #: PRE-EXCLUSION. The csp delta now carries D4 as an invariant OVER policies
+    #: (ruling 20261001, from plugin's measured inversion): "NO policy may select the
+    #: proposer as a critic of their own proposal: selection excludes the proposing
+    #: agent, and when exclusion empties a policy's set the fallback policy applies."
+    #: This surface evaluates a hook WITHOUT a proposal, so there is no proposer to
+    #: exclude and the set it shows is the one before exclusion — which is why the
+    #: rendering says so rather than letting a reader take it for the review roster.
     critics: tuple[str, ...] = ()
     evaluated: bool = False
     note: str = ""
+
+    @property
+    def single_candidate(self) -> str:
+        """The lone critic, when this hook resolves to exactly one.
+
+        That agent's own proposals empty the set under the invariant, so the fallback
+        decides them — or nothing does, when no fallback is declared. A pre-dispatch
+        finding rather than a runtime surprise, the same shape as sghc's
+        guarded-route warning.
+        """
+        return self.critics[0] if self.evaluated and len(self.critics) == 1 else ""
 
 
 @dataclass

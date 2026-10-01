@@ -1144,6 +1144,11 @@ def _cmd_critics(rest: list[str]) -> int:
                             "fallback": h.fallback,
                             "sensitivity_overrides": h.overrides,
                             "critics": list(h.critics),
+                            # Named in the payload too: a caller reading `critics`
+                            # as the review roster would conclude an agent reviews
+                            # its own proposals.
+                            "critics_are_pre_exclusion": True,
+                            "single_candidate": h.single_candidate or None,
                             "evaluated": h.evaluated,
                             "note": h.note,
                         }
@@ -1175,7 +1180,22 @@ def _cmd_critics(rest: list[str]) -> int:
         for sensitivity, policy in sorted(h.overrides.items()):
             UI.muted(f"        {sensitivity} → {policy}")
         if h.evaluated:
-            UI.muted(f"        selects: {', '.join(h.critics) or '(nobody)'}")
+            UI.muted(
+                f"        selects: {', '.join(h.critics) or '(nobody)'}"
+                f"   [{critic_policy.PRE_EXCLUSION_NOTE}]"
+            )
+            lone = h.single_candidate
+            if lone:
+                # Pre-dispatch, not a runtime surprise: this agent's own proposals
+                # empty the set, so the fallback decides them — or nothing does.
+                remedy = (
+                    f"fallback {h.fallback} decides those"
+                    if h.fallback
+                    else "and NO fallback is declared"
+                )
+                UI.warn(
+                    f"        only {lone} qualifies — their own proposals exclude them, {remedy}"
+                )
         if h.note:
             UI.muted(f"        {h.note}")
 
