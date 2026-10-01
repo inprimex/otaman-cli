@@ -14,6 +14,25 @@ from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.scripts import run_script
 from otaman_cli.ui import UI
 
+#: Exit code for "this run could not examine most of its input". Distinct from 1 so a
+#: caller can tell it from an ordinary failure, and from 0 because a run that read a
+#: minority of the bus has not done the job its name claims.
+EXIT_MOSTLY_UNEXAMINED = 3
+
+
+def _examined_remainder(report: dict) -> int:
+    """Messages that were read and simply did not qualify — young, or already archived.
+
+    Derived rather than reported, because the report counts OUTCOMES and this needs the
+    denominator: everything with a readable timestamp that the archive pass looked at
+    and left alone. `active_count` is post-run, so the archived ones are no longer in
+    it; the skipped ones still are, and are subtracted.
+    """
+    active = report.get("active_count", 0)
+    skipped = report.get("skipped_unparseable", 0) + report.get("skipped_no_frontmatter", 0)
+    held = report.get("held_unacked", 0)
+    return max(0, active - skipped - held)
+
 
 def cmd_cleanup(args: list[str]) -> int:
     """Archive old bus messages and clean up."""
@@ -111,6 +130,29 @@ def cmd_cleanup(args: list[str]) -> int:
 
     if dry_run:
         UI.warn("(dry run — no changes made)")
+
+    # deploy-agent's second ask (20261001T192057), which I declined in #234 and was
+    # wrong to: exit non-zero when the run examined a MINORITY of its input.
+    #
+    # Not a percentage threshold — those are arbitrary and argued about. The rule is
+    # "I looked at less than half of what I was given", which separates a data
+    # condition from a tool failure. With core refusing a valueless timestamp at write
+    # (core #102), the only way to reach that state is a parser/producer mismatch:
+    # exactly the four-month silence this closes, where 6,893 of 7,006 were discarded
+    # and the command still exited 0. On this bus today it is 7 of 7,084, which is
+    # data, and stays exit 0.
+    examined = (
+        len(report.get("archived", []))
+        + report.get("held_unacked", 0)
+        + _examined_remainder(report)
+    )
+    if skipped + no_fm > examined:
+        UI.error(
+            f"Examined a MINORITY of the bus: {examined} message(s) read, "
+            f"{skipped + no_fm} skipped. A parser that cannot read what the writer "
+            "emits reports 'nothing to clean up' over a bus that is never cleaned."
+        )
+        return EXIT_MOSTLY_UNEXAMINED
 
     return 0
 

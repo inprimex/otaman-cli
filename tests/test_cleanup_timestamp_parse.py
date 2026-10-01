@@ -245,7 +245,11 @@ def test_the_command_says_what_it_did_not_examine(tmp_path, monkeypatch, capsys)
         lambda *a, **kw: _Result(cleanup(root, dry_run=True)),
     )
 
-    assert cleanup_cmd.cmd_cleanup(["--dry-run"]) == 0
+    # Exit 3, not 0: this fixture is ONE message and it is unreadable, so the run
+    # examined a minority of its input. The code changed when deploy escalated their
+    # second ask (20261001T192057); what this test is ABOUT is the reporting below,
+    # and the expectation follows the behaviour rather than pinning the old one.
+    assert cleanup_cmd.cmd_cleanup(["--dry-run"]) == cleanup_cmd.EXIT_MOSTLY_UNEXAMINED
     out = capsys.readouterr().out
 
     assert "NOT EXAMINED" in out
@@ -286,3 +290,102 @@ class _Result:
         import json
 
         self.stdout = json.dumps(report)
+
+
+# ---------------------------------------------------------------------------
+# deploy-agent's second ask, escalated to a task-assignment (20261001T192057).
+
+
+def test_the_minority_examined_exit_code_is_not_zero_and_not_one():
+    """Distinct from 1 so a caller can tell it from an ordinary failure, and not 0
+    because a run that read a minority of the bus has not done the job its name
+    claims."""
+    from otaman_cli.commands.cleanup import EXIT_MOSTLY_UNEXAMINED
+
+    assert EXIT_MOSTLY_UNEXAMINED not in (0, 1)
+
+
+def test_the_four_month_state_now_exits_non_zero(tmp_path, monkeypatch, capsys):
+    """THE escalation. deploy measured 6,893 of 7,006 discarded while the command
+    exited 0 and printed "Nothing to clean up." — across 8 of 8 tenants, 4 already
+    accumulating. An exit code is what automation reads, and it said success."""
+    from otaman_cli.commands import cleanup as cleanup_cmd
+
+    root = tmp_path / "prog"
+    _bus(root, [(f"20260101T0000{i:02d}-x{i}", "", "cli-agent") for i in range(12)])
+    monkeypatch.setattr(cleanup_cmd, "find_project_root", lambda: root)
+    monkeypatch.setattr(
+        cleanup_cmd, "run_script", lambda *a, **kw: _Result(cleanup(root, dry_run=True))
+    )
+
+    rc = cleanup_cmd.cmd_cleanup(["--dry-run"])
+    out = capsys.readouterr().out
+
+    assert rc == cleanup_cmd.EXIT_MOSTLY_UNEXAMINED
+    assert "Examined a MINORITY" in out
+    assert "12 skipped" in out
+
+
+def test_a_handful_of_unreadable_messages_is_data_and_stays_zero(tmp_path, monkeypatch, capsys):
+    """The live bus today: 7 valueless-timestamp June messages out of 7,084. That is
+    DATA, not a parser mismatch, and a run that read everything else did its job.
+
+    The rule is "I examined a minority of what I was given" rather than a percentage
+    threshold — percentages are arbitrary and get argued about; this one separates a
+    tool failure from bad rows.
+    """
+    from otaman_cli.commands import cleanup as cleanup_cmd
+
+    root = tmp_path / "prog"
+    messages = [("20260101T000000-bad", "", "cli-agent")]
+    messages += [(f"20260101T0001{i:02d}-ok{i}", _old(1), "cli-agent") for i in range(6)]
+    _bus(root, messages)
+    monkeypatch.setattr(cleanup_cmd, "find_project_root", lambda: root)
+    monkeypatch.setattr(
+        cleanup_cmd, "run_script", lambda *a, **kw: _Result(cleanup(root, dry_run=True))
+    )
+
+    rc = cleanup_cmd.cmd_cleanup(["--dry-run"])
+    out = capsys.readouterr().out
+
+    assert rc == 0, "one unreadable message among seven is not a failed run"
+    assert "NOT EXAMINED: 1 message" in out, "and it is still reported"
+    assert "Examined a MINORITY" not in out
+
+
+def test_a_clean_bus_exits_zero(tmp_path, monkeypatch, capsys):
+    from otaman_cli.commands import cleanup as cleanup_cmd
+
+    root = tmp_path / "prog"
+    _bus(root, [("20260101T000000-a", _old(1), "cli-agent")])
+    monkeypatch.setattr(cleanup_cmd, "find_project_root", lambda: root)
+    monkeypatch.setattr(
+        cleanup_cmd, "run_script", lambda *a, **kw: _Result(cleanup(root, dry_run=True))
+    )
+
+    assert cleanup_cmd.cmd_cleanup(["--dry-run"]) == 0
+    assert "Examined a MINORITY" not in capsys.readouterr().out
+
+
+def test_archived_messages_count_as_examined(tmp_path):
+    """They left `active_count`, so the denominator has to add them back — otherwise a
+    successful cleanup looks like it examined less and less the better it worked."""
+    from otaman_cli.commands.cleanup import _examined_remainder
+
+    report = {
+        "active_count": 100,
+        "skipped_unparseable": 5,
+        "skipped_no_frontmatter": 0,
+        "held_unacked": 20,
+    }
+
+    assert _examined_remainder(report) == 75
+
+
+def test_the_remainder_never_goes_negative():
+    """A report whose counts do not add up must not produce a negative denominator and
+    flip the comparison."""
+    from otaman_cli.commands.cleanup import _examined_remainder
+
+    assert _examined_remainder({"active_count": 1, "skipped_unparseable": 50}) == 0
+    assert _examined_remainder({}) == 0
