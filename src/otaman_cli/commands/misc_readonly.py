@@ -12,6 +12,7 @@ _read_platform_specs_path.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
@@ -68,8 +69,65 @@ def cmd_owner_paths(args: list[str]) -> int:
     return 0
 
 
+def _cmd_review_security_gate(args: list[str]) -> int:
+    """Render Hook C's security-gate-report (sghc 1.7, cli half).
+
+    A subtarget rather than a new top-level command, the same shape as
+    `validate docs` — Hook C's report belongs to the review flow, which is
+    where `otaman review` already lives.
+
+    The source is a JSON payload: plugin's `report_body` as the CI artifact
+    writes it, by path or on stdin. The exit code is part of the surface —
+    0 clear, 1 blocked, 2 could not be read — because a CI step that renders a
+    blocking report and exits 0 has reported a success that did not happen.
+    """
+    from otaman_cli import security_gate_render as sgr
+
+    if not args or args[0] in ("--help", "-h"):
+        UI.error("Usage: otaman review security-gate <report.json|->")
+        UI.muted("The report is plugin's `report_body` payload (sghc 1.7).")
+        return sgr.CANNOT_RENDER
+
+    source = args[0]
+    loaded: sgr.Loaded | None = None
+    raw = ""
+    if source == "-":
+        raw = sys.stdin.read()
+        where = "stdin"
+    else:
+        path = Path(source)
+        where = str(path)
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            # An unreadable report takes the SAME output path as a malformed
+            # one — one shape for "the gate was not evaluated", so a reader
+            # cannot learn to skim past one of them.
+            loaded = sgr.Loaded(error=f"cannot read {where}: {exc}")
+
+    if loaded is None:
+        loaded = sgr.load(raw)
+    UI.header("Security gate (Hook C)")
+    for line in sgr.render_lines(loaded):
+        print(f"  {line}" if line else "")
+    code = sgr.exit_code(loaded)
+    print()
+    if code == sgr.CANNOT_RENDER:
+        UI.error(f"The ladder's result for {where} could not be read — this is not a pass.")
+    elif code == sgr.BLOCKED:
+        UI.blocked("Hook C blocks this PR.")
+    else:
+        UI.ok("Hook C raises no blocking finding.")
+    return code
+
+
 def cmd_review(args: list[str]) -> int:
     """Trigger a review."""
+    # `review security-gate <payload>` renders Hook C's own result record
+    # (sghc 1.7); bare `review [...]` keeps pointing at the observer agents.
+    if args and args[0] == "security-gate":
+        return _cmd_review_security_gate(args[1:])
+
     reviewer = "all"
     positional: list[str] = []
     i = 0
@@ -468,7 +526,9 @@ register(
 )
 register(
     CommandSpec(
-        name="review", handler=cmd_review, help="Trigger observer review (CTO / security / all)"
+        name="review",
+        handler=cmd_review,
+        help="Observer review (CTO / security / all); `review security-gate <f>` renders Hook C",
     )
 )
 register(
