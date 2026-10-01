@@ -1360,6 +1360,8 @@ def check_critic_policy(project_root: Path) -> dict[str, Any]:
 
     result["details"]["hooks"] = len(surface.hooks)
     result["details"]["effective"] = ", ".join(f"{h.hook}={h.primary}" for h in surface.hooks)
+    # The rendered sets are proposal-independent; the invariant is proposal-dependent.
+    result["details"]["critics_are"] = critic_policy.PRE_EXCLUSION_NOTE
     result["details"]["cleared_agents"] = len(surface.roster.rows)
     issues: list[dict[str, Any]] = []
 
@@ -1375,6 +1377,32 @@ def check_critic_policy(project_root: Path) -> dict[str, Any]:
             }
         )
     for hook in surface.hooks:
+        # csp's D4 invariant (ruling 20261001): no policy may select the proposer as
+        # a critic of their own proposal. A hook resolving to ONE candidate therefore
+        # has nobody for that agent's own proposals — the fallback decides them, or
+        # nothing does. Surfaced before dispatch rather than discovered at it.
+        lone = hook.single_candidate
+        if lone:
+            result["status"] = "warn"
+            issues.append(
+                {
+                    "severity": "medium" if hook.fallback else "high",
+                    "message": (
+                        f"{hook.hook}: only {lone} qualifies, so their own proposals "
+                        "exclude the entire set"
+                        + (
+                            f" — fallback {hook.fallback} decides those"
+                            if hook.fallback
+                            else " and NO fallback is declared"
+                        )
+                    ),
+                    "fix": (
+                        "clear a second critic for this hook, or declare a fallback"
+                        if not hook.fallback
+                        else "accept that this agent's proposals always take the fallback"
+                    ),
+                }
+            )
         if hook.evaluated and not hook.critics:
             result["status"] = "warn"
             issues.append(
