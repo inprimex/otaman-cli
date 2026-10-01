@@ -24,10 +24,23 @@ screen at open and the capability lens 225.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import pathlib
 import tempfile
 
 import pytest
+
+#: Which WIDGET each lens renders into. Resolved from Textual rather than
+#: compared by class name, because the tree lenses render into `ArtifactTree` —
+#: a Tree subclass carrying D1's arrow bindings, which a name check rejects and
+#: an isinstance check correctly accepts.
+if importlib.util.find_spec("textual") is not None:  # pragma: no branch
+    from textual.widgets import DataTable as _DataTable
+    from textual.widgets import Tree as _Tree
+
+    _WIDGETS = {"Tree": _Tree, "DataTable": _DataTable}
+else:  # pragma: no cover - the whole module is skipped without Textual
+    _WIDGETS = {}
 import yaml
 
 _textual = pytest.mark.skipif(
@@ -87,7 +100,10 @@ def test_each_lens_focuses_the_widget_it_renders_into(program, lens, expected):
             screen = await _open(app, pilot, program)
             await _cycle_to(app, pilot, screen, lens)
             assert app.focused is not None, f"{lens} lens: nothing focused — keyboard is dead"
-            assert type(app.focused).__name__ == expected
+            # isinstance, not the class NAME: the tree lenses render into
+            # `ArtifactTree`, a Tree subclass that exists to carry D1's arrow
+            # bindings. What this guard is about is which WIDGET has focus.
+            assert isinstance(app.focused, _WIDGETS[expected])
             await app.action_quit()
 
     asyncio.run(go())
@@ -108,7 +124,7 @@ def test_focus_survives_a_full_lens_cycle(program):
             await _cycle_to(app, pilot, screen, "lifecycle")
             await _cycle_to(app, pilot, screen, "value")
             assert app.focused is not None, "focus lost after returning from the lifecycle lens"
-            assert type(app.focused).__name__ == "Tree"
+            assert isinstance(app.focused, _WIDGETS["Tree"])
             await app.action_quit()
 
     asyncio.run(go())

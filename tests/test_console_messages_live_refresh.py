@@ -38,10 +38,15 @@ class FakeSource:
         self.on_change = None
         self.started = False
         self.stopped = False
+        #: COUNTED, not just flagged: once the loader outlives the screen, "was
+        #: it started" stops being the interesting question and "how many times"
+        #: starts being one — a second start is a second poll thread.
+        self.starts = 0
 
     def start(self, on_change):
         self.on_change = on_change
         self.started = True
+        self.starts += 1
 
     def stop(self):
         self.stopped = True
@@ -174,8 +179,16 @@ def test_a_plain_message_also_triggers_a_refresh(program, tmp_path):
 
 
 @_textual
-def test_the_screen_stops_a_source_it_created(program, tmp_path, monkeypatch):
-    """A poll thread that outlives its screen is a leak."""
+def test_the_source_outlives_the_screen_and_dies_with_the_app(program, tmp_path, monkeypatch):
+    """Ownership moved to the APP, and the lifetime moved with it.
+
+    This asserted the opposite until the per-mount store was fixed: the screen
+    created a loader and stopped it on unmount, which is also why leaving
+    Messages threw the store away and coming back cold-scanned 978 messages
+    again (Roman, v0.5.17: 6s on RETURN). The loader is the app's now, so it must
+    survive popping the screen — and the app must be what stops it, or a program
+    switch leaves the old watcher polling for the session.
+    """
     import otaman_cli.console.events as events
     from otaman_cli.console.app import InboxScreen, OtamanConsole
 
@@ -186,17 +199,68 @@ def test_the_screen_stops_a_source_it_created(program, tmp_path, monkeypatch):
         app = OtamanConsole([program], search_root=program.root, log_dir=tmp_path / "logs")
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.push_screen(InboxScreen(program))  # no injected source → owns one
+            app.push_screen(InboxScreen(program))  # no injected source → the app's
             await pilot.pause()
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert source.started
             app.pop_screen()
             await pilot.pause()
+            assert not source.stopped, "the store must survive leaving the screen"
             await app.action_quit()
 
     asyncio.run(go())
-    assert source.stopped, "the poll thread would outlive the screen"
+    assert source.stopped, "the app must stop what it owns"
+
+
+@_textual
+def test_re_entering_messages_reuses_the_store_and_does_not_restart_the_watcher(
+    program, tmp_path, monkeypatch
+):
+    """The measured defect: a second visit built a second store and a second watcher.
+
+    Roman's numbers at 978 pending were 7s first entry and 6s on RETURN; the
+    return is the one that proves nothing survived. Two assertions, because the
+    per-mount store had two costs: the rescan, and a poll thread per visit.
+    """
+    import otaman_cli.console.events as events
+    from otaman_cli.console.app import InboxScreen, OtamanConsole
+
+    source = FakeSource()
+    monkeypatch.setattr(events, "make_event_source", lambda program, **kw: source)
+
+    seen = {}
+
+    async def go():
+        app = OtamanConsole([program], search_root=program.root, log_dir=tmp_path / "logs")
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            first = InboxScreen(program)
+            app.push_screen(first)
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            seen["store"] = first._store
+            seen["starts"] = source.starts
+            seen["version"] = first._store.version
+            app.pop_screen()
+            await pilot.pause()
+
+            second = InboxScreen(program)
+            app.push_screen(second)
+            await pilot.pause()
+            seen["store2"] = second._store
+            # Painted from the warm store BEFORE any worker ran: no Loading row.
+            seen["cache_at_mount"] = second._cache
+            seen["starts2"] = source.starts
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await app.action_quit()
+
+    asyncio.run(go())
+    assert seen["store2"] is seen["store"], "the second visit built its own store"
+    assert seen["cache_at_mount"] is not None, "the warm store was not painted at mount"
+    assert seen["starts2"] == seen["starts"] == 1, "a visit started a second watcher"
 
 
 @_textual

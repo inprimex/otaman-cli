@@ -24,6 +24,10 @@ from otaman_cli.console.bus import Program
 
 #: outcome ids appear in change .openspec.yaml `outcome:` as a free-text prefix.
 _JTBD_RE = re.compile(r"JTBD-\d+(?:-[a-z0-9-]+)?", re.IGNORECASE)
+#: a BARE outcome number, as prose carries it (`JTBD-118 lineage (...)`). Registry
+#: ids are full slugs, so a bare number has to be resolved against them — on the
+#: number's boundary, or `JTBD-1` would claim `JTBD-118`.
+_JTBD_BARE_RE = re.compile(r"JTBD-\d+", re.IGNORECASE)
 
 _CLOSED_OUTCOME = {"Done", "Retired"}
 _CLOSED_SOLUTION = {"Discarded"}
@@ -351,7 +355,21 @@ def _change_rows(program: Program):
 
 
 def _change_outcome_id(program: Program, change_name: str) -> str | None:
-    """The outcome id linked from a change's .openspec.yaml `outcome:` (free text)."""
+    """The outcome a change links to — its `outcome-id:` stamp, else prose.
+
+    `outcome-id:` is the back-link convention and carries an exact registry id
+    (`JTBD-118-interactive-spec-editing`). `outcome:` is a free-text sentence
+    that merely tends to open with an id. This read used ONLY the prose, and the
+    cost was total: measured on the live program, 72 changes, **0 linked** — every
+    one of them in the "unlinked changes" group, 26 of them carrying a perfectly
+    good stamp nobody read. Roman found it hunting spec-approval candidates,
+    which is the one job the group makes hardest (v0.5.17).
+
+    Prose stays as the fallback rather than being dropped: 6 changes carry only
+    the sentence, and a scraped id still resolves through
+    :func:`_resolve_outcome`. Returned verbatim — matching is that resolver's
+    job, so nothing here has to know how registry ids are spelled.
+    """
     try:
         from otaman_core.spec_lifecycle import read_openspec
 
@@ -361,9 +379,44 @@ def _change_outcome_id(program: Program, change_name: str) -> str | None:
         if changes is None:
             return None
         data = read_openspec(changes / change_name / ".openspec.yaml")
+        # `outcome_id` is not a spelling this fleet writes; accepted because the
+        # cost of tolerating it is one `or` and the cost of missing it is a
+        # change that silently never links.
+        stamp = data.get("outcome-id") or data.get("outcome_id")
+        if isinstance(stamp, str) and stamp.strip():
+            return stamp.strip()
         return _extract_outcome_id(data.get("outcome"))
     except Exception:  # noqa: BLE001
         return None
+
+
+def _resolve_outcome(oid: str | None, registry_ids: set[str]) -> str | None:
+    """The registry outcome *oid* names, or None when it names none.
+
+    Three shapes reach here and only the first is exact:
+
+    * a full stamp — `JTBD-118-interactive-spec-editing`, matched case-insensitively
+      (the prose scraper upper-cases what it finds, which otherwise destroys a slug)
+    * a bare number from prose — `JTBD-108` names `JTBD-108-<slug>`, resolved on the
+      number's boundary so `JTBD-1` cannot claim `JTBD-118`
+    * neither — prose in the wrong field, or an outcome not yet in the registry
+
+    An ambiguous bare number resolves to None rather than picking a winner: two
+    candidates mean the stamp does not identify one outcome, and nesting under a
+    guess is worse than leaving the change where the reader can see it is unlinked.
+    """
+    if not oid:
+        return None
+    needle = oid.strip()
+    for rid in registry_ids:
+        if rid.lower() == needle.lower():
+            return rid
+    if _JTBD_BARE_RE.fullmatch(needle):
+        prefix = needle.upper() + "-"
+        hits = [rid for rid in registry_ids if rid.upper().startswith(prefix)]
+        if len(hits) == 1:
+            return hits[0]
+    return None
 
 
 def _change_node(program: Program, row, blocked: dict[str, str]) -> TreeNode:
@@ -429,7 +482,21 @@ def build_artifact_tree(
 
     # change-name -> node, and the outcome id each change links to
     change_nodes = {r.name: _change_node(program, r, blocked) for r in rows}
-    change_outcome = {r.name: _change_outcome_id(program, r.name) for r in rows}
+    change_stamp = {r.name: _change_outcome_id(program, r.name) for r in rows}
+    # Resolve every stamp against the registry ONCE, here, rather than comparing
+    # raw strings inside the per-outcome loop: a stamp that resolves to nothing
+    # is a different fact from no stamp at all, and the loop cannot tell them
+    # apart after the fact.
+    registry_ids = {o.id for o in outcomes.outcomes} if outcomes is not None else set()
+    change_outcome = {
+        name: _resolve_outcome(oid, registry_ids) for name, oid in change_stamp.items()
+    }
+    # Named an outcome, resolved to none — from either source, stamp or prose.
+    dangling = {
+        name: change_stamp[name]
+        for name, resolved in change_outcome.items()
+        if resolved is None and change_stamp[name]
+    }
 
     def _visible(node: TreeNode) -> bool:
         return show_closed or not node.closed
@@ -500,9 +567,22 @@ def build_artifact_tree(
         if _visible(node):
             roots.append(node)
 
-    # unlinked changes (no outcome, or outcome not in the registry) grouped last
+    # Unlinked changes grouped last — but a change that NAMES an outcome the
+    # registry does not have is not unlinked, it is mis-linked, and burying the
+    # two together hides the fixable case inside the expected one. Measured on
+    # the live program: 4 such changes against 40 genuine orphans. Two name
+    # JTBDs approved today but not yet in the registry, one has prose where the
+    # id goes, one scraped `JTBD-99-102` out of a sentence that meant a range.
+    # Every one is someone's to fix and none is findable under "unlinked".
     orphans = _sort_changes(
-        [n for name, n in change_nodes.items() if name not in linked_changes and _visible(n)]
+        [
+            n
+            for name, n in change_nodes.items()
+            if name not in linked_changes and name not in dangling and _visible(n)
+        ]
+    )
+    dangling_nodes = _sort_changes(
+        [n for name, n in change_nodes.items() if name in dangling and _visible(n)]
     )
     roots.sort(key=lambda n: (_priority_rank(n.priority), n.id))
     if orphans:
@@ -515,6 +595,16 @@ def build_artifact_tree(
                 id=f"(unlinked changes — {len(orphans)})",
                 title="",
                 children=orphans,
+                collapsed=True,
+            )
+        )
+    if dangling_nodes:
+        roots.append(
+            TreeNode(
+                kind="group",
+                id=f"(outcome id does not resolve — {len(dangling_nodes)})",
+                title="",
+                children=dangling_nodes,
                 collapsed=True,
             )
         )

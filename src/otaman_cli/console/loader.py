@@ -119,6 +119,11 @@ class Loader:
         self._timer: Any | None = None
         self._lock = threading.Lock()
         self._stopped = False
+        #: A loader now outlives the screen that started it (the app owns one per
+        #: program), so `start` is reached once per MOUNT rather than once per
+        #: loader. Without this, re-entering Messages called `source.start` again
+        #: on a provider already watching — a second poll thread per visit.
+        self._started = False
         store.register_deriver(KIND_MESSAGE, message_deriver)
 
     # -- scanning ---------------------------------------------------------
@@ -154,6 +159,8 @@ class Loader:
         provider's own contract already forbids scanning on the calling thread
         there: a synchronous scan at mount blocked first paint (5.1 finding #4).
         """
+        if self._started and not self._stopped:
+            return  # already watching — a second screen mounting is not a second watcher
         if self._source is None:
             from otaman_cli.console.events import make_event_source
 
@@ -161,6 +168,7 @@ class Loader:
             self._own_source = True
         self._stopped = False
         self._source.start(self._on_change)
+        self._started = True
         self._record_provider()
 
     def _record_provider(self) -> None:
