@@ -1,10 +1,19 @@
 """Tests for `otaman whoami --resolve-only` (F013 security fix).
 
+Exit-code note (2026-10-01): the unresolved cases below return
+`UNRESOLVED_BUT_CAPABLE` (3), not 1. The INTENT of each test is unchanged — a
+spoofable signal must not resolve an identity — but the code now distinguishes
+"this build asked and found nothing" from "this build could not be asked",
+which the ownership hook needs in order to fail closed without denying every
+tenant on a lagging bundle (plugin 20261001T124643). Any non-zero still reads as
+unresolved to existing callers.
+
 Lightweight non-interactive wrapper around
 `otaman_core.identity.resolve_enforcement_identity()`, for non-Python
 callers (the Bash PreToolUse hook) to shell out to instead of
 reimplementing the enforcement-identity priority chain. Prints ONLY the
-resolved agent name on success; exits 1 with no output when unresolved.
+resolved agent name on success; exits UNRESOLVED_BUT_CAPABLE (3) with no
+output when this build looked and found no identity.
 
 Deliberately narrower than the general `otaman whoami` display chain:
 `OTAMAN_AGENT` env var and `.agents/current-agent` are NOT trusted here
@@ -18,6 +27,8 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+from otaman_cli.commands.status_cluster import UNRESOLVED_BUT_CAPABLE
 
 
 def _run_cli(
@@ -67,20 +78,20 @@ class TestResolveOnly:
         r = _run_cli(
             tmp_path, "whoami", "--resolve-only", env_overrides={"OTAMAN_AGENT": "cli-agent"}
         )
-        assert r.returncode == 1
+        assert r.returncode == UNRESOLVED_BUT_CAPABLE
         assert r.stdout.strip() == ""
 
     def test_current_agent_file_alone_does_not_resolve(self, tmp_path: Path):
         _stage_project(tmp_path, otaman_marker_agent=None)
         (tmp_path / ".agents" / "current-agent").write_text("cli-agent", encoding="utf-8")
         r = _run_cli(tmp_path, "whoami", "--resolve-only")
-        assert r.returncode == 1
+        assert r.returncode == UNRESOLVED_BUT_CAPABLE
         assert r.stdout.strip() == ""
 
-    def test_no_marker_no_env_exits_1_with_no_output(self, tmp_path: Path):
+    def test_no_marker_no_env_exits_capable_but_unresolved_with_no_output(self, tmp_path: Path):
         _stage_project(tmp_path, otaman_marker_agent=None)
         r = _run_cli(tmp_path, "whoami", "--resolve-only")
-        assert r.returncode == 1
+        assert r.returncode == UNRESOLVED_BUT_CAPABLE
         assert r.stdout.strip() == ""
 
     def test_takes_priority_over_general_whoami_display_logic(self, tmp_path: Path):
