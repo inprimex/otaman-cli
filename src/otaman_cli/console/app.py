@@ -3144,7 +3144,13 @@ class OtamanConsole(App):
 
     def rescan_programs(self) -> None:
         if self._search_root is not None:
-            self._programs = discover_programs(self._search_root)
+            # Same exclusions as the launch path, surfaced where the operator is
+            # now — a rescan that silently drops a shadowing leftover teaches them
+            # the picker is broken rather than that a file needs deleting.
+            warnings: list[str] = []
+            self._programs = discover_programs(self._search_root, warnings=warnings)
+            for warning in warnings:
+                self.notify(warning, severity="warning", timeout=12)
         # Rebuild the picker with the fresh list.
         self.pop_screen()
         self.push_screen(ProgramPickerScreen(self._programs))

@@ -137,7 +137,14 @@ def run_console(argv: list[str], *, _run: bool = True) -> int:
     # Pass cwd so discovery can union the marker-chain program when launched
     # from inside a one-off checkout (5.1 finding #3); canonical CE-layout
     # enumeration handles the standard home-dir launch.
-    programs = discover_programs(search_root, cwd=Path.cwd())
+    # picker-canonical-precedence 1.1 — print what discovery EXCLUDED before the
+    # TUI takes the screen. A leftover platform.yaml that would have shadowed the
+    # tenant's programs is exactly the thing the operator needs to delete, and once
+    # the app has started there is nowhere for a line like this to go.
+    discovery_warnings: list[str] = []
+    programs = discover_programs(search_root, cwd=Path.cwd(), warnings=discovery_warnings)
+    for warning in discovery_warnings:
+        print(f"warning: {warning}")
 
     # console-ia-consolidation 1.1 — open the named (or only) program directly.
     # An unknown/ambiguous name is a loud non-zero exit rather than a silent

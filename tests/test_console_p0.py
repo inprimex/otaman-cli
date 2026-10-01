@@ -132,7 +132,7 @@ def test_run_console_exits_nonzero_on_an_unknown_name(tmp_path, monkeypatch, cap
     monkeypatch.setattr(launch, "_resolve_search_root", lambda argv: tmp_path)
     monkeypatch.setattr(
         "otaman_cli.console.bus.discover_programs",
-        lambda root, cwd=None: [_program(tmp_path, "alpha")],
+        lambda root, cwd=None, **kwargs: [_program(tmp_path, "alpha")],
     )
     rc = launch.run_console(["nope"], _run=False)
     out = capsys.readouterr().out
@@ -147,7 +147,7 @@ def test_run_console_builds_with_the_selected_program(tmp_path, monkeypatch):
     monkeypatch.setattr(launch, "_resolve_search_root", lambda argv: tmp_path)
     monkeypatch.setattr(
         "otaman_cli.console.bus.discover_programs",
-        lambda root, cwd=None: [_program(tmp_path, "alpha"), _program(tmp_path, "beta")],
+        lambda root, cwd=None, **kwargs: [_program(tmp_path, "alpha"), _program(tmp_path, "beta")],
     )
     assert launch.run_console(["beta"], _run=False) == 0
 
