@@ -43,6 +43,11 @@ class Proposal:
     msg_type: str = "spec-change-request"
     #: `decision-required` only: the task/change this question is blocking.
     blocks: str = ""
+    #: JTBD-57 1.3 / D5 — the proposal gate's row annotation, e.g.
+    #: `  [gate 72/100 adequate · critique has-comments]`. Derived at INGEST, not on
+    #: the render path (crs D1), and empty when the gate has produced nothing for
+    #: this item. Set by the loader; the row reads it.
+    gate_suffix: str = ""
 
     #: Short human names for the message types the console decides on. A raw
     #: `spec-change-request` in a confirmation prompt is accurate and unreadable.
@@ -390,6 +395,10 @@ def _frontmatter_head(f: Path, limit: int = 8192) -> str | None:
     return m.group(1) if m else None
 
 
+#: plugin emits `Critique: <change> — <verdict>`; this lifts the change name back
+#: out, which is the only join available under D6 (no parallel state store).
+_CRITIQUE_SUBJECT = re.compile(r"Critique:\s*(?P<change>.+?)\s+—\s")
+
 _QUEUE_TYPES = ("spec-change-request", "outcome-proposal")
 
 #: Types that reach the human's queue REGARDLESS of `to:`, and that count as
@@ -434,6 +443,54 @@ def read_body(item: Proposal) -> str:
     return content.split("---", 2)[-1] if content.count("---") >= 2 else content
 
 
+def _critiques_from_entries(entries) -> dict:
+    """`{change: Critique}` from critique-result messages in an already-walked set.
+
+    Bounded: only entries whose TYPE is the critique result are opened, and the
+    highest pass index wins — plugin allows two passes, and pass 2 exists precisely
+    because pass 1's verdict was not the final word.
+    """
+    from otaman_cli.spec_gate_surface import CRITIQUE_RESULT_TYPE, parse_critique
+
+    out: dict = {}
+    for entry in entries:
+        if entry.tag("type") != CRITIQUE_RESULT_TYPE:
+            continue
+        match = _CRITIQUE_SUBJECT.search(_subject_head(entry.path) or "")
+        if match is None:
+            continue
+        try:
+            body = entry.path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        parsed = parse_critique(body)
+        if not parsed.ran:
+            continue
+        change = match.group("change").strip()
+        existing = out.get(change)
+        if existing is None or parsed.pass_index >= existing.pass_index:
+            out[change] = parsed
+    return out
+
+
+def _gate_suffix_for(subject: str, critiques: dict) -> str:
+    """The row annotation for a proposal whose subject names a change.
+
+    Matched on the change name appearing in the proposal's subject — D6 forbids a
+    parallel state store, so the join has to come out of the messages themselves.
+    Longest name first, because `console-lens` is a substring of
+    `console-lens-navigation-and-filtering` and the shorter one would otherwise win.
+    """
+    if not subject or not critiques:
+        return ""
+    from otaman_cli.spec_gate_surface import Score, row_suffix
+
+    for change in sorted(critiques, key=len, reverse=True):
+        if change and change in subject:
+            return row_suffix(Score(), critiques[change])
+    return ""
+
+
 def list_human_queue(program: Program) -> list[Proposal]:
     """EVERY pending item addressed to the human — decisions and plain messages
     alike, newest-relevant first (console-ia-consolidation 2.1).
@@ -464,6 +521,11 @@ def list_human_queue(program: Program) -> list[Proposal]:
         acked = {p.name for p in acks_dir.glob("*.human.ack")} if acks_dir.is_dir() else set()
     except OSError:
         acked = set()
+
+    # JTBD-57 1.3 / D5 — the gate's verdict per change, collected from the SAME
+    # already-walked entry set. A second scan would be a second cost on the screen
+    # Roman opens most, and the critique messages are right here.
+    critiques = _critiques_from_entries(active_entries(program))
 
     out: list[Proposal] = []
     for entry in active_entries(program):
@@ -514,6 +576,8 @@ def list_human_queue(program: Program) -> list[Proposal]:
                 # dae 1.2 — what a decision-required is blocking, so the tree
                 # can mark the change that is waiting on this answer.
                 blocks=str(fm.get("blocks", "") or ""),
+                # D5 — derived HERE, at ingest, so the row renders it without IO.
+                gate_suffix=_gate_suffix_for(subject or "", critiques),
             )
         )
     # Decisions first — they are the rows that need the human to act; then by
