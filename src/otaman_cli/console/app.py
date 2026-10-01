@@ -825,18 +825,16 @@ class InboxScreen(_DecisionActions, Screen):
         # The store is created here when not injected, so `InboxScreen(program)`
         # and `InboxScreen(program, event_source=...)` — the two forms eight test
         # modules already use — keep working, and keep getting the new path.
-        from otaman_cli.console.loader import Loader
-        from otaman_cli.console.store import Store
-
-        self._store = store if store is not None else Store()
-        self._loader = (
-            loader if loader is not None else Loader(program, self._store, source=event_source)
-        )
-        self._own_loader = loader is None
+        # An injected store/loader belongs to the caller (eight test modules rely
+        # on that). Otherwise BOTH come from the app on mount, where `self.app`
+        # exists — not from here, which would build a fresh store per visit and
+        # is exactly the per-mount defect Roman measured as a 6s RETURN.
+        self._store = store
+        self._loader = loader
+        self._injected_event_source = event_source
+        self._own_loader = False
         self._unsubscribe = None
-        from otaman_cli.console.optimistic import OptimisticWrites
-
-        self._optimistic = OptimisticWrites(self._store)
+        self._optimistic = None
         #: None until the first snapshot lands — distinct from "loaded, and
         #: empty", which is what tells the mount path whether to show Loading…
         self._cache = None
@@ -864,14 +862,36 @@ class InboxScreen(_DecisionActions, Screen):
         return [r for r in rows if r is not None]
 
     def on_mount(self) -> None:
+        from otaman_cli.console.loader import Loader
+        from otaman_cli.console.optimistic import OptimisticWrites
+
+        # The app's store for this program, unless one was injected. This is the
+        # whole of the process-wide fix: the second visit finds the first visit's
+        # store already full.
+        if self._store is None:
+            self._store = self.app.store_for(self.program)
+        if self._loader is None:
+            app_loader = getattr(self.app, "loader_for", None)
+            if app_loader is not None:
+                self._loader = app_loader(self.program, event_source=self._injected_event_source)
+            else:  # an app that predates loader_for (test doubles) still works
+                self._loader = Loader(self.program, self._store, source=self._injected_event_source)
+                self._own_loader = True
+        self._optimistic = OptimisticWrites(self._store)
         # Repaint whenever a new store version lands, whoever produced it: the
         # Loader's poll, an external write, or this screen's own refresh. The
         # subscriber takes the SNAPSHOT, so a missed version costs nothing.
         self._unsubscribe = self._store.subscribe(marshal_to_app(self.app, self._on_snapshot))
+        # A warm store paints NOW and refreshes behind the paint; only a cold one
+        # earns the "Loading…" placeholder. Showing it over data the store
+        # already holds is how a 7ms re-entry still reads as a wait.
+        warm = bool(self._rows())
+        if warm:
+            self._apply()
         # Cold-start off the UI thread: a synchronous scan at mount blocked
         # first paint (5.1 finding #4), and that constraint did not change just
         # because the reader moved.
-        self._load(show_loading=True)
+        self._load(show_loading=not warm)
         self._loader.start()
 
     def _on_snapshot(self, snapshot) -> None:
@@ -886,7 +906,8 @@ class InboxScreen(_DecisionActions, Screen):
         self._apply()
 
     def on_unmount(self) -> None:
-        self._optimistic.forget()
+        if self._optimistic is not None:
+            self._optimistic.forget()
         if self._unsubscribe is not None:
             self._unsubscribe()
             self._unsubscribe = None
@@ -1016,6 +1037,44 @@ def _authored_change_roots(program, roots):
     return found
 
 
+class ArtifactTree(Tree):
+    """The artifact tree, with D1's arrow semantics actually bound.
+
+    Textual's own `Tree` binds `space` to toggle and `shift+left/right` to walk
+    ancestors. It binds plain `→`/`←` to NOTHING. D1 (Roman, 2026-09-21) ruled
+    `→` expands and `←` collapses, every lens strip has advertised exactly that
+    since console-lens 1.1, and the keys have never once done anything — Roman
+    found them dead on the value and capability lenses driving v0.5.17. The
+    strip was not describing behaviour, it was describing an intention.
+
+    Bound on the WIDGET rather than the screen, deliberately: the lifecycle lens
+    is a DataTable that uses `←`/`→` for horizontal cursor movement and already
+    omits the expand/collapse strip, so a screen-level priority binding would
+    have broken the one lens that was behaving correctly.
+
+    D1 and nothing more. `→` on a leaf or an already-expanded node does nothing,
+    and `←` on a collapsed node does NOT walk to the parent. Both are
+    conventional tree behaviour and neither was ruled; `shift+left` already goes
+    to the parent, and quietly widening a ruling is how the advertised strip
+    stopped matching the keys in the first place.
+    """
+
+    BINDINGS = [
+        Binding("right", "expand_cursor", "Expand", show=False),
+        Binding("left", "collapse_cursor", "Collapse", show=False),
+    ]
+
+    def action_expand_cursor(self) -> None:
+        node = self.cursor_node
+        if node is not None and node.allow_expand and not node.is_expanded:
+            node.expand()
+
+    def action_collapse_cursor(self) -> None:
+        node = self.cursor_node
+        if node is not None and node.is_expanded:
+            node.collapse()
+
+
 class TreeScreen(Screen):
     """The linked artifact tree (console-ux-redesign 1.3 / D2): outcomes →
     solutions → changes as one navigable tree, priority-sorted, status-colored,
@@ -1092,13 +1151,16 @@ class TreeScreen(Screen):
         active = Static("", id="tree-filter", markup=False)
         active.display = False
         yield active
+        # The placeholder is the grammar's only on-screen documentation, so `a`
+        # goes in it — see the awaiting-note comment in `_apply_lens`.
         cmd = Input(
-            placeholder=":p1 sappr t login   ·   e+ / e- expand/collapse", id="tree-command"
+            placeholder=":a awaiting you   ·   :p1 sappr t login   ·   e+ / e- expand/collapse",
+            id="tree-command",
         )
         cmd.display = False
         yield cmd
         with Horizontal(id="tree-row"):
-            yield Tree("artifacts", id="artifact-tree")
+            yield ArtifactTree("artifacts", id="artifact-tree")
             with VerticalScroll(id="tree-side"):
                 yield Static("", id="tree-side-body", markup=False)
         # The lifecycle lens is a TABLE, not a tree — same door, same objects,
@@ -1245,8 +1307,15 @@ class TreeScreen(Screen):
         orientation = lens_orientation(self._lens)
         # "N awaiting you" (1.4) — the count the `:a` filter selects, from the
         # same derived set, so the header and the filter cannot disagree.
+        #
+        # The count NAMES its filter. Roman drove v0.5.17 hunting
+        # spec-approval candidates and asked for "a quick filter for
+        # awaiting-approval specs" — which had shipped in 1.4 and which he never
+        # found, because `:a` appeared in the grammar's docstring, in the SCR and
+        # nowhere on the screen. A count that tells you how many are waiting and
+        # not how to see them is the number without the door.
         count = getattr(self, "_awaiting_count", 0)
-        awaiting_note = f"  ·  {count} awaiting you" if count else ""
+        awaiting_note = f"  ·  {count} awaiting you (:a)" if count else ""
         self.query_one("#mode-banner", Static).update(
             f"Artifacts · {self.program.name} — {label} lens"
             + awaiting_note
@@ -2880,6 +2949,65 @@ class OtamanConsole(App):
         # console-undo 1.2 — the last SUCCEEDED decision action, set by
         # run_decision_action. `u` reverses it when the table says it can.
         self.last_action = None
+        # crs D1 — ONE store per program, owned by the app, surviving every
+        # screen exit. It was per-screen: `InboxScreen.__init__` built its own
+        # `Store()` on every mount, so leaving Messages threw the store away and
+        # coming back cold-scanned the bus again. Roman measured it on v0.5.17
+        # at 978 pending messages: 7s on first entry and 6s on RETURN — the
+        # return is the number that proves nothing survived.
+        #
+        # Keyed by program root, not one store for the app: two programs' bus
+        # entities share a kind and an id space, and a single store would show
+        # one program's rows inside the other.
+        #
+        # `TreeScreen.on_mount` has been reaching for `self.app.store` since
+        # crs 2.1 to bind its lens projections to bus deltas. Nothing ever
+        # defined it, so that `getattr` returned None on every mount and the
+        # binding silently never happened. Same root cause, quieter symptom.
+        self._stores: dict[str, object] = {}
+        self._loaders: dict[str, object] = {}
+
+    def store_for(self, program: Program):
+        """The one store for *program* — created once, reused by every screen."""
+        from otaman_cli.console.store import Store
+
+        key = str(program.root)
+        if key not in self._stores:
+            self._stores[key] = Store()
+        return self._stores[key]
+
+    def loader_for(self, program: Program, *, event_source=None):
+        """The one loader feeding *program*'s store. Started by its first screen."""
+        from otaman_cli.console.loader import Loader
+
+        key = str(program.root)
+        if key not in self._loaders:
+            self._loaders[key] = Loader(program, self.store_for(program), source=event_source)
+        return self._loaders[key]
+
+    @property
+    def store(self):
+        """The current screen's program store, for screens that only need to bind.
+
+        None when no screen with a program is mounted — the honest answer, and
+        what `TreeScreen.on_mount` already handles.
+        """
+        program = getattr(getattr(self, "screen", None), "program", None)
+        return None if program is None else self.store_for(program)
+
+    def on_unmount(self) -> None:
+        """Stop every loader this app owns.
+
+        Ownership moved here with the store: a loader now outlives the screen
+        that started it, so the screen can no longer be the thing that stops it.
+        Nothing else would — a program switch used to leave the previous
+        program's watcher polling for the rest of the session.
+        """
+        for loader in self._loaders.values():
+            try:
+                loader.stop()
+            except Exception:  # noqa: BLE001 - shutdown must not raise over a watcher
+                continue
 
     def action_undo(self) -> None:
         """`u` — reverse the last decision action, when the table allows it (1.2)."""

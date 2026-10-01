@@ -127,6 +127,20 @@ _ALIAS_ONLY = {
     "lifecycle": "alias for Artifacts (t) in the lifecycle lens — L cycles",
 }
 
+#: Actions whose binding is `show=False` because the NAV STRIP advertises them
+#: rather than the Footer — the arrow keys D1 ruled, which every lens strip has
+#: named since console-lens 1.1 (and which, until Roman drove v0.5.17, the strip
+#: named while nothing was bound). Two arrow rows in the Footer would crowd out
+#: the keys a reader cannot guess, which is what the Footer is for.
+#:
+#: The value is the substring the strip MUST contain, and it is checked below:
+#: a register entry that only asserts "this is fine" becomes a lie the first time
+#: someone edits the strip.
+_STRIP_ADVERTISED = {
+    "expand_cursor": "→ expand",
+    "collapse_cursor": "← collapse",
+}
+
 
 def _hidden_only_actions() -> dict[str, list[str]]:
     src = APP.read_text(encoding="utf-8")
@@ -149,7 +163,7 @@ def test_no_operation_reaches_the_user_only_through_an_unadvertised_key():
     operation whose only path was a key nobody is told about. An undo nobody
     knows exists protects nobody.
     """
-    unexplained = sorted(set(_hidden_only_actions()) - set(_ALIAS_ONLY))
+    unexplained = sorted(set(_hidden_only_actions()) - set(_ALIAS_ONLY) - set(_STRIP_ADVERTISED))
     assert not unexplained, (
         f"operations reachable only by an unadvertised key: {unexplained} — "
         "advertise the binding or give the operation another path"
@@ -157,8 +171,22 @@ def test_no_operation_reaches_the_user_only_through_an_unadvertised_key():
 
 
 def test_the_alias_register_has_no_stale_entries():
-    stale = sorted(set(_ALIAS_ONLY) - set(_hidden_only_actions()))
-    assert not stale, f"registered aliases that are no longer hidden-only: {stale}"
+    hidden = set(_hidden_only_actions())
+    stale = sorted((set(_ALIAS_ONLY) | set(_STRIP_ADVERTISED)) - hidden)
+    assert not stale, f"registered exemptions that are no longer hidden-only: {stale}"
+
+
+def test_strip_advertised_actions_are_really_in_the_strip():
+    """The register's own guard. An exemption that merely claims the operation is
+    advertised elsewhere is worth nothing unless the claim is checked — this is
+    the defect Roman found, in the shape of a test: a strip that named arrow keys
+    for two weeks while nothing was bound to them."""
+    src = APP.read_text(encoding="utf-8")
+    for action, advertised in _STRIP_ADVERTISED.items():
+        assert advertised in src, (
+            f"{action} is exempt because the nav strip says {advertised!r}, "
+            "and the strip no longer says it"
+        )
 
 
 def test_undo_and_the_session_view_are_advertised():
