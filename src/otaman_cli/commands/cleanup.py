@@ -71,8 +71,35 @@ def cmd_cleanup(args: list[str]) -> int:
         for name in orphans:
             UI.muted(name)
 
+    # no-silent-success: what the run DECLINED TO EXAMINE is part of its result.
+    # `otaman cleanup` printed "Nothing to clean up." over 6,980 active messages
+    # for four and a half months, because a broken timestamp parse skipped 98.4%
+    # of them with a bare `continue` (deploy-agent root-cause 20261001T142130).
+    # The sentence was true. It was true of 113 messages out of 7,006, and
+    # nothing said so.
+    skipped = report.get("skipped_unparseable", 0)
+    no_fm = report.get("skipped_no_frontmatter", 0)
+    if skipped or no_fm:
+        UI.warn(
+            f"NOT EXAMINED: {skipped} message(s) with an unparseable timestamp"
+            + (f", {no_fm} with no frontmatter" if no_fm else "")
+        )
+        for sample in report.get("skipped_samples", []):
+            UI.muted(f"{sample.get('timestamp', '')!r}  in {sample.get('file', '')}")
+        UI.muted("These reached neither the age check nor the ack check.")
+
+    held = report.get("held_unacked", 0)
+    if held:
+        # The question that arrives right after the parse fix lands.
+        UI.muted(f"Old enough to archive but waiting on an ack: {held}")
+
     if not archived and not deleted and not orphans and not report.get("migrated"):
-        UI.muted("Nothing to clean up.")
+        if skipped or no_fm:
+            # Never the bare sentence when input was discarded: "nothing to do"
+            # and "could not look at most of it" are opposite facts.
+            UI.muted("Nothing archivable among the messages that COULD be examined.")
+        else:
+            UI.muted("Nothing to clean up.")
 
     UI.kv("Active", str(report.get("active_count", 0)))
     UI.kv("Archived", str(report.get("archive_count", 0)))
