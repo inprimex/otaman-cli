@@ -170,16 +170,20 @@ def advance_to_spec_approved(
     from otaman_cli.console.lifecycle import _write_openspec
 
     stamped_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # core #100 homed the `approved_by` FORMAT in `apply_spec_approved`, which is
+    # what I asked for (20261001T124651) rather than assumed. #229 composed the
+    # string here because core shipped no writer for it; that was a second home for
+    # a format a stricter gate parse could drift from, and it is gone now — one
+    # writer, one format, and core's own test asserts its output passes
+    # `check_merge_gate` (the writer satisfies its own gate).
+    #
+    # `attested_at` is still passed from here: the timestamp belongs to the ACT, and
+    # letting core stamp its own would make the attestation time the moment core was
+    # called rather than the moment the human approved.
     try:
-        updated = apply_spec_approved(data, approver)
+        updated = apply_spec_approved(data, approver, attested_at=stamped_at)
     except SpecLifecycleError as exc:
         return False, str(exc)
-    # `apply_spec_approved` writes stage + `spec_approved_by` (the identity, D5).
-    # `approved_by` is the separate attestation the merge gate reads, and core
-    # ships no writer for it — composed here in the act that owns it, in the
-    # format spec-agent ruled. Folding it into core's writer would be the better
-    # long-term home; raised with core rather than assumed.
-    updated["approved_by"] = f"{approver.name} (spec-approved {stamped_at}, via otaman -i)"
     _write_openspec(oy, updated)
     # Repo is truth (D1): commit the stage change (human-seat override for the
     # branch-policy hook — gate-3.1 defect fix; the actor is the present human).
