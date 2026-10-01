@@ -40,21 +40,76 @@ def registry_path(root: Path) -> Path | None:
     return (home / REGISTRY_FILENAME) if home is not None else None
 
 
-def known_terms(root: Path) -> set[str] | None:
-    """The declared vocabulary terms, or None when there is no registry to read.
+#: Why there is nothing to check a term against. Three different facts, and the
+#: first version of this module collapsed all three into `None` — contradicting
+#: its own docstring, which said None and `set()` were deliberately distinct.
+#:
+#: The cost: a program whose `vocabulary.yaml` exists and declares nothing was
+#: told "no vocabulary registry at <path>" — false, the file is right there — and
+#: every `--domain` was accepted as unvalidated instead of being refused for not
+#: being declared. A registry that could not be PARSED got the same sentence, so
+#: a broken registry was indistinguishable from no registry at all. That is the
+#: fail-open family spec-agent found in plugin's dispatch gate and I then found
+#: twice in mine (cli #223).
+ABSENT = "absent"
+UNREADABLE = "unreadable"
 
-    None means "could not check" and is deliberately distinct from `set()`,
-    which means "checked, and the registry declares nothing".
+
+def read_terms(root: Path) -> tuple[set[str] | None, str]:
+    """``(terms, reason)`` — the declared vocabulary, or why it could not be read.
+
+    `terms` is a set (possibly EMPTY, which means "checked, and the registry
+    declares nothing" — a term is then genuinely undeclared and refusable) or None
+    with a `reason` of :data:`ABSENT` or :data:`UNREADABLE`.
+
+    The read goes through `extra_registries.entry_rows`, which returns `[]` for
+    both an unparseable file and an empty one — correct for its own job (a TUI
+    preview must not raise), and not enough to validate against. So this
+    distinguishes the two itself rather than inferring from a row count.
     """
     path = registry_path(root)
     if path is None or not path.is_file():
-        return None
+        return None, ABSENT
+
     from otaman_cli.console.extra_registries import entry_rows
 
-    rows = entry_rows(path)
-    if not rows:
-        return None
-    return {ident.strip().lower() for ident, _ in rows if ident.strip()}
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return None, UNREADABLE
+    if not raw.strip():
+        # An empty FILE is a declared-nothing registry, not a broken one — the
+        # same ruling as cli #200, where an empty FILTER was not an empty SURFACE.
+        return set(), ""
+
+    # The STRICT loader, deliberately, not `yaml_fast.load_file`: that one returns
+    # None for malformed YAML instead of raising, so `vocabulary: [: : :` and a
+    # comments-only file are the same value to it. Measured — all four malformed
+    # samples I tried came back as None. Fine for a TUI preview, useless for
+    # deciding whether a registry could be read, which is the whole question here.
+    try:
+        import yaml
+
+        data = yaml.safe_load(raw)
+    except Exception:  # noqa: BLE001 - a parse failure is UNREADABLE, never absent
+        return None, UNREADABLE
+    if data is None:
+        # Parsed clean and holds nothing (comments only) — declared-nothing.
+        return set(), ""
+    if not isinstance(data, (dict, list)):
+        return None, UNREADABLE
+
+    return {ident.strip().lower() for ident, _ in entry_rows(path) if ident.strip()}, ""
+
+
+def known_terms(root: Path) -> set[str] | None:
+    """The declared vocabulary terms, or None when there is nothing to read.
+
+    Thin wrapper over :func:`read_terms` for callers that do not need the reason.
+    An EMPTY set now reaches them, where this used to return None for it.
+    """
+    terms, _ = read_terms(root)
+    return terms
 
 
 def check_domain(root: Path, domain: str) -> tuple[bool, str]:
@@ -68,10 +123,19 @@ def check_domain(root: Path, domain: str) -> tuple[bool, str]:
     if not term:
         return True, ""
 
-    terms = known_terms(root)
+    terms, reason = read_terms(root)
+    path = registry_path(root)
+    where = str(path) if path else f"<registry home unset>/{REGISTRY_FILENAME}"
     if terms is None:
-        path = registry_path(root)
-        where = str(path) if path else f"<registry home unset>/{REGISTRY_FILENAME}"
+        # Accept-and-state, with the reason named. "No registry" and "the registry
+        # is there and would not parse" call for different actions by the reader —
+        # declare the term vs. fix the file — so they cannot share a sentence.
+        if reason == UNREADABLE:
+            return True, (
+                f"domain {term!r} was NOT validated: the vocabulary registry at "
+                f"{where} exists and could not be read. The term is recorded as "
+                "written — fix the registry, this is not a missing-registry case."
+            )
         return True, (
             f"domain {term!r} was NOT validated: no vocabulary registry at {where}. "
             "The term is recorded as written."
@@ -80,7 +144,6 @@ def check_domain(root: Path, domain: str) -> tuple[bool, str]:
     if term.lower() in terms:
         return True, ""
 
-    path = registry_path(root)
     listed = ", ".join(sorted(terms)[:8]) or "(none declared)"
     return False, (
         f"domain {term!r} is not in the program vocabulary.\n"
