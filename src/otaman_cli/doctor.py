@@ -1398,6 +1398,81 @@ def check_critic_policy(project_root: Path) -> dict[str, Any]:
     return result
 
 
+def check_llm_routing(project_root: Path) -> dict[str, Any]:
+    """Effective LLM route per agent (llm-router-backend 1.4).
+
+    Resolution is core's — `effective_route` is the single resolution point — so
+    this reports what the bridge's dispatch will see, never its own reading of
+    `agents[].route`. A doctor view that parsed the raw field itself could show a
+    human a route the dispatch guard would then refuse.
+
+    An unreadable `router:` block is NOT CHECKED, never "no routing configured":
+    opting out of routing and failing to express it are opposite facts, and
+    conflating them is the fail-open class corrected in #223, #227 and #235.
+
+    The one finding this raises is pre-dispatch: a route that leaves the tenant
+    while `local_only_classes` is declared means every guarded call on that agent
+    refuses at dispatch. Legitimate for unguarded content, so a warning rather than
+    a failure — but a config finding beats a runtime refusal.
+    """
+    result: dict[str, Any] = {"check": "llm_routing", "status": "ok", "details": {}}
+    try:
+        from otaman_cli import llm_routes
+    except Exception as exc:  # noqa: BLE001 - old bundle → not-checked, not "clean"
+        result["status"] = "warn"
+        result["details"]["skipped"] = f"llm-routing support unavailable: {exc}"
+        return result
+
+    surface = llm_routes.load(project_root)
+    if surface.error:
+        result["status"] = "warn"
+        result["details"]["routing"] = f"NOT CHECKED — {surface.error}"
+        return result
+
+    result["details"]["backend"] = surface.backend
+    if not surface.configured:
+        # The spec's opt-in-means-zero-change scenario, stated rather than silent.
+        result["details"]["routing"] = "no router: block — native path, unchanged"
+        return result
+
+    routed = [r for r in surface.routes if not r.default_path]
+    result["details"]["agents"] = len(surface.routes)
+    result["details"]["routed"] = len(routed)
+    result["details"]["effective"] = ", ".join(f"{r.agent}={r.label}" for r in routed) or "none"
+    result["details"]["local_only_classes"] = (
+        ", ".join(surface.local_only_classes) or "none declared"
+    )
+
+    issues: list[dict[str, Any]] = []
+    for route in surface.guarded_routes:
+        result["status"] = "warn"
+        issues.append(
+            {
+                "severity": "medium",
+                "message": (
+                    f"{route.agent} routes to {route.family} which leaves the tenant, "
+                    f"while local-only classes are declared "
+                    f"({', '.join(surface.local_only_classes)}) — guarded calls refuse "
+                    "at dispatch"
+                ),
+                "fix": "route the agent to a local target, or drop the class from local_only",
+            }
+        )
+    invalid = [r.agent for r in surface.routes if "[invalid:" in r.agent]
+    if invalid:
+        result["status"] = "warn"
+        issues.append(
+            {
+                "severity": "medium",
+                "message": f"route declaration could not be parsed: {', '.join(invalid)}",
+                "fix": "fix agents[].route — a family string, or {family, model, local}",
+            }
+        )
+    if issues:
+        result["issues"] = issues
+    return result
+
+
 def check_security_gates(project_root: Path) -> dict[str, Any]:
     """Hook C's ladder: layers configured/effective per repo (sghc 1.2).
 
@@ -2137,6 +2212,7 @@ def run_doctor(project_root: Path) -> dict[str, Any]:
         check_knowledge_health(project_root),
         check_security_gates(project_root),
         check_critic_policy(project_root),
+        check_llm_routing(project_root),
         check_human_roster(config),
         check_edition_consistency(),
         check_branch_policy(config, project_root),
