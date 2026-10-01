@@ -1017,6 +1017,83 @@ def _cmd_check_changelog(
     return _GUARD_REFUSED
 
 
+def _cmd_routes(rest: list[str]) -> int:
+    """`otaman policy routes [--agent A] [--json]` — llm-router 1.4's config surface.
+
+    Shows the active backend and the effective route per declared agent, resolved by
+    `otaman_core.llm_router.effective_route` — the single resolution point, so this
+    view and the bridge's dispatch cannot disagree about which route an agent is on.
+    That is not pedantry: what the bridge enforces at dispatch is a sensitivity
+    guard, so a surface that resolved the raw field itself could show a human a
+    route the guard would refuse.
+
+    A sibling of `policy critics` rather than a new top-level verb — routing IS gate
+    configuration, and csp 1.3 already established where that reads.
+    """
+    from otaman_cli import llm_routes
+
+    root = find_project_root()
+    if root is None:
+        UI.error(not_in_project_message())
+        return 1
+
+    agent = ""
+    as_json = False
+    i = 0
+    while i < len(rest):
+        if rest[i] == "--agent" and i + 1 < len(rest):
+            agent = rest[i + 1]
+            i += 2
+        elif rest[i] == "--json":
+            as_json = True
+            i += 1
+        else:
+            return _bail(f"Unexpected argument: {rest[i]}")
+
+    surface = llm_routes.load(root, agent=agent)
+
+    if as_json:
+        import json
+
+        print(
+            json.dumps(
+                {
+                    "configured": surface.configured,
+                    "backend": surface.backend,
+                    "base_url": surface.base_url,
+                    "local_only_classes": list(surface.local_only_classes),
+                    "routes": [
+                        {
+                            "agent": r.agent,
+                            "family": r.family,
+                            "model": r.model,
+                            "local": r.local,
+                            "default_path": r.default_path,
+                        }
+                        for r in surface.routes
+                    ],
+                    "guarded": [r.agent for r in surface.guarded_routes],
+                    "error": surface.error,
+                },
+                indent=2,
+            )
+        )
+        # Non-zero for "could not resolve": a caller must not read an unresolvable
+        # config as an unconfigured one (the #223 family).
+        return 0 if surface.error is None else 2
+
+    UI.header("LLM routing")
+    for line in llm_routes.render_lines(surface):
+        print(f"  {line}" if line else "")
+    print()
+    if surface.error:
+        UI.error("Routing could not be resolved — this is not 'no routing configured'.")
+        return 2
+    if surface.guarded_routes:
+        UI.warn(f"{len(surface.guarded_routes)} route(s) leave the tenant under a local-only class")
+    return 0
+
+
 def _cmd_critics(rest: list[str]) -> int:
     """`otaman policy critics [--hook H] [--json]` — csp 1.3's config surface.
 
@@ -1125,11 +1202,14 @@ def cmd_policy(args: list[str]) -> int:
         UI.muted("                   [--pr-body-file F] [--repo NAME] [--json]")
         UI.muted("       otaman policy validate")
         UI.muted("       otaman policy critics [--hook H] [--sensitivity C] [--json]")
+        UI.muted("       otaman policy routes [--agent A] [--json]")
         return 0 if args else 1
 
     action, rest = args[0], args[1:]
     if action == "critics":
         return _cmd_critics(rest)
+    if action == "routes":
+        return _cmd_routes(rest)
     if action == "list":
         return _cmd_list()
     if action == "diff":
@@ -1224,7 +1304,7 @@ def cmd_policy(args: list[str]) -> int:
 
     return _bail(
         f"Unknown action {action!r}. "
-        "Actions: list, show, diff, apply, check-merge, annotate, validate"
+        "Actions: list, show, diff, apply, check-merge, annotate, validate, critics, routes"
     )
 
 
