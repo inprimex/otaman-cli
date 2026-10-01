@@ -30,8 +30,13 @@ def cmd_blocked(args: list[str]) -> int:
     `otaman blocked clear <stem>`        — tombstone any matching entry across
                                             ALL agents' files by Proposal stem
                                             (auto-clear-blocked-entries 2.1)
-    `otaman blocked <slug> [--blocked-by NAME]`  — register a new blocked entry
-                                                    and set status (1.8)
+    `otaman blocked <slug> [--change SLUG] [--blocked-by NAME]`
+                                         — register a new blocked entry and set
+                                            status (1.8). `--change` is the
+                                            entry's stable ref; without one,
+                                            core's reader reports the entry as
+                                            stale, because there is nothing it
+                                            could be resolved against.
     """
     # `-h`/`--help` must win over positional parsing: the `<slug>` form turns a
     # positional into content, so a bare `--help` would otherwise be registered
@@ -42,12 +47,13 @@ def cmd_blocked(args: list[str]) -> int:
         UI.muted("       otaman blocked --clear <slug>")
         UI.muted("       otaman blocked clear <stem>")
         UI.muted("       otaman blocked migrate [--apply]   (one-time sweep, dry-run default)")
-        UI.muted("       otaman blocked <slug> [--blocked-by NAME]")
+        UI.muted("       otaman blocked <slug> [--change SLUG] [--blocked-by NAME]")
         return 0
 
     list_mode = False
     clear_slug = ""
     blocked_by: str | None = None
+    change_ref: str | None = None
     positional: list[str] = []
     i = 0
     while i < len(args):
@@ -59,6 +65,9 @@ def cmd_blocked(args: list[str]) -> int:
             i += 2
         elif args[i] == "--blocked-by" and i + 1 < len(args):
             blocked_by = args[i + 1]
+            i += 2
+        elif args[i] == "--change" and i + 1 < len(args):
+            change_ref = args[i + 1]
             i += 2
         else:
             positional.append(args[i])
@@ -156,6 +165,28 @@ def cmd_blocked(args: list[str]) -> int:
 
         now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
         by = blocked_by or "human"
+        # `--change` is the entry's STABLE REF, and without it this verb could
+        # only ever write an entry core's own reader calls stale: `stale_reason`
+        # returns "no stable ref recorded" for any entry with no ref, and nothing
+        # on the write path supplied one. Registering
+        # `llm-router-backend 1.4 ...` and then being told by `--list` that it
+        # cannot be resolved is how this was found — the read surface was right
+        # and the write surface could not satisfy it.
+        #
+        # A ref that names no change is refused rather than written: it would be
+        # stale for the OTHER reason ("change X not found"), which reads like an
+        # archived change rather than a typo. Same predicate `otaman complete`
+        # uses, so the two verbs cannot disagree about what a change is.
+        ref = (change_ref or "").strip()
+        if ref:
+            from otaman_cli.commands.complete import check_change_exists
+
+            accepted, note = check_change_exists(root, ref)
+            if not accepted:
+                UI.error(f"--change {ref!r} is not a change: {note}")
+                return 1
+            if note:
+                UI.warn(note)
         # blocked-entry-lifecycle 1.1 — ADDITIVE: the entry gains `Kind` so the
         # terminators can tell an approval wait (ended by a human decision) from
         # a dependency wait (ended by the work completing). Every other field
@@ -165,6 +196,8 @@ def cmd_blocked(args: list[str]) -> int:
             slug,
             kind=KIND_DEPENDENCY,
             since=now_iso,
+            ref=ref,
+            ref_label="Change",
             extra={"Blocked by": by},
         )
         blocked_file.parent.mkdir(parents=True, exist_ok=True)
@@ -176,9 +209,20 @@ def cmd_blocked(args: list[str]) -> int:
             blocked_file.write_text(new_text, encoding="utf-8")
             UI.ok(f"Registered blocked task: {slug}")
             UI.muted(f"  blocked_by: {by}")
+            if ref:
+                UI.muted(f"  change: {ref}")
+            else:
+                # Not a refusal — a wait on a human decision or an upstream
+                # release has no change slug, and those are real. But the entry
+                # WILL report as stale, and learning that from `--list` later
+                # teaches nothing about how to avoid it.
+                UI.warn(
+                    "no --change ref: `otaman blocked --list` will report this "
+                    "entry as stale (nothing to resolve it against)"
+                )
 
         # Status hook — write blocked state
-        _status_hook_after_blocked(root, agent, slug, by)
+        _status_hook_after_blocked(root, agent, slug, by, change=ref)
         return 0
 
     UI.error("Specify --list, --clear <slug>, or pass a slug to register")
@@ -186,7 +230,8 @@ def cmd_blocked(args: list[str]) -> int:
     UI.muted("  otaman blocked --clear <slug>          (title, substring, or Proposal stem)")
     UI.muted("  otaman blocked clear <proposal-stem>   (tombstones across ALL agents)")
     UI.muted("  otaman blocked migrate [--apply]       (one-time sweep; dry run by default)")
-    UI.muted("  otaman blocked <slug> [--blocked-by NAME]")
+    UI.muted("  otaman blocked <slug> [--change SLUG] [--blocked-by NAME]")
+    UI.muted("       --change is what makes the entry resolvable; without it it reads stale")
     return 1
 
 
@@ -540,7 +585,9 @@ def _cmd_blocked_clear_by_stem(root: Path, stem: str) -> int:
     return 0
 
 
-def _status_hook_after_blocked(root: Path, agent: str, slug: str, by: str) -> None:
+def _status_hook_after_blocked(
+    root: Path, agent: str, slug: str, by: str, change: str = ""
+) -> None:
     """agent-status-presence task 1.8 — write `blocked` status after `otaman blocked <slug>`."""
     try:
         from otaman_cli.status import (
@@ -561,9 +608,12 @@ def _status_hook_after_blocked(root: Path, agent: str, slug: str, by: str) -> No
     backend = get_backend(root)
     existing = backend.read(agent)
     since = existing.since if (existing and existing.state == State.BLOCKED) else now_iso
-    # Preserve existing task/change so the operator sees what triggered the block
+    # Preserve existing task/change so the operator sees what triggered the block.
+    # A `--change` ref is better than either: it is the change THIS block waits
+    # on, which is the question `otaman status` is being asked. It only wins over
+    # a preserved value because the entry it was just written into now names it.
     task = existing.task if existing else slug
-    change = existing.change if existing else None
+    change = change or (existing.change if existing else None)
     try:
         backend.write(
             AgentStatus(
