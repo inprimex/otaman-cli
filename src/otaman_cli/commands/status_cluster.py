@@ -513,6 +513,13 @@ def _cmd_whoami_for_path(raw_path: str) -> int:
     return 0
 
 
+#: Exit code for "this build can resolve enforcement identity, and there is
+#: none". Distinct from 1 so a caller can tell it from a build that cannot be
+#: asked at all — an older `otaman` ignores `--resolve-only` and exits 0 with a
+#: banner, so it can never produce this code.
+UNRESOLVED_BUT_CAPABLE = 3
+
+
 def _cmd_whoami_resolve_only() -> int:
     """F013 — lightweight non-interactive wrapper around
     `otaman_core.identity.resolve_enforcement_identity()`.
@@ -525,14 +532,34 @@ def _cmd_whoami_resolve_only() -> int:
     call to `plugin-agent`, 2026-06-08).
 
     Prints ONLY the resolved agent name on success (nothing else, so a
-    shell can capture it directly via `$(...)`), and exits 1 with no
-    output when identity can't be resolved.
+    shell can capture it directly via `$(...)`).
+
+    EXIT CODES ARE A CONTRACT with the ownership hook:
+
+      0  resolved — the agent name is on stdout
+      3  CAPABLE, ASKED, GOT NOTHING — this build supports --resolve-only and
+         the identity is genuinely unattributable
+
+    Why 3 rather than 1: the hook has to tell "cannot ask" from "asked and got
+    nothing", and could not. An old build does not error on an unknown flag —
+    it falls through to the full `whoami` banner and exits 0 — while a current
+    build with no identity exited 1. Plugin's resolver rejects the banner by
+    shape and returns 1 either way, so both collapsed to the same signal and
+    the hook had to allow, which is how an agent nobody can name writes
+    anywhere (plugin's report, 20261001T124643).
+
+    :data:`UNRESOLVED_BUT_CAPABLE` is a code no older build can emit — it exits
+    0-with-a-banner — so a caller seeing 3 knows the chain ran and found
+    nothing. Anything else means the environment could not answer, and the
+    caller should treat that as an environment gap rather than an attribution
+    failure. That distinction is the whole fix; the hook's policy on each is
+    plugin's to set.
     """
     from otaman_core.identity import resolve_enforcement_identity
 
     result = resolve_enforcement_identity()
     if not result.agent:
-        return 1
+        return UNRESOLVED_BUT_CAPABLE
     print(result.agent)
     return 0
 
