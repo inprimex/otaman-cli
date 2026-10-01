@@ -135,6 +135,32 @@ def _core() -> Any | None:
     return security_gates if all(hasattr(security_gates, n) for n in needed) else None
 
 
+#: The key, in whichever file currently declares it.
+BLOCK_KEY = "security-gates"
+
+
+def _gate_config(root: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """``(verification-gates.yaml mapping, error)`` — the block's NEW home.
+
+    `(None, None)` means the file is absent, which is the common case mid-migration
+    and not an error. `(None, error)` means it exists and could not be read, which
+    must not be reported as "no gates declared" — the same distinction this module's
+    header draws for the platform.yaml block.
+    """
+    from otaman_cli.critic_policy import CONFIG_NAME
+
+    path = root / CONFIG_NAME
+    if not path.is_file():
+        return None, None
+    try:
+        import yaml
+
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001 - unreadable is NOT absent
+        return None, f"{CONFIG_NAME} exists and could not be read — {type(exc).__name__}"
+    return (doc if isinstance(doc, dict) else {}), None
+
+
 def evaluate(root: Path, config: dict[str, Any] | None = None) -> Report:
     """Resolve every repo's ladder from `security-gates:` in platform.yaml."""
     report = Report()
@@ -155,12 +181,33 @@ def evaluate(root: Path, config: dict[str, Any] | None = None) -> Report:
             report.error = f"platform.yaml could not be read: {type(exc).__name__}"
             return report
 
-    block = config.get("security-gates")
-    if block is None:
+    # core #101 homed the two-location resolution: `resolve_security_gates` reads
+    # verification-gates.yaml first and falls back to platform.yaml, so this call
+    # site no longer knows which file won. That was my ask (20261001T123147) and the
+    # ordering core kept — reader first, then plugin's csp 1.2 migrates the block —
+    # is what closes the absent-vs-moved window: during the migration the block is
+    # in exactly one of two places and this reads both without choosing.
+    gate_config, gate_error = _gate_config(root)
+    if gate_error:
+        report.error = gate_error
+        return report
+
+    # PRESENCE is still mine to establish, and deliberately so: core's resolver
+    # returns an empty config when neither file declares the block, which makes
+    # "nobody configured a ladder" and "a ladder configured as empty" the same
+    # value. The first is not a failure and the second is a finding, so the
+    # question is asked here before handing the parse to core.
+    declared = BLOCK_KEY in (gate_config or {}) or BLOCK_KEY in config
+    if not declared:
         return report  # nothing declared — nothing to report, and that is not a failure
 
+    resolver = getattr(core, "resolve_security_gates", None)
     try:
-        parsed = core.parse_security_gates(block)
+        if resolver is not None:
+            parsed = resolver(config, gate_config)
+        else:
+            # A bundle predating core #101 still works against platform.yaml only.
+            parsed = core.parse_security_gates(config.get(BLOCK_KEY))
     except Exception as exc:  # noqa: BLE001 - see the module docstring
         # An unreadable block is NOT an absent one. Reporting "no gates" here
         # would be the fail-open shape this fleet has now found three times.
