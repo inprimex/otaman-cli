@@ -1376,6 +1376,7 @@ def cmd_doctor(args: list[str]) -> int:
         "orphan_status_files": "Status Files (orphans)",
         "knowledge_health": "Knowledge Vault (decay/drift/ownership)",
         "security_gates": "Security Ladder (Hook C layers + suppressions)",
+        "critic_policy": "Critic Selection (effective policy + clearances)",
     }
 
     for check in checks:

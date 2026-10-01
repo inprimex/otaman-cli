@@ -1017,6 +1017,100 @@ def _cmd_check_changelog(
     return _GUARD_REFUSED
 
 
+def _cmd_critics(rest: list[str]) -> int:
+    """`otaman policy critics [--hook H] [--json]` — csp 1.3's config surface.
+
+    Shows the effective policy per hook and the clearance roster. Where a
+    policy's inputs are derivable from the program itself it is EVALUATED;
+    where they come from a live gate the configured chain is shown and said to
+    be unevaluated, rather than inventing a context and presenting the result as
+    though it were real.
+    """
+    from otaman_cli import critic_policy
+
+    root = find_project_root()
+    if root is None:
+        UI.error(not_in_project_message())
+        return 1
+
+    only = ""
+    if "--hook" in rest:
+        i = rest.index("--hook")
+        if i + 1 >= len(rest):
+            UI.error("Usage: otaman policy critics [--hook <name>] [--json]")
+            return 2
+        only = rest[i + 1]
+
+    sensitivity = ""
+    if "--sensitivity" in rest:
+        i = rest.index("--sensitivity")
+        if i + 1 >= len(rest):
+            UI.error("Usage: otaman policy critics [--sensitivity <class>]")
+            return 2
+        sensitivity = rest[i + 1]
+
+    surface = critic_policy.load(root, sensitivity=sensitivity or None)
+    hooks = [h for h in surface.hooks if not only or h.hook == only]
+
+    if "--json" in rest:
+        import json
+
+        print(
+            json.dumps(
+                {
+                    "configured": surface.configured,
+                    "error": surface.error,
+                    "hooks": [
+                        {
+                            "hook": h.hook,
+                            "primary": h.primary,
+                            "fallback": h.fallback,
+                            "sensitivity_overrides": h.overrides,
+                            "critics": list(h.critics),
+                            "evaluated": h.evaluated,
+                            "note": h.note,
+                        }
+                        for h in hooks
+                    ],
+                    "clearances": {a: list(c) for a, c in surface.roster.rows},
+                },
+                indent=2,
+            )
+        )
+        return 1 if surface.error else 0
+
+    print()
+    UI.header("Verification gates — critic selection")
+    if surface.error:
+        # not-checked, never "no gates": the two mean opposite things.
+        UI.warn(f"  NOT CHECKED — {surface.error}")
+        return 1
+    if not surface.configured:
+        UI.muted(f"  No {critic_policy.CONFIG_NAME} — no gate policy declared.")
+        return 0
+    if only and not hooks:
+        UI.error(f"No hook named {only!r} in {critic_policy.CONFIG_NAME}.")
+        return 2
+
+    for h in hooks:
+        chain = h.primary + (f" → {h.fallback}" if h.fallback else "")
+        UI.kv(f"  {h.hook}", chain)
+        for sensitivity, policy in sorted(h.overrides.items()):
+            UI.muted(f"        {sensitivity} → {policy}")
+        if h.evaluated:
+            UI.muted(f"        selects: {', '.join(h.critics) or '(nobody)'}")
+        if h.note:
+            UI.muted(f"        {h.note}")
+
+    print()
+    UI.header("Clearance roster")
+    if not surface.roster.rows:
+        UI.muted("  No clearances declared — sensitivity-scoped selection drops everyone.")
+    for agent, classes in surface.roster.rows:
+        UI.kv(f"  {agent}", ", ".join(classes))
+    return 0
+
+
 def cmd_policy(args: list[str]) -> int:
     """`otaman policy <list|show|validate> …`."""
     if not args or args[0] in ("-h", "--help"):
@@ -1030,9 +1124,12 @@ def cmd_policy(args: list[str]) -> int:
         UI.muted("                   [--paths-from FILE|-] [--pr N] [--pr-body TEXT]")
         UI.muted("                   [--pr-body-file F] [--repo NAME] [--json]")
         UI.muted("       otaman policy validate")
+        UI.muted("       otaman policy critics [--hook H] [--sensitivity C] [--json]")
         return 0 if args else 1
 
     action, rest = args[0], args[1:]
+    if action == "critics":
+        return _cmd_critics(rest)
     if action == "list":
         return _cmd_list()
     if action == "diff":
