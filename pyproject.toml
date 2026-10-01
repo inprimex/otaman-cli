@@ -6,7 +6,13 @@ name = "otaman-cli"
 # it when it lags a shipped product release; do not expect it to match tenants.
 version = "0.5.0"
 description = "Otaman standalone CLI: subcommand dispatch, local + remote operations, account management"
-requires-python = ">=3.10"
+# 3.11, not 3.10: otaman-core is a hard dependency below and declares
+# `requires-python = ">=3.11"`, so a 3.10 install could never resolve — the old
+# ">=3.10" was a floor nothing could stand on, and it cost a real workaround
+# (cli #234 normalized fractional seconds to six digits for 3.10's stricter
+# `fromisoformat`, protecting an interpreter this package cannot run on).
+# A test asserts this stays at or above every declared dependency's floor.
+requires-python = ">=3.11"
 authors = [{ name = "Otaman platform" }]
 license = "AGPL-3.0-only"
 license-files = ["LICENSE", "NOTICE"]
