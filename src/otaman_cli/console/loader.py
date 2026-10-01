@@ -161,6 +161,27 @@ class Loader:
             self._own_source = True
         self._stopped = False
         self._source.start(self._on_change)
+        self._record_provider()
+
+    def _record_provider(self) -> None:
+        """Journal which provider is live, and why if it is not the fast one.
+
+        A console that silently fell back to polling looks like a console that
+        is merely slow — "live updates take two seconds" is a question nobody
+        can answer later unless the fallback left a trace.
+        """
+        reason = getattr(self._source, "degraded_reason", "")
+        if not reason:
+            return
+        log = getattr(getattr(self, "app", None), "session_log", None) or getattr(
+            self, "_session_log", None
+        )
+        if log is None:
+            return
+        try:
+            log.event("console-provider-degraded", reason=reason, provider="polling")
+        except Exception:  # noqa: BLE001 - observability must not break the console
+            return
 
     def _on_change(self) -> None:
         """Provider says the set may have moved — coalesce, then dispatch once."""

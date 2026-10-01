@@ -101,14 +101,93 @@ class PollingEventSource:
             self._thread = None
 
 
+class FallbackEventSource:
+    """fswatch when it works, polling when it does not (crs 1.3, console half).
+
+    Two different failures have to be survived, and only one of them is visible
+    at construction time:
+
+    * **otaman-fswatch is not installed.** It is not a declared dependency of
+      otaman-cli — the console must run without it — so the import is probed and
+      the poller is used when it is absent.
+    * **`start()` raises.** inotify watch limits are per-user and exhaustible, so
+      a provider that imports fine can still fail to begin watching. fswatch
+      suggested this fallback themselves; it is the reason this wrapper exists
+      rather than a plain `if available` at construction.
+
+    Degradation is RECORDED, never silent: `degraded_reason` says which failure
+    happened, so a caller can surface "live updates are polling, not watching"
+    instead of the human wondering why a change took two seconds to appear.
+    """
+
+    def __init__(self, program: Program, *, lister=None, primary=None, fallback=None) -> None:
+        self.program = program
+        self._lister = lister or list_pending_proposals
+        self._primary = primary if primary is not None else _fswatch_source(program, self._lister)
+        self._fallback_factory = fallback or (
+            lambda: PollingEventSource(program, lister=self._lister)
+        )
+        self._active = self._primary
+        self.degraded_reason = "" if self._primary is not None else "otaman-fswatch not installed"
+        if self._active is None:
+            self._active = self._fallback_factory()
+
+    @property
+    def watching(self) -> bool:
+        """True when the fswatch provider is the live one."""
+        return self._primary is not None and self._active is self._primary
+
+    def snapshot(self) -> list[Proposal]:
+        return self._active.snapshot()
+
+    def start(self, on_change: Callable[[], None]) -> None:
+        try:
+            self._active.start(on_change)
+            return
+        except Exception as exc:  # noqa: BLE001 - see the class docstring
+            if self._active is not self._primary:
+                raise  # the poller itself failed; there is nothing left to try
+            self.degraded_reason = f"fswatch could not start ({type(exc).__name__}: {exc})"
+        self._active = self._fallback_factory()
+        self._active.start(on_change)
+
+    def stop(self) -> None:
+        self._active.stop()
+
+
+def _fswatch_source(program: Program, lister):
+    """fswatch's provider, or None when it is not installed.
+
+    Probed by import, not by a version check: the package is optional, and the
+    question is whether THIS install has it.
+    """
+    try:
+        from otaman_fswatch import BusEventSource
+    except Exception:  # noqa: BLE001 - optional dependency → poll instead
+        return None
+    try:
+        return BusEventSource(program.bus_paths(), lambda: lister(program))
+    except Exception:  # noqa: BLE001 - a provider that cannot be built is not a provider
+        return None
+
+
 def make_event_source(program: Program, *, lister=None) -> EventSource:
-    """The default provider for Iteration 1 (polling). Swap here (or via config)
-    when fswatch/NATS providers land — no console change needed.
+    """The console's provider: fswatch when available, polling otherwise.
+
+    The seam did its job — fswatch's BusEventSource satisfies the same
+    `start`/`snapshot`/`stop` protocol with no otaman-cli import on their side,
+    so the dependency direction stays cli -> fswatch and this is the only place
+    that changed when it landed.
 
     *lister* lets a caller watch the set IT renders; it defaults to the pending
     decisions for backwards compatibility.
     """
-    return PollingEventSource(program, lister=lister)
+    return FallbackEventSource(program, lister=lister)
 
 
-__all__ = ["EventSource", "PollingEventSource", "make_event_source"]
+__all__ = [
+    "EventSource",
+    "FallbackEventSource",
+    "PollingEventSource",
+    "make_event_source",
+]
