@@ -85,21 +85,81 @@ def is_fully_acked(msg_path: Path, acks_dir: Path, agents: list[str], fm: dict[s
         return ack_file.exists()
 
 
+#: Legacy hand-listed formats, kept as a FALLBACK only. Each one is a shape
+#: `fromisoformat` already accepts, so nothing reaches them in practice — they
+#: stay so that no timestamp which parsed before this fix stops parsing now.
+_LEGACY_FORMATS = ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S")
+
+
+def _normalize_fraction(ts: str) -> str:
+    """Pad or trim fractional seconds to 6 digits.
+
+    Python 3.10's ``fromisoformat`` accepts ONLY 3 or 6 fractional digits (3.11
+    widened it). The floor for this package is 3.10 and CI runs 3.11, so without
+    this a 2-digit fraction parses on the runner and fails on a tenant — a
+    version-dependent parse, which is worse than a format list because it is
+    invisible until someone else's machine disagrees.
+    """
+    head, sep, tail = ts.partition(".")
+    if not sep:
+        return ts
+    digits = ""
+    for ch in tail:
+        if not ch.isdigit():
+            break
+        digits += ch
+    if not digits:
+        return ts
+    rest = tail[len(digits) :]
+    return f"{head}.{digits[:6].ljust(6, '0')}{rest}"
+
+
 def parse_timestamp(fm: dict[str, Any]) -> datetime | None:
-    """Parse timestamp from frontmatter."""
+    """The bus timestamp as an aware datetime, or None if it is genuinely malformed.
+
+    This rejected **98.4% of the live bus** (deploy-agent root-cause
+    20261001T142130: 6,893 of 7,006 messages). It tried three hand-listed
+    `strptime` formats, none of which accepts fractional seconds — while the
+    producer writes `datetime.now(UTC).isoformat()`, which emits them. A second
+    family failed too: `2026-05-24 21:29:29+00:00`, space-separated WITH an
+    offset, which the listed `%Y-%m-%d %H:%M:%S` cannot take.
+
+    Every rejected message was then skipped by a bare `continue`, so it never
+    reached the age or ack check. `otaman cleanup` reported "Nothing to clean up"
+    over 6,980 active messages and one archived, for four and a half months —
+    technically true, and true only because 98.4% of the input was discarded
+    before any criterion was applied.
+
+    `fromisoformat` is the right parser because the producer uses `isoformat`:
+    one function that accepts exactly what the other emits, instead of a format
+    list this side maintains alone. ``Z`` is trimmed because 3.10 does not take
+    it, and fractional digits are normalized because 3.10 wants 3 or 6.
+
+    NOTE (single-home): the canonical bus-timestamp parse now has two consumers —
+    `otaman_core.task_complete` already does `fromisoformat(...replace("Z", ...))`
+    inline, and this. Asked core-agent to home it; this repoints when it lands.
+    """
     ts = fm.get("timestamp", "")
     if not ts:
         return None
-    ts_str = str(ts)
-    for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S"):
-        try:
-            dt = datetime.strptime(ts_str, fmt)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt
-        except ValueError:
-            continue
-    return None
+    ts_str = str(ts).strip()
+    if not ts_str:
+        return None
+    candidate = ts_str[:-1] + "+00:00" if ts_str.endswith(("Z", "z")) else ts_str
+    try:
+        dt = datetime.fromisoformat(_normalize_fraction(candidate))
+    except ValueError:
+        dt = None
+    if dt is None:
+        for fmt in _LEGACY_FORMATS:
+            try:
+                dt = datetime.strptime(ts_str, fmt)
+                break
+            except ValueError:
+                continue
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
 
 
 def migrate_flat_to_active(bus_dir: Path) -> int:
@@ -165,6 +225,18 @@ def cleanup(
         "active_count": 0,
         "archive_count": 0,
         "errors": [],
+        # no-silent-success: what was NOT examined, and why. The parse bug cost
+        # four months because the skip was invisible — had the run said "skipped
+        # 6,893 messages with unparseable timestamps", it would have been a
+        # one-minute diagnosis (deploy-agent, 20261001T142130). A count of what a
+        # verb declined to look at is part of its result, not a debug detail.
+        "skipped_unparseable": 0,
+        "skipped_no_frontmatter": 0,
+        "skipped_samples": [],
+        # Old enough to archive and held back only by a missing ack. Reported so
+        # that the question after this fix ("why are these still here?") arrives
+        # answered instead of becoming the next four-month mystery.
+        "held_unacked": 0,
     }
 
     # identity-divergence 1.4: reap status files with no agents.yaml entry. Runs
@@ -213,25 +285,38 @@ def cleanup(
     for msg_file in sorted(active_dir.glob("*.md")):
         fm = parse_frontmatter(msg_file)
         if not fm:
+            report["skipped_no_frontmatter"] += 1
             continue
 
         ts = parse_timestamp(fm)
         if not ts:
+            report["skipped_unparseable"] += 1
+            # A bounded sample, because the count alone does not tell you WHICH
+            # shape to fix and 6,893 filenames are not a report.
+            if len(report["skipped_samples"]) < 5:
+                report["skipped_samples"].append(
+                    {"file": msg_file.name, "timestamp": str(fm.get("timestamp", ""))}
+                )
             continue
 
-        if ts < archive_cutoff and is_fully_acked(msg_file, acks_dir, agents, fm):
-            month_dir = archive_dir / ts.strftime("%Y-%m")
-            if not dry_run:
-                month_dir.mkdir(parents=True, exist_ok=True)
-                dest = month_dir / msg_file.name
-                shutil.move(str(msg_file), str(dest))
-                # Move associated ack files too
-                msg_id = get_msg_id(msg_file)
-                for ack_file in acks_dir.glob(f"{msg_id}.*.ack"):
-                    ack_dest = month_dir / "acks"
-                    ack_dest.mkdir(exist_ok=True)
-                    shutil.move(str(ack_file), str(ack_dest / ack_file.name))
-            report["archived"].append(msg_file.name)
+        if ts >= archive_cutoff:
+            continue
+        if not is_fully_acked(msg_file, acks_dir, agents, fm):
+            report["held_unacked"] += 1
+            continue
+
+        month_dir = archive_dir / ts.strftime("%Y-%m")
+        if not dry_run:
+            month_dir.mkdir(parents=True, exist_ok=True)
+            dest = month_dir / msg_file.name
+            shutil.move(str(msg_file), str(dest))
+            # Move associated ack files too
+            msg_id = get_msg_id(msg_file)
+            for ack_file in acks_dir.glob(f"{msg_id}.*.ack"):
+                ack_dest = month_dir / "acks"
+                ack_dest.mkdir(exist_ok=True)
+                shutil.move(str(ack_file), str(ack_dest / ack_file.name))
+        report["archived"].append(msg_file.name)
 
     # Step 3: Delete old archives
     for month_subdir in sorted(archive_dir.iterdir()):
