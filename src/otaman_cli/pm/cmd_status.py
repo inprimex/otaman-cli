@@ -16,7 +16,7 @@ from otaman_cli.identity import find_project_root, not_in_project_message
 
 def cmd_pm_status(args: list[str]) -> int:
     """otaman pm status -- show per-repo PM sync state."""
-    from otaman_cli.main import UI
+    from otaman_cli.ui import UI
 
     root = find_project_root()
     if root is None:

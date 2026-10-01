@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.main import UI
 from otaman_cli.project._platform import (
     append_repo,
     find_repo,
@@ -21,6 +20,7 @@ from otaman_cli.project._platform import (
     save_platform_yaml,
 )
 from otaman_cli.project.launch_scaffold import build_launch_block, owner_refusal
+from otaman_cli.ui import UI
 
 
 def _bail(msg: str, code: int = 1) -> int:

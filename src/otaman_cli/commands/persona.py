@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.commands._flag_parsing import _parse_flag_value
-from otaman_cli.main import UI
+from otaman_cli.ui import UI
 
 
 def cmd_persona(args: list[str]) -> int:

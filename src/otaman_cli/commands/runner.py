@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.commands._flag_parsing import _parse_flag_value
-from otaman_cli.main import UI, C
+from otaman_cli.ui import UI, C
 
 _RUNNER_USAGE = (
     "Usage:\n"

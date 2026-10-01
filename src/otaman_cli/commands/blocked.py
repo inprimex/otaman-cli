@@ -15,7 +15,7 @@ from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message, resolve_agent_identity
-from otaman_cli.main import UI
+from otaman_cli.ui import UI
 
 
 def cmd_blocked(args: list[str]) -> int:
@@ -448,7 +448,7 @@ def _decided_proposal_stems(root: Path) -> set[str]:
     """
     stems: set[str] = set()
     try:
-        from otaman_cli.main import _resolve_bus_paths
+        from otaman_cli.bus_paths import _resolve_bus_paths
 
         active_dir, _ = _resolve_bus_paths(root)
         bus_dir = active_dir.parent if active_dir.name == "active" else active_dir

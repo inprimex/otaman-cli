@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.main import UI
 from otaman_cli.project._platform import find_repo, is_git_repo, load_platform_yaml
+from otaman_cli.ui import UI
 
 
 def cmd_project_show(name: str) -> int:

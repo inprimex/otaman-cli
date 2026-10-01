@@ -14,7 +14,8 @@ import sys
 from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.main import UI, C, run_script
+from otaman_cli.scripts import run_script
+from otaman_cli.ui import UI, C
 
 
 def cmd_clone(args: list[str]) -> int:

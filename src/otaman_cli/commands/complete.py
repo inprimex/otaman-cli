@@ -16,9 +16,12 @@ from pathlib import Path
 
 from otaman_core.identity import resolve_enforcement_identity
 
+from otaman_cli.bus_paths import _resolve_bus_paths
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message, resolve_agent_identity
-from otaman_cli.main import UI, _read_platform_specs_path, _resolve_bus_paths, run_script
+from otaman_cli.platform_config import _read_platform_specs_path
+from otaman_cli.scripts import run_script
+from otaman_cli.ui import UI
 
 
 def _read_spec_owner(root: Path, change_name: str) -> str | None:

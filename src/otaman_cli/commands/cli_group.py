@@ -30,7 +30,7 @@ which is the failure the scatter produced in the first place.
 from __future__ import annotations
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.main import UI
+from otaman_cli.ui import UI
 
 #: One line per entry, printed line by line — `UI.muted` indents only what it is
 #: handed, so a single embedded-newline string renders with every line after the

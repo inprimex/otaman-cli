@@ -5,7 +5,7 @@ commands. Moved verbatim from main.py during the F020 decomposition
 
 from __future__ import annotations
 
-from otaman_cli.main import UI
+from otaman_cli.ui import UI
 
 
 def _parse_flag_value(rest: list[str], flag: str, *, default: str | None = None) -> str | None:

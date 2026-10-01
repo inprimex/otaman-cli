@@ -22,7 +22,7 @@ def root(tmp_path, monkeypatch):
     (r / "platform.yaml").write_text("project: demo\nspecs:\n  path: specs\n", encoding="utf-8")
     monkeypatch.setattr(spec_cmd, "find_project_root", lambda: r)
     monkeypatch.setattr(
-        "otaman_cli.main._resolve_bus_paths",
+        "otaman_cli.bus_paths._resolve_bus_paths",
         lambda root: (
             root / ".agents" / "bus" / "active",
             root / ".agents" / "bus" / "active" / "acks",

@@ -19,8 +19,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from otaman_cli.bus_paths import _resolve_bus_paths
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.main import UI, _resolve_bus_paths
 from otaman_cli.registries import bus_messages
 from otaman_cli.registries.loader import (
     resolve_registry_path,
@@ -41,6 +41,7 @@ from otaman_cli.registries.roles import (
     resolve_roles,
 )
 from otaman_cli.registries.transitions import append_transition, make_transition
+from otaman_cli.ui import UI
 
 
 def _bail(msg: str, code: int = 1) -> int:

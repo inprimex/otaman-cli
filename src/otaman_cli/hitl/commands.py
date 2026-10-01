@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from otaman_cli.bus_paths import _resolve_bus_paths
 from otaman_cli.hitl.messages import (
     HumanDecisionPayload,
     RequestHumanReview,
@@ -24,7 +25,7 @@ from otaman_cli.hitl.messages import (
     write_resolved_ack,
 )
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.main import UI, _resolve_bus_paths
+from otaman_cli.ui import UI
 
 
 def _bail(msg: str, code: int = 1) -> int:

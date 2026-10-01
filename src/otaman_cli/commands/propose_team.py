@@ -11,10 +11,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from otaman_cli import main as _main
+import otaman_cli  # for the installed package's own location
+from otaman_cli.bus_paths import _resolve_bus_paths
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message, resolve_agent_identity
-from otaman_cli.main import UI, C, _resolve_bus_paths
+from otaman_cli.ui import UI, C
 
 
 def _help_requested(args: list[str]) -> bool:
@@ -304,7 +305,7 @@ def cmd_team(args: list[str]) -> int:
     # location (not this module's __file__) -- the otaman CLI package is
     # part of the plugin checkout, and main.py is the stable entrypoint
     # file this has always been pinned against.
-    plugin_root = Path(_main.__file__).resolve().parent.parent
+    plugin_root = Path(otaman_cli.__file__).resolve().parent.parent
     template_path = plugin_root / "references" / "workflows" / f"{feature}.md"
     if template_path.exists():
         UI.kv("Template", f"{C.GREEN}found{C.RESET} ({feature}.md)")

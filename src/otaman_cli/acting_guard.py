@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import os
 
-from otaman_cli.main import UI
+from otaman_cli.ui import UI
 
 # Exit code for a guard refusal — distinct from argparse's 2 so a caller (or a
 # test) can tell "refused because another session is acting" from a usage error.

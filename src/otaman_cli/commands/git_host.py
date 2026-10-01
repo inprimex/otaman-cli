@@ -12,7 +12,7 @@ from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.main import UI
+from otaman_cli.ui import UI
 
 
 def cmd_git_host(args: list[str]) -> int:

@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.main import UI
 from otaman_cli.registries.loader import (
     resolve_registry_path,
     yaml_dump,
@@ -26,6 +25,7 @@ from otaman_cli.registries.roles import (
     resolve_operating_actor,
     resolve_roles,
 )
+from otaman_cli.ui import UI
 
 
 def _bail(msg: str, code: int = 1) -> int:

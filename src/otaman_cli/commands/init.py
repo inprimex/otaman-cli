@@ -27,7 +27,9 @@ from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.main import UI, _normalize_ce_platform_yaml_for_validation, run_script
+from otaman_cli.platform_config import _normalize_ce_platform_yaml_for_validation
+from otaman_cli.scripts import run_script
+from otaman_cli.ui import UI
 
 
 def _ensure_settings_default_mode(root: Path, config: dict) -> None:

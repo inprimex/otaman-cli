@@ -11,7 +11,7 @@ from otaman_cli.identity import find_project_root, not_in_project_message
 def cmd_pm_configure(args: list[str]) -> int:
     """otaman pm configure <provider> [--url URL] [--webhook URL]
     [--no-webhooks] [--tracker NAME]"""
-    from otaman_cli.main import UI
+    from otaman_cli.ui import UI
 
     # Parse args
     provider: str | None = None

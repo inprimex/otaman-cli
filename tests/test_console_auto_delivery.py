@@ -120,7 +120,7 @@ def test_spec_status_shows_auto_delivery_badge(program, monkeypatch, capsys):
     _change(program, "auto-one", delivery="auto")
     monkeypatch.setattr(spec_cmd, "find_project_root", lambda: program.root)
     monkeypatch.setattr(
-        "otaman_cli.main._resolve_bus_paths",
+        "otaman_cli.bus_paths._resolve_bus_paths",
         lambda root: (
             root / ".agents" / "bus" / "active",
             root / ".agents" / "bus" / "active" / "acks",

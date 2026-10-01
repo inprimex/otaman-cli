@@ -23,7 +23,7 @@ from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.main import UI, C
+from otaman_cli.ui import UI, C
 
 #: Default review horizon. Long enough not to be busywork, short enough that a
 #: fact nobody re-confirmed in a quarter gets looked at rather than trusted
