@@ -20,6 +20,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from otaman_core.frontmatter import parse_bus_timestamp
+
 try:
     import yaml
 except ImportError:
@@ -85,81 +87,28 @@ def is_fully_acked(msg_path: Path, acks_dir: Path, agents: list[str], fm: dict[s
         return ack_file.exists()
 
 
-#: Legacy hand-listed formats, kept as a FALLBACK only. Each one is a shape
-#: `fromisoformat` already accepts, so nothing reaches them in practice — they
-#: stay so that no timestamp which parsed before this fix stops parsing now.
-_LEGACY_FORMATS = ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S")
-
-
-def _normalize_fraction(ts: str) -> str:
-    """Pad or trim fractional seconds to 6 digits.
-
-    Python 3.10's ``fromisoformat`` accepts ONLY 3 or 6 fractional digits (3.11
-    widened it). The floor for this package is 3.10 and CI runs 3.11, so without
-    this a 2-digit fraction parses on the runner and fails on a tenant — a
-    version-dependent parse, which is worse than a format list because it is
-    invisible until someone else's machine disagrees.
-    """
-    head, sep, tail = ts.partition(".")
-    if not sep:
-        return ts
-    digits = ""
-    for ch in tail:
-        if not ch.isdigit():
-            break
-        digits += ch
-    if not digits:
-        return ts
-    rest = tail[len(digits) :]
-    return f"{head}.{digits[:6].ljust(6, '0')}{rest}"
-
-
 def parse_timestamp(fm: dict[str, Any]) -> datetime | None:
-    """The bus timestamp as an aware datetime, or None if it is genuinely malformed.
+    """The bus timestamp as an AWARE datetime, or None if it is genuinely malformed.
 
-    This rejected **98.4% of the live bus** (deploy-agent root-cause
-    20261001T142130: 6,893 of 7,006 messages). It tried three hand-listed
-    `strptime` formats, none of which accepts fractional seconds — while the
-    producer writes `datetime.now(UTC).isoformat()`, which emits them. A second
-    family failed too: `2026-05-24 21:29:29+00:00`, space-separated WITH an
-    offset, which the listed `%Y-%m-%d %H:%M:%S` cannot take.
+    Delegates to `otaman_core.frontmatter.parse_bus_timestamp` (core #102, homed in
+    response to cli #234's single-home note). The local three-`strptime` parser this
+    replaces is gone: it rejected the fractional seconds the producer's
+    `datetime.now(UTC).isoformat()` emits, so `otaman cleanup` aged 98.4% of the live
+    bus as unparseable and archived nothing for four and a half months.
 
-    Every rejected message was then skipped by a bare `continue`, so it never
-    reached the age or ack check. `otaman cleanup` reported "Nothing to clean up"
-    over 6,980 active messages and one archived, for four and a half months —
-    technically true, and true only because 98.4% of the input was discarded
-    before any criterion was applied.
-
-    `fromisoformat` is the right parser because the producer uses `isoformat`:
-    one function that accepts exactly what the other emits, instead of a format
-    list this side maintains alone. ``Z`` is trimmed because 3.10 does not take
-    it, and fractional digits are normalized because 3.10 wants 3 or 6.
-
-    NOTE (single-home): the canonical bus-timestamp parse now has two consumers —
-    `otaman_core.task_complete` already does `fromisoformat(...replace("Z", ...))`
-    inline, and this. Asked core-agent to home it; this repoints when it lands.
+    The wrapper survives for ONE reason, measured rather than assumed: core's parser
+    returns a value with whatever tzinfo the input carried, so a naive
+    `2026-08-11 20:53:12` comes back naive — and the caller compares the result
+    against an aware cutoff, which raises `TypeError: can't compare offset-naive and
+    offset-aware datetimes`. The live bus has no naive timestamps today (measured:
+    7,076 aware, 0 naive), so this is a guard against a shape that is accepted at
+    write and would crash the archive pass, not a workaround for current data. Raised
+    with core, whose docstring promises "aware".
     """
-    ts = fm.get("timestamp", "")
-    if not ts:
+    parsed = parse_bus_timestamp(fm.get("timestamp"))
+    if parsed is None:
         return None
-    ts_str = str(ts).strip()
-    if not ts_str:
-        return None
-    candidate = ts_str[:-1] + "+00:00" if ts_str.endswith(("Z", "z")) else ts_str
-    try:
-        dt = datetime.fromisoformat(_normalize_fraction(candidate))
-    except ValueError:
-        dt = None
-    if dt is None:
-        for fmt in _LEGACY_FORMATS:
-            try:
-                dt = datetime.strptime(ts_str, fmt)
-                break
-            except ValueError:
-                continue
-    if dt is None:
-        return None
-    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
 
 
 def migrate_flat_to_active(bus_dir: Path) -> int:

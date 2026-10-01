@@ -55,39 +55,62 @@ def test_the_producer_s_own_output_parses():
     assert parse_timestamp({"timestamp": emitted}) is not None
 
 
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        ("2026-09-25T14:43:43.1+00:00", "2026-09-25T14:43:43.100000+00:00"),
-        ("2026-09-25T14:43:43.12+00:00", "2026-09-25T14:43:43.120000+00:00"),
-        ("2026-09-25T14:43:43.123+00:00", "2026-09-25T14:43:43.123000+00:00"),
-        ("2026-09-25T14:43:43.123456+00:00", "2026-09-25T14:43:43.123456+00:00"),
-        ("2026-09-25T14:43:43.1234567+00:00", "2026-09-25T14:43:43.123456+00:00"),
-        ("2026-09-25T14:43:43+00:00", "2026-09-25T14:43:43+00:00"),  # untouched
-        ("2026-09-25T14:43:43.+00:00", "2026-09-25T14:43:43.+00:00"),  # no digits: untouched
-        ("not a date", "not a date"),
-    ],
-)
-def test_the_fraction_is_normalized_to_six_digits(raw, expected):
-    """Tested DIRECTLY, not through the parse.
+def test_the_parse_is_cores_single_home_not_a_local_copy():
+    """core #102 homed `parse_bus_timestamp` in response to cli #234's note. The
+    local three-`strptime` parser is GONE, not shadowed — a second implementation is
+    what let the two drift until cli's rejected the producer's own output."""
+    import ast
+    import inspect
+    import textwrap
 
-    The round-trip version of this guard is vacuous on 3.11+: `fromisoformat`
-    there accepts any fraction length, so deleting the normalization changes
-    nothing on CI or on this interpreter and the test still passes. The behaviour
-    it protects only shows up on 3.10 — the package floor — where 3 or 6 digits
-    are the only ones accepted. So assert the normalization itself, which is the
-    same on every interpreter.
+    from otaman_cli import cleanup_bus
+
+    # Scoped to the function's CODE: `cleanup` legitimately calls `strptime`
+    # elsewhere to read an archive month directory's `%Y-%m` name, so a file-wide ban
+    # would forbid a correct use — and the docstring here NAMES the parser it
+    # replaced, so a source-text check on the whole function matches its own prose. A
+    # guard a comment can break is a guard about comments.
+    func = ast.parse(textwrap.dedent(inspect.getsource(cleanup_bus.parse_timestamp))).body[0]
+    code = "\n".join(ast.unparse(node) for node in func.body if not isinstance(node, ast.Expr))
+    assert "parse_bus_timestamp(" in code, "the parse is no longer delegated to core"
+    assert "strptime" not in code, "a local timestamp parser came back"
+    assert not hasattr(cleanup_bus, "_LEGACY_FORMATS")
+    assert not hasattr(cleanup_bus, "_normalize_fraction")
+
+
+def test_a_naive_timestamp_is_forced_to_utc_at_this_call_site():
+    """The one thing the wrapper still does, and the reason it survives the repoint.
+
+    core's parser returns whatever tzinfo the input carried, so a naive value comes
+    back naive — and `cleanup` compares the result against an AWARE cutoff, which
+    raises `TypeError: can't compare offset-naive and offset-aware datetimes`.
+    Measured on the live bus: 7,076 aware, 0 naive, so this guards a shape that is
+    accepted at write and would crash the archive pass rather than one in the data.
     """
-    from otaman_cli.cleanup_bus import _normalize_fraction
+    from datetime import timedelta
 
-    assert _normalize_fraction(raw) == expected
+    from otaman_core.frontmatter import parse_bus_timestamp
+
+    raw = "2026-08-11 20:53:12"
+    assert parse_bus_timestamp(raw).tzinfo is None, (
+        "core started normalizing naive input — if that is now its contract, this wrapper can go"
+    )
+    got = parse_timestamp({"timestamp": raw})
+    assert got is not None and got.tzinfo is not None
+    # The comparison the archive pass actually performs must not raise.
+    assert isinstance(got < datetime.now(timezone.utc) - timedelta(days=30), bool)
 
 
 @pytest.mark.parametrize("digits", [1, 2, 3, 5, 6, 7, 9])
 def test_fractional_seconds_of_any_length_parse(digits):
-    """End to end, for the shapes a tenant can actually produce. On 3.11+ this
-    passes with or without the normalization — see the direct test above, which
-    is the guard that has teeth on every interpreter."""
+    """Any fractional-digit count, through core's parser.
+
+    cli used to normalize the fraction to six digits because 3.10's `fromisoformat`
+    accepts only 3 or 6. That normalization is gone and is not core's to add either:
+    **otaman-core declares `requires-python = ">=3.11"`**, and cli depends on it, so
+    3.10 was never a reachable target — which is a defect in cli's own declared floor,
+    fixed in this change.
+    """
     raw = "2026-09-25T14:43:43." + ("1" * digits) + "+00:00"
     got = parse_timestamp({"timestamp": raw})
     assert got is not None, f"{digits} fractional digits rejected"
