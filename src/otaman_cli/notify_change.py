@@ -94,6 +94,42 @@ def _parse_at_annotations(tasks_md: Path) -> list[str]:
     return out
 
 
+def _owner_map(platform_yaml: Path) -> tuple[dict[str, str], str]:
+    """``(repo -> owner, reason)`` — the map, or why there is none.
+
+    A non-empty *reason* means the map could not be built, and it is NOT the same
+    fact as a map that resolved no owner for a particular annotation. Four states
+    reached `derive_recipients` as one empty list before this: absent
+    platform.yaml, unreadable platform.yaml, a `repos:` key of the wrong shape, and
+    a `repos:` list whose entries name no owner.
+    """
+    if not platform_yaml.is_file():
+        return {}, f"no platform.yaml at {platform_yaml}"
+    try:
+        import yaml
+
+        doc = yaml.safe_load(platform_yaml.read_text(encoding="utf-8")) or {}
+    except Exception as exc:  # noqa: BLE001 - unreadable is NOT "declares no owners"
+        return {}, f"platform.yaml could not be read ({type(exc).__name__})"
+    if not isinstance(doc, dict):
+        return {}, "platform.yaml is not a mapping"
+    repos = doc.get("repos")
+    if repos is None:
+        return {}, "platform.yaml declares no `repos:`"
+    if not isinstance(repos, list):
+        return {}, "platform.yaml `repos:` is not a list"
+    by_name: dict[str, str] = {}
+    for r in repos:
+        if isinstance(r, dict):
+            name = r.get("name")
+            owner = r.get("owner")
+            if isinstance(name, str) and isinstance(owner, str) and owner:
+                by_name[name] = owner
+    if not by_name:
+        return {}, f"platform.yaml `repos:` names no owners ({len(repos)} entr(ies))"
+    return by_name, ""
+
+
 def _lookup_owners(annotations: list[str], platform_yaml: Path) -> list[str]:
     """Map `otaman-<repo>` annotations to repo owners via platform.yaml.
 
@@ -105,63 +141,94 @@ def _lookup_owners(annotations: list[str], platform_yaml: Path) -> list[str]:
     fall back to the prefix-stripped form, so both conventions resolve.
 
     Returns ordered, deduplicated list of owner agent names.  Annotations
-    that don't match any `repos[].name` (in either form) are silently
-    skipped (the hook's behavior — better to under-notify than mis-notify).
+    that don't match any `repos[].name` (in either form) are skipped — better to
+    under-notify than mis-notify — but the skip is now REPORTED by
+    :func:`resolve_recipients` rather than being invisible.
     """
-    if not platform_yaml.is_file():
-        return []
-    try:
-        import yaml
+    owners, _reason = _resolve_owners(annotations, platform_yaml)
+    return owners
 
-        doc = yaml.safe_load(platform_yaml.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return []
-    if not isinstance(doc, dict):
-        return []
-    repos = doc.get("repos") or []
-    if not isinstance(repos, list):
-        return []
-    by_name = {}
-    for r in repos:
-        if isinstance(r, dict):
-            name = r.get("name")
-            owner = r.get("owner")
-            if isinstance(name, str) and isinstance(owner, str) and owner:
-                by_name[name] = owner
+
+def _resolve_owners(annotations: list[str], platform_yaml: Path) -> tuple[list[str], str]:
+    """``(owners, reason)`` — resolved owners, and why any annotation found none."""
+    by_name, reason = _owner_map(platform_yaml)
+    if reason:
+        return [], reason
 
     seen: set[str] = set()
     out: list[str] = []
+    unmatched: list[str] = []
     for ann in annotations:
         owner = by_name.get(ann)
         if owner is None and ann.startswith("otaman-"):
             owner = by_name.get(ann[len("otaman-") :])
-        if owner and owner not in seen:
+        if owner is None:
+            if ann not in unmatched:
+                unmatched.append(ann)
+            continue
+        if owner not in seen:
             seen.add(owner)
             out.append(owner)
-    return out
+    if unmatched:
+        return out, ("these annotations match no `repos[].name`: " + ", ".join(unmatched))
+    return out, ""
 
 
-def derive_recipients(specs_root: Path, change_name: str, platform_yaml: Path) -> list[str]:
-    """Public — derive the `to:` list for a `spec-change` notification.
+#: The recipients a notification falls back to when no repo owner resolved. The
+#: human is on it because somebody has to notice; spec-agent because the change is
+#: theirs to re-dispatch.
+FALLBACK_RECIPIENTS = ["spec-agent", "human"]
 
-    Mirrors `spec-change-hook.sh` lines 103-149 logic exactly:
-      - No `tasks.md` for the change → `["spec-agent"]`
-      - `tasks.md` exists but no `@otaman-<repo>` annotations OR no owner
-        resolved → `["spec-agent", "human"]`
-      - Otherwise → ordered list of unique owners from the annotations
+
+def resolve_recipients(
+    specs_root: Path, change_name: str, platform_yaml: Path
+) -> tuple[list[str], str]:
+    """``(recipients, fallback_reason)`` for a `spec-change` notification.
+
+    The reason is empty when real owners resolved. When it is set, the recipients
+    are :data:`FALLBACK_RECIPIENTS` and the reason says WHY — which five different
+    situations used to collapse into, indistinguishably:
+
+      * the change's `tasks.md` carries no `@otaman-<repo>` annotation at all
+        (legitimate: nobody is assigned yet)
+      * an annotation names a repo this program does not have — a typo in
+        `tasks.md` routes the whole dispatch away from the agent who owns the work
+      * `platform.yaml` is absent, or unreadable, or its `repos:` is the wrong
+        shape, or its entries name no owners
+
+    All five produced `["spec-agent", "human"]` with exit 0, and the message body
+    then told the reader "Fallback: spec-agent, human when no annotations" — which
+    is FALSE in four of the five, and false in the one that matters most: a typo'd
+    annotation. The human receiving it was being told the change assigns nobody,
+    when in fact the dispatch could not find the person it named.
+
+    Mirrors `spec-change-hook.sh` for the recipient LIST; the reason is additional,
+    and nothing about the list changed.
     """
     tasks_md = specs_root / "openspec" / "changes" / change_name / "tasks.md"
     if not tasks_md.is_file():
-        return ["spec-agent"]
+        return ["spec-agent"], ""
 
     annotations = _parse_at_annotations(tasks_md)
     if not annotations:
-        return ["spec-agent", "human"]
+        return list(FALLBACK_RECIPIENTS), "tasks.md carries no `@otaman-<repo>` annotation"
 
-    owners = _lookup_owners(annotations, platform_yaml)
+    owners, reason = _resolve_owners(annotations, platform_yaml)
     if not owners:
-        return ["spec-agent", "human"]
-    return owners
+        return list(FALLBACK_RECIPIENTS), (reason or "no annotation resolved to a repo owner")
+    # Owners resolved, but not for every annotation — the notification reaches the
+    # agents it could name, and the ones it could not are still worth saying.
+    return owners, reason
+
+
+def derive_recipients(specs_root: Path, change_name: str, platform_yaml: Path) -> list[str]:
+    """Public — the `to:` list for a `spec-change` notification.
+
+    Thin wrapper over :func:`resolve_recipients` for callers that do not need the
+    reason. The list is unchanged from before.
+    """
+    recipients, _reason = resolve_recipients(specs_root, change_name, platform_yaml)
+    return recipients
 
 
 def _build_message(
@@ -175,6 +242,7 @@ def _build_message(
     timestamp_iso: str,
     msg_id: str,
     specs_repo_name: str,
+    fallback_reason: str = "",
 ) -> str:
     """Render one recipient's spec-change copy.
 
@@ -205,12 +273,25 @@ def _build_message(
         f"\n"
         f"**All recipients**: {', '.join(recipients)}\n"
         f"\n"
-        f"Recipients are derived from `tasks.md` `@otaman-<repo>` annotations.\n"
-        f"Fallback: `spec-agent` when no tasks.md exists; `spec-agent, human` "
-        f"when no annotations.  Use `/otaman:check` to see this notification.\n"
-        f"\n"
-        f"This message was generated by `otaman notify-change` "
-        f"(post-merge-spec-notify), not the post-commit hook.\n"
+        # The reason this list is what it is, stated. The old text asserted "no
+        # annotations" for every fallback, which was false whenever the real cause
+        # was a typo'd annotation or an unreadable platform.yaml — and told the
+        # human the change assigns nobody when the dispatch had in fact failed to
+        # find the person it named.
+        + (
+            # "Why" rather than "Fallback": the reason is also set when SOME
+            # annotations resolved, where nothing fell back and the recipients are
+            # real owners. One sentence that is true in both cases.
+            f"**Why these recipients**: {fallback_reason}\n\n"
+            if fallback_reason
+            else "Recipients are derived from `tasks.md` `@otaman-<repo>` annotations.\n\n"
+        )
+        + (
+            "Use `/otaman:check` to see this notification.\n"
+            "\n"
+            "This message was generated by `otaman notify-change` "
+            "(post-merge-spec-notify), not the post-commit hook.\n"
+        )
     )
 
 
@@ -258,6 +339,9 @@ def notify_change(project_root: Path, change_name: str) -> tuple[int, dict[str, 
         "map_tasks_called": False,
         "map_tasks_path": None,
         "tasks_md_path": None,
+        # Empty when real owners resolved; otherwise why the recipients are the
+        # fallback. Five situations used to reach the caller as one silent list.
+        "fallback_reason": "",
     }
 
     specs_root = _resolve_specs_path(project_root)
@@ -272,8 +356,11 @@ def notify_change(project_root: Path, change_name: str) -> tuple[int, dict[str, 
     summary["tasks_md_path"] = str(tasks_md) if tasks_md.is_file() else None
 
     platform_yaml = project_root / "platform.yaml"
-    recipients = derive_recipients(specs_root, change_name, platform_yaml)
+    recipients, fallback_reason = resolve_recipients(specs_root, change_name, platform_yaml)
     summary["recipients"] = recipients
+    # In the summary as well as the message: the caller is the one who can fix a
+    # typo'd annotation, and they see the summary, not the body they just wrote.
+    summary["fallback_reason"] = fallback_reason
 
     commit_hash, commit_msg, commit_author = _git_metadata(specs_root)
     now = datetime.now(timezone.utc)
@@ -304,6 +391,7 @@ def notify_change(project_root: Path, change_name: str) -> tuple[int, dict[str, 
             timestamp_iso=iso_ts,
             msg_id=msg_id,
             specs_repo_name=specs_root.name,
+            fallback_reason=fallback_reason,
         )
         # The change name is part of the stem, and the write is create-exclusive.
         # Both are needed, and neither is redundant:
@@ -425,6 +513,21 @@ def cmd_notify_change(args: list[str]) -> int:
     )
     UI.kv("  Change", summary["change_name"])
     UI.kv("  Recipients", ", ".join(summary["recipients"]))
+    # The operator is the one who can fix a typo'd annotation, and they see THIS,
+    # not the body they just wrote. A dispatch that fell back to spec-agent+human
+    # looks identical to a correct one on this line unless the reason is printed.
+    reason = summary.get("fallback_reason") or ""
+    if reason:
+        # PARTIAL resolution is its own case: some annotations resolved and some did
+        # not, so the recipients are real owners and nothing fell back. Saying "fell
+        # back" there would be a second false statement in the place the first one
+        # was — which is the whole defect, repeated.
+        if summary["recipients"] == FALLBACK_RECIPIENTS:
+            UI.warn(f"  Fell back to {', '.join(FALLBACK_RECIPIENTS)}: {reason}")
+            UI.muted("  No repo owner was notified — fix the annotation or platform.yaml.")
+        else:
+            UI.warn(f"  Partially resolved: {reason}")
+            UI.muted("  The owners above were notified; the unmatched annotations were not.")
     if summary["tasks_md_path"]:
         UI.muted(f"  tasks.md: {summary['tasks_md_path']}")
     else:
@@ -451,7 +554,9 @@ def cmd_notify_change(args: list[str]) -> int:
 
 
 __all__ = [
+    "FALLBACK_RECIPIENTS",
     "cmd_notify_change",
     "derive_recipients",
     "notify_change",
+    "resolve_recipients",
 ]
