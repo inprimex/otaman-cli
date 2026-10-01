@@ -20,7 +20,7 @@ a repo nobody configured.
 
 **The suppression rule covers SECURITY suppressions, and distinguishes bare
 from coded.** The spec's failing scenario is `# nosemgrep` with no
-justification. My first version also matched `# noqa` and `# type: ignore`,
+justification. My first version also matched ruff's and mypy's markers,
 which found 14 "bare" suppressions in this repo — every one a `# type: ignore`
 on an `import yaml` line. A rule that matches what it was not written for is how
 a gate earns the reputation that gets it switched off, so the markers are the
@@ -54,7 +54,7 @@ SKIPPED = "skipped"
 
 #: SECURITY-tool suppressions only — the markers the ladder's own scanners emit.
 #:
-#: Deliberately NOT `# noqa` or `# type: ignore`. Those silence a style linter
+#: Deliberately NOT ruff's or mypy's markers. Those silence a style linter
 #: and a type checker; this gate is about security findings, and the spec's
 #: failing scenario is `# nosemgrep` with no justification. Measured before
 #: narrowing: the broad set produced 14 "bare" findings in this repo and every
@@ -70,11 +70,16 @@ _MARKERS = (
     r"//\s*nosemgrep",
     r"//\s*nolint:\s*gosec",
     # ruff's `S` rules ARE the security ones (the bandit port), so in a
-    # ruff-based repo a security suppression is written `# noqa: S310`. Matching
-    # `noqa` wholesale would drag in every style suppression; matching only the
-    # S-coded ones catches the form this toolchain actually uses. Found by
-    # noticing the narrowed set reported zero while `# noqa: S310` sat in
+    # ruff-based repo a security suppression is written as a noqa carrying an
+    # S-code. Matching noqa wholesale would drag in every style suppression;
+    # matching only the S-coded ones catches the form this toolchain uses. Found
+    # by noticing the narrowed set reported zero while such a suppression sat in
     # commands/connection.py.
+    #
+    # Written WITHOUT the literal marker on purpose: spelling it out here made
+    # ruff parse this comment as a real directive, and made this scanner count a
+    # comment ABOUT a suppression as one. A detector that matches its own
+    # documentation is a detector with a false positive built in.
     r"#\s*noqa:\s*S[0-9]+",
 )
 _MARKER_RE = re.compile("|".join(f"(?:{m})" for m in _MARKERS))

@@ -1331,6 +1331,73 @@ def check_git_host(project_root: Path) -> dict[str, Any]:
     return result
 
 
+def check_critic_policy(project_root: Path) -> dict[str, Any]:
+    """Verification-gate critic selection: effective policy per hook (csp 1.3).
+
+    Reports the configured chain, what it resolves to where the inputs are
+    locally derivable, and the clearance roster. A config that exists and does
+    not parse is NOT CHECKED — "no gate policy declared" would be the same
+    fail-open conflation corrected in #223 and #227.
+    """
+    result: dict[str, Any] = {"check": "critic_policy", "status": "ok", "details": {}}
+    try:
+        from otaman_cli import critic_policy
+    except Exception as exc:  # noqa: BLE001 - old bundle → not-checked, not "clean"
+        result["status"] = "warn"
+        result["details"]["skipped"] = f"critic-policy support unavailable: {exc}"
+        return result
+
+    surface = critic_policy.load(project_root)
+    if surface.error:
+        result["status"] = "warn"
+        result["details"]["gates"] = f"NOT CHECKED — {surface.error}"
+        return result
+    if not surface.configured:
+        result["details"]["gates"] = (
+            f"no {critic_policy.CONFIG_NAME} — no critic-selection policy declared"
+        )
+        return result
+
+    result["details"]["hooks"] = len(surface.hooks)
+    result["details"]["effective"] = ", ".join(f"{h.hook}={h.primary}" for h in surface.hooks)
+    result["details"]["cleared_agents"] = len(surface.roster.rows)
+    issues: list[dict[str, Any]] = []
+
+    if not surface.roster.rows:
+        # sensitivity-scoped selection with no clearances drops every critic,
+        # which renders as a gate that silently selects nobody.
+        result["status"] = "warn"
+        issues.append(
+            {
+                "severity": "medium",
+                "message": "no clearances declared — sensitivity-scoped selection drops everyone",
+                "fix": f"declare `clearances:` in {critic_policy.CONFIG_NAME}",
+            }
+        )
+    for hook in surface.hooks:
+        if hook.evaluated and not hook.critics:
+            result["status"] = "warn"
+            issues.append(
+                {
+                    "severity": "medium",
+                    "message": f"{hook.hook}: {hook.primary} selects nobody",
+                    "fix": "declare a fallback, or check the inputs the policy reads",
+                }
+            )
+        if "dropped for missing clearance" in (hook.note or ""):
+            result["status"] = "warn"
+            issues.append(
+                {
+                    "severity": "low",
+                    "message": f"{hook.hook}: {hook.note}",
+                    "fix": "grant the clearance, or accept the layer renders not-run",
+                }
+            )
+    if issues:
+        result["issues"] = issues
+    return result
+
+
 def check_security_gates(project_root: Path) -> dict[str, Any]:
     """Hook C's ladder: layers configured/effective per repo (sghc 1.2).
 
@@ -2069,6 +2136,7 @@ def run_doctor(project_root: Path) -> dict[str, Any]:
         check_plugin_doctor(project_root),
         check_knowledge_health(project_root),
         check_security_gates(project_root),
+        check_critic_policy(project_root),
         check_human_roster(config),
         check_edition_consistency(),
         check_branch_policy(config, project_root),

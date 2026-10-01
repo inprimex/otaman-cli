@@ -38,7 +38,11 @@ security-gates:
       ci-fast: {tools: [gitleaks, semgrep], blocking: true, timeout: 30}
       ci-medium: {tools: [semgrep], blocking: true, scanner-pair: [trivy, grype]}
     docsonly:
-      ci-slow: {tools: [deep-sast], blocking: false, opt-in: true}
+      # No `opt-in` here: core rules that opt-in is a PER-REPO decision and
+      # refuses it as a language default. This fixture carried it until core
+      # tightened the validation mid-task — the refusal is right, and the
+      # fixture was wrong.
+      ci-slow: {tools: [deep-sast], blocking: false}
   repos:
     docs:
       opt-out: true
