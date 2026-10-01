@@ -134,15 +134,22 @@ def test_polling_stop_halts_callbacks(program):
     assert count["n"] == 0
 
 
-def test_make_event_source_is_polling(program):
-    assert isinstance(make_event_source(program), PollingEventSource)
+def test_make_event_source_prefers_fswatch_with_polling_beneath(program):
+    """crs 1.3 — the seam's whole purpose was to swap the provider without
+    console rework, and fswatch's BusEventSource landed. This asserted the
+    polling provider directly; the contract it was protecting is that the
+    console still works when fswatch is absent, which is now the fallback's job
+    and is tested in test_console_fswatch_provider.py.
+    """
+    from otaman_cli.console.events import FallbackEventSource
+
+    source = make_event_source(program)
+    assert isinstance(source, FallbackEventSource)
+    # Whatever is live, the protocol the console calls is unchanged.
+    for method in ("snapshot", "start", "stop"):
+        assert callable(getattr(source, method))
 
 
-# ---------------------------------------------------------------------------
-# console wiring — screen starts + stops the source (provider-agnostic)
-
-
-@_textual
 def test_messages_screen_starts_and_stops_source(program, monkeypatch):
     class _Fake:
         def __init__(self):
