@@ -710,8 +710,19 @@ def _cmd_init_update(dry_run: bool = False) -> int:
     # generator resolves everything from the platform.yaml path, cwd-free.
     print()
     gen_failed = False
+    # instruction-regeneration 1.1 — the generated instruction files are ACCOUNTED
+    # FOR, by content. This command regenerated them and reported nothing about them
+    # for four months: `Updated: N` counts `.otaman` markers, and a generator exit
+    # code says nothing about whether a single file moved. All 18 CLAUDE.local.md on
+    # this fleet sat at 2026-08-28 across 19 generator commits, and two merged
+    # instruction fixes never reached a running agent.
+    from otaman_cli import generated_instructions as gi
+
+    before = gi.expected_files(root, config)
     if dry_run:
         UI.muted("  would regenerate agent config (generate-agent-config.py)")
+        present = [f for f in before if not f.repo_missing]
+        UI.muted(f"  would account for {len(present)} generated {gi.GENERATED_FILENAME} file(s)")
     else:
         print("Regenerating agent config (queues, ownership, CLAUDE.local.md rules)...")
         try:
@@ -725,6 +736,21 @@ def _cmd_init_update(dry_run: bool = False) -> int:
             UI.warn(
                 "generate-agent-config did not complete — CLAUDE.local.md was NOT "
                 "(re)generated; marker/launch patches above still applied."
+            )
+        # Counted either way: a generator that exits non-zero may still have written
+        # some files, and which ones is exactly what the operator needs to know.
+        outcome = gi.compare(before, gi.expected_files(root, config))
+        print()
+        for line in gi.render_lines(outcome):
+            print(f"  {line}")
+        if outcome.failed and not gen_failed:
+            # The generator said it succeeded and a file it owns is not there. That
+            # is the silent-success shape this task exists to close, so it is a
+            # failure of the run regardless of the exit code.
+            gen_failed = True
+            UI.warn(
+                "generate-agent-config exited 0 but did not write every expected "
+                f"{gi.GENERATED_FILENAME} — counted above."
             )
 
     print()
