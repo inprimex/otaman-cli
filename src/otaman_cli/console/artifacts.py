@@ -126,10 +126,9 @@ def advance_to_spec_approved(
     """Advance ``authored`` → ``spec-approved`` (approver-gated). The stage in
     ``.openspec.yaml`` is the authoritative signal; a bus notification is derived."""
     from otaman_core.spec_lifecycle import (
-        SPEC_APPROVED_STAGE,
         SpecLifecycleError,
+        apply_spec_approved,
         read_openspec,
-        set_stage,
         spec_approved_reached,
     )
 
@@ -156,10 +155,32 @@ def advance_to_spec_approved(
             f"{change_name} is at stage {stage or 'unknown'} — only an authored "
             "(or approved-with-artifacts) change can advance to spec-approved"
         )
+    # The v-act is THE writer of `approved_by` under the scoped-fields ruling
+    # (spec-agent 20261001T122219). It used to call `set_stage` alone, which
+    # advanced the stage and wrote no attestation — so core's merge-gate conjunct
+    # (#91) saw spec-approved-without-attestation and today's CI went red on four
+    # changes that had genuinely been approved. spec-agent's backfill was the
+    # interim; this is the pattern.
+    #
+    # Both signals land in ONE write, and that write is in the same commit below:
+    # a stage advanced in one commit and attested in another is a window where
+    # the repo states something untrue about itself.
+    from datetime import datetime, timezone
+
+    from otaman_cli.console.lifecycle import _write_openspec
+
+    stamped_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        set_stage(oy, SPEC_APPROVED_STAGE)
+        updated = apply_spec_approved(data, approver)
     except SpecLifecycleError as exc:
         return False, str(exc)
+    # `apply_spec_approved` writes stage + `spec_approved_by` (the identity, D5).
+    # `approved_by` is the separate attestation the merge gate reads, and core
+    # ships no writer for it — composed here in the act that owns it, in the
+    # format spec-agent ruled. Folding it into core's writer would be the better
+    # long-term home; raised with core rather than assumed.
+    updated["approved_by"] = f"{approver.name} (spec-approved {stamped_at}, via otaman -i)"
+    _write_openspec(oy, updated)
     # Repo is truth (D1): commit the stage change (human-seat override for the
     # branch-policy hook — gate-3.1 defect fix; the actor is the present human).
     from otaman_cli.console.lifecycle import _commit_push, _durability_suffix, _specs_root
