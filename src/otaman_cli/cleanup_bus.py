@@ -67,24 +67,57 @@ def get_msg_id(filepath: Path) -> str:
     return name
 
 
+#: Ack states that END a message's life for its recipient. `read` is deliberately
+#: absent: `otaman ack --read` exists to keep a message VISIBLE while the recipient
+#: finishes something else, and this repo's own CLAUDE.md prescribes exactly that
+#: pattern ("ack as read, add to queue, finish current task first").
+TERMINAL_ACK_STATES = ("resolved", "approved", "rejected")
+
+#: The non-terminal state, named rather than inferred from "not in the set above": a
+#: reader of this module should be able to see the one word that keeps a message live.
+LIVE_ACK_STATE = "read"
+
+
+def ack_is_terminal(acks_dir: Path, msg_id: str, agent: str) -> bool:
+    """Whether *agent* has FINISHED with this message, not merely seen it.
+
+    The archive predicate used to ask `ack_file.exists()`, which answers "has anyone
+    acked this?" when the question is "is anyone still working on it?". Those differ:
+    measured by deploy-agent on the live bus (20261001T201348), **428 of the 2,494
+    archivable messages are acked `read`** — deliberately kept visible — and would have
+    been archived out of `otaman check` on the first successful cleanup in four months.
+    The distinction `--read` exists to express would have been silently discarded by
+    the command that is supposed to respect it.
+
+    An ack whose state cannot be read, or is a word this does not recognise, is NOT
+    terminal. Unreadable is not finished — the same rule this module already applies to
+    an unparseable timestamp, and the safe direction when the action is irreversible
+    from the operator's point of view even though the file is only moved.
+    """
+    ack_file = acks_dir / f"{msg_id}.{agent}.ack"
+    try:
+        state = ack_file.read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        return False
+    if not state:
+        return False
+    # Substring, not equality: one live ack reads "approved — already actioned: ..."
+    # with the reason appended, and a state word followed by prose is still that state.
+    return any(word in state for word in TERMINAL_ACK_STATES)
+
+
 def is_fully_acked(msg_path: Path, acks_dir: Path, agents: list[str], fm: dict[str, Any]) -> bool:
-    """Check if a broadcast message has been acked by all relevant agents."""
+    """Whether every recipient has reached a TERMINAL ack state for this message."""
     to = fm.get("to", "")
     msg_id = get_msg_id(msg_path)
 
     if to == "all":
-        # Need all developer agents to ack
+        # Need all developer agents to have finished with it.
         if not agents:
             return False
-        for agent in agents:
-            ack_file = acks_dir / f"{msg_id}.{agent}.ack"
-            if not ack_file.exists():
-                return False
-        return True
-    else:
-        # Single-agent message: check if that agent acked
-        ack_file = acks_dir / f"{msg_id}.{to}.ack"
-        return ack_file.exists()
+        return all(ack_is_terminal(acks_dir, msg_id, agent) for agent in agents)
+    # Single-agent message: that agent has to have finished with it.
+    return ack_is_terminal(acks_dir, msg_id, str(to))
 
 
 def parse_timestamp(fm: dict[str, Any]) -> datetime | None:

@@ -200,7 +200,7 @@ def test_an_acked_old_message_with_microseconds_archives(tmp_path):
     """End to end on the exact shape that was being rejected."""
     root = tmp_path / "prog"
     active = _bus(root, [("20260101T000000-a", _old(90), "cli-agent")])
-    (active / "acks" / "20260101T000000-a.cli-agent.ack").write_text("ok", encoding="utf-8")
+    (active / "acks" / "20260101T000000-a.cli-agent.ack").write_text("resolved\n", encoding="utf-8")
 
     report = cleanup(root, dry_run=True)
 
@@ -222,7 +222,7 @@ def test_a_young_message_is_neither_archived_nor_counted_as_held(tmp_path):
 def test_dry_run_moves_nothing(tmp_path):
     root = tmp_path / "prog"
     active = _bus(root, [("20260101T000000-a", _old(90), "cli-agent")])
-    (active / "acks" / "20260101T000000-a.cli-agent.ack").write_text("ok", encoding="utf-8")
+    (active / "acks" / "20260101T000000-a.cli-agent.ack").write_text("resolved\n", encoding="utf-8")
 
     cleanup(root, dry_run=True)
 
