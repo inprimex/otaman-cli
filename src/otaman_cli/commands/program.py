@@ -21,7 +21,7 @@ from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.main import UI
+from otaman_cli.ui import UI
 
 _TRANSITIONS = ("limit", "suspend", "resume", "archive", "unarchive")
 _ACTIONS = ("status", "enforce", *_TRANSITIONS)
@@ -196,7 +196,7 @@ def _broadcast_transition(
     """
     from datetime import datetime, timezone
 
-    from otaman_cli.main import _resolve_bus_paths
+    from otaman_cli.bus_paths import _resolve_bus_paths
 
     try:
         active_dir, _acks = _resolve_bus_paths(program_root)

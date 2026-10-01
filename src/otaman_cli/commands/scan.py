@@ -15,7 +15,8 @@ import subprocess
 from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.main import UI, C, run_script
+from otaman_cli.scripts import run_script
+from otaman_cli.ui import UI, C
 
 
 def _find_existing_otaman_project(scan_root: Path) -> Path | None:

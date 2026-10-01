@@ -23,8 +23,8 @@ from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root
-from otaman_cli.main import UI, C
 from otaman_cli.safety import confirm_destructive_operation
+from otaman_cli.ui import UI, C
 
 _ARTIFACT_NAMES = ("platform.yaml", ".agents", ".claude", ".mcp.json", "CLAUDE.md")
 _SCRIPT_NAMES = ("launch-agents.ps1", "launch-agents.sh", "LAUNCH-AGENTS.md")

@@ -27,7 +27,7 @@ from typing import Any
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_program_root, not_in_project_message
-from otaman_cli.main import UI
+from otaman_cli.ui import UI
 
 # The two artifacts that constitute a materialized repo (spec: `.otaman`
 # marker + CLAUDE.local.md orchestration rules). Both must exist for a repo

@@ -15,7 +15,8 @@ from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_program_root, not_in_project_message
-from otaman_cli.main import UI, C, run_script
+from otaman_cli.scripts import run_script
+from otaman_cli.ui import UI, C
 
 try:
     import pwd as _pwd
@@ -447,7 +448,7 @@ def _has_pending_proposals(root: Path) -> bool:
     try:
         import yaml
 
-        from otaman_cli.main import _resolve_bus_paths
+        from otaman_cli.bus_paths import _resolve_bus_paths
 
         active_dir, acks_dir = _resolve_bus_paths(root)
     except Exception:  # noqa: BLE001
@@ -570,7 +571,7 @@ def _check_spec_lifecycle(root: Path) -> dict:
     if not isinstance(config, dict):
         return out
 
-    from otaman_cli.main import _resolve_bus_paths
+    from otaman_cli.bus_paths import _resolve_bus_paths
 
     specs = config.get("specs") if isinstance(config.get("specs"), dict) else {}
     changes_dir = None

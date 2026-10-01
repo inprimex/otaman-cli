@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.main import UI
+from otaman_cli.ui import UI
 
 _ACTIONS = ("create", "list", "show", "update", "delete", "check", "map")
 

@@ -24,7 +24,7 @@ from __future__ import annotations
 import os
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.main import UI
+from otaman_cli.ui import UI
 
 _ACTIONS = ("list", "enroll", "remove")
 

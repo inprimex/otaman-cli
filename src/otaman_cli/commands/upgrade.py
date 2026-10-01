@@ -17,10 +17,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from otaman_cli import main as _main
+import otaman_cli  # for the installed package's own location
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.main import UI
 from otaman_cli.safety import confirm_destructive_operation
+from otaman_cli.ui import UI
 
 
 def _resolve_connection(
@@ -318,11 +318,12 @@ def _upgrade_one(
             UI.error("    Missing local_root for local connection")
             return 2
         # Plugin path: the otaman CLI itself is part of the plugin checkout.
-        # NOTE: this must resolve relative to main.py's location, not this
-        # module's -- otaman_cli.main.__file__ is used explicitly rather
-        # than __file__ so the move out of main.py doesn't shift the path
-        # up an extra directory level.
-        plugin_root = Path(_main.__file__).resolve().parent.parent
+        # NOTE: resolved from the PACKAGE's own location, not this module's — the
+        # answer has to be the package dir's parent however deep inside `otaman_cli`
+        # the caller lives. This read `otaman_cli.main.__file__` until the dependency
+        # inversion; `otaman_cli/__init__.py` sits in the same directory, so the path
+        # is identical and this no longer imports the entry point to learn it.
+        plugin_root = Path(otaman_cli.__file__).resolve().parent.parent
 
         if not skip_pull:
             UI.muted(f"    Run: git -C {plugin_root} pull --ff-only")
@@ -334,11 +335,13 @@ def _upgrade_one(
         if not skip_init:
             UI.muted(f"    Run: otaman init  (cwd={local_root})")
             if not dry_run:
-                # Re-invoke main.py as a script (`python3 main.py init`), same
-                # reason as plugin_root above: must be main.py's path, not
-                # this module's, for `if __name__ == "__main__"` to fire.
+                # Re-invoke main.py as a script (`python3 main.py init`): it has to be
+                # main.py's own path for `if __name__ == "__main__"` to fire. Built
+                # from the package dir rather than by importing the module — the only
+                # thing wanted here is a filename.
+                main_py = Path(otaman_cli.__file__).resolve().parent / "main.py"
                 rc = subprocess.run(
-                    [sys.executable, str(Path(_main.__file__).resolve()), "init"],
+                    [sys.executable, str(main_py), "init"],
                     cwd=local_root,
                 ).returncode
                 if rc != 0:

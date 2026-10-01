@@ -21,7 +21,7 @@ from otaman_cli.console.seat import (
     SEAT_REFUSED_SOCKET,
     seat_console,
 )
-from otaman_cli.main import UI
+from otaman_cli.ui import UI
 
 
 def _seat(argv: list[str]) -> int:

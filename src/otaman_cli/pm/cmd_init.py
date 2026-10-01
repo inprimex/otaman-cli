@@ -20,7 +20,7 @@ from otaman_cli.identity import find_project_root, not_in_project_message
 def cmd_pm_init(args: list[str]) -> int:
     """otaman pm init <provider> [--url URL] [--dry-run] [--seed-backlog]
     [--no-webhooks] [--admin-key KEY]"""
-    from otaman_cli.main import UI
+    from otaman_cli.ui import UI
 
     # -----------------------------------------------------------------------
     # Parse args

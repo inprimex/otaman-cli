@@ -17,7 +17,9 @@ from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.main import UI, C, _normalize_ce_platform_yaml_for_validation, run_script
+from otaman_cli.platform_config import _normalize_ce_platform_yaml_for_validation
+from otaman_cli.scripts import run_script
+from otaman_cli.ui import UI, C
 
 
 def cmd_owner_paths(args: list[str]) -> int:

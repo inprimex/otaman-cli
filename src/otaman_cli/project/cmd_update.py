@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.main import UI
 from otaman_cli.project._platform import (
     find_repo,
     git_commit_platform_yaml,
@@ -13,6 +12,7 @@ from otaman_cli.project._platform import (
     save_platform_yaml,
     update_repo,
 )
+from otaman_cli.ui import UI
 
 _UPDATABLE_FIELDS = ("owner", "path", "url", "description")
 

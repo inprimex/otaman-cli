@@ -35,7 +35,7 @@ from typing import Any
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root
-from otaman_cli.main import UI
+from otaman_cli.ui import UI
 
 #: Operations git may invoke. Anything else is a protocol error, not a no-op —
 #: silently succeeding on an unknown verb would hide a git/helper mismatch.

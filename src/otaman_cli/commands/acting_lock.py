@@ -25,7 +25,7 @@ import os
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message, resolve_agent_identity
-from otaman_cli.main import UI
+from otaman_cli.ui import UI
 
 _MODES = ("interactive", "background")
 _PREEMPT_WINDOW_S = 10.0

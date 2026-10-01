@@ -21,7 +21,7 @@ import subprocess
 from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.main import UI
+from otaman_cli.ui import UI
 
 #: Characters that make a manifest entry a pattern rather than a name. A manifest
 #: is machine-written, so any of these means the file was hand-edited or forged —

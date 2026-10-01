@@ -272,7 +272,7 @@ class TestMapTasksDispatch:
     def test_map_tasks_dispatch_fires_when_tasks_md_present(self, tmp_path: Path, monkeypatch):
         project, specs = _stage_workspace(tmp_path)
         _stage_change(specs, "ch1", "- [ ] @otaman-cli\n")
-        monkeypatch.setattr("otaman_cli.main.run_script", self._fake_run_script(0))
+        monkeypatch.setattr("otaman_cli.scripts.run_script", self._fake_run_script(0))
         rc, summary = notify_change(project, "ch1")
         assert rc == 0
         assert summary["map_tasks_called"] is True
@@ -281,7 +281,7 @@ class TestMapTasksDispatch:
     def test_dispatch_failure_does_not_break_notify(self, tmp_path: Path, monkeypatch):
         project, specs = _stage_workspace(tmp_path)
         _stage_change(specs, "ch1", "- [ ] @otaman-cli\n")
-        monkeypatch.setattr("otaman_cli.main.run_script", self._fake_run_script(99, "boom"))
+        monkeypatch.setattr("otaman_cli.scripts.run_script", self._fake_run_script(99, "boom"))
         rc, summary = notify_change(project, "ch1")
         assert rc == 0  # notify itself doesn't fail
         assert summary["map_tasks_called"] is False
@@ -294,7 +294,7 @@ class TestMapTasksDispatch:
         def _raise(*a, **k):
             raise RuntimeError("import blew up")
 
-        monkeypatch.setattr("otaman_cli.main.run_script", _raise)
+        monkeypatch.setattr("otaman_cli.scripts.run_script", _raise)
         rc, summary = notify_change(project, "ch1")
         assert rc == 0
         assert summary["map_tasks_called"] is False
@@ -309,7 +309,7 @@ class TestMapTasksDispatch:
         def _must_not_call(*a, **k):
             raise AssertionError("run_script must not be called without tasks.md")
 
-        monkeypatch.setattr("otaman_cli.main.run_script", _must_not_call)
+        monkeypatch.setattr("otaman_cli.scripts.run_script", _must_not_call)
         rc, summary = notify_change(project, "ch1")
         assert rc == 0
         assert summary["map_tasks_called"] is False
@@ -338,7 +338,7 @@ class TestExitCodes:
         project, specs = _stage_workspace(tmp_path)
         _stage_change(specs, "ch1", "- [ ] @otaman-cli\n")
         monkeypatch.setattr(
-            "otaman_cli.main.run_script",
+            "otaman_cli.scripts.run_script",
             lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=None),
         )
         rc, _ = notify_change(project, "ch1")
@@ -414,7 +414,7 @@ class TestNotifyChangeDispatchGate:
         def _must_not_dispatch(*a, **k):
             raise AssertionError("map-tasks must not run when the gate blocks")
 
-        monkeypatch.setattr("otaman_cli.main.run_script", _must_not_dispatch)
+        monkeypatch.setattr("otaman_cli.scripts.run_script", _must_not_dispatch)
         rc, summary = notify_change(project, "ch1")
         assert rc == 0
         assert summary.get("gate_blocked") is True
@@ -433,7 +433,7 @@ class TestNotifyChangeDispatchGate:
             captured["env"] = os.environ.get("OTAMAN_GATE_WAIVED")
             return SimpleNamespace(returncode=0, stdout="{}", stderr=None)
 
-        monkeypatch.setattr("otaman_cli.main.run_script", fake_run_script)
+        monkeypatch.setattr("otaman_cli.scripts.run_script", fake_run_script)
         monkeypatch.delenv("OTAMAN_GATE_WAIVED", raising=False)
         rc, summary = notify_change(project, "ch1")
         assert rc == 0 and summary["map_tasks_called"] is True

@@ -17,10 +17,13 @@ from pathlib import Path
 
 from otaman_core.validate_message import PRIVILEGED_TYPES
 
+from otaman_cli.bus_paths import _resolve_bus_paths
 from otaman_cli.bus_write import BusMessageValidationError, write_message_exclusive
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message, resolve_agent_identity
-from otaman_cli.main import UI, C, _read_platform_specs_path, _resolve_bus_paths, run_script
+from otaman_cli.platform_config import _read_platform_specs_path
+from otaman_cli.scripts import run_script
+from otaman_cli.ui import UI, C
 
 # outcome-proposal-routing task 3.1 — message-type registry for `otaman send`
 # validation.  Keep this list lean: deliberately limited to types that have

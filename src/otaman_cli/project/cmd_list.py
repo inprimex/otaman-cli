@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.main import UI
 from otaman_cli.project._platform import load_platform_yaml
+from otaman_cli.ui import UI
 
 
 def _normalised_status(entry: dict[str, Any]) -> str:

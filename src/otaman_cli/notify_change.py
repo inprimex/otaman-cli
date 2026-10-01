@@ -461,7 +461,7 @@ def notify_change(project_root: Path, change_name: str) -> tuple[int, dict[str, 
         if waiver_slug:
             os.environ["OTAMAN_GATE_WAIVED"] = waiver_slug
         try:
-            from otaman_cli.main import run_script
+            from otaman_cli.scripts import run_script
 
             result = run_script("map-tasks.py", str(tasks_md), capture=True)
             summary["map_tasks_called"] = result.returncode == 0
@@ -485,7 +485,7 @@ def notify_change(project_root: Path, change_name: str) -> tuple[int, dict[str, 
 def cmd_notify_change(args: list[str]) -> int:
     """`otaman notify-change <change-name>` CLI entry point (task 1.1)."""
     from otaman_cli.identity import find_project_root, not_in_project_message
-    from otaman_cli.main import UI
+    from otaman_cli.ui import UI
 
     if not args:
         UI.error("Usage: otaman notify-change <change-name>")

@@ -16,9 +16,11 @@ import json
 import os
 from pathlib import Path
 
+from otaman_cli.bus_paths import _get_agent_ack_status, _resolve_bus_paths
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message, resolve_agent_identity
-from otaman_cli.main import UI, C, _get_agent_ack_status, _resolve_bus_paths, run_script
+from otaman_cli.scripts import run_script
+from otaman_cli.ui import UI, C
 
 
 def cmd_set_status(args: list[str]) -> int:

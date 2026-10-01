@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.main import UI
+from otaman_cli.ui import UI
 
 
 def cmd_project(args: list[str]) -> int:

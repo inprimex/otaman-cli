@@ -14,7 +14,7 @@ from pathlib import Path
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.main import UI, C
+from otaman_cli.ui import UI, C
 
 _ACTIONS = ("status", "gate", "approve", "reconcile", "sweep", "envelope")
 _GATES = ("dispatch", "archive", "merge")
@@ -238,7 +238,7 @@ def _apply_ticks(root: Path, change: str, ids: list[str]) -> tuple[int, dict]:
     """Drive `actualize_tasks` — the single home for the tasks.md write."""
     import json
 
-    from otaman_cli.main import run_script
+    from otaman_cli.scripts import run_script
 
     result = run_script(
         "actualize-tasks.py",
@@ -702,7 +702,7 @@ def _critiques_by_change(active_bus) -> dict:
 
 
 def _bus_active(root: Path):
-    from otaman_cli.main import _resolve_bus_paths
+    from otaman_cli.bus_paths import _resolve_bus_paths
 
     active, acks = _resolve_bus_paths(root)
     return (active if active.is_dir() else None), acks

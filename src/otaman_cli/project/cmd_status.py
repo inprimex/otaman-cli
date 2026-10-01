@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.main import UI
 from otaman_cli.project._platform import (
     find_repo,
     git_commit_platform_yaml,
     load_platform_yaml,
     save_platform_yaml,
 )
+from otaman_cli.ui import UI
 
 
 def _toggle(name: str, *, disable: bool) -> int:

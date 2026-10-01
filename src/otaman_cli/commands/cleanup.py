@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.main import UI, run_script
+from otaman_cli.scripts import run_script
+from otaman_cli.ui import UI
 
 
 def cmd_cleanup(args: list[str]) -> int:

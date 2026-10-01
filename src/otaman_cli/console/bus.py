@@ -23,7 +23,7 @@ class Program:
 
     def bus_paths(self) -> tuple[Path, Path]:
         """(active_dir, acks_dir) via the shared resolver — honors bus_path."""
-        from otaman_cli.main import _resolve_bus_paths
+        from otaman_cli.bus_paths import _resolve_bus_paths
 
         return _resolve_bus_paths(self.root)
 

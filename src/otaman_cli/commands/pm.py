@@ -10,7 +10,7 @@ at -- one of F022's "duplicate dead dict entries" is this pair.
 from __future__ import annotations
 
 from otaman_cli.commands import CommandSpec, register
-from otaman_cli.main import UI
+from otaman_cli.ui import UI
 
 
 def cmd_pm(args: list[str]) -> int:
