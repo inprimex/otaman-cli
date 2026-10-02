@@ -193,11 +193,12 @@ def score_for_scr(
     except Exception as exc:  # noqa: BLE001 - an unparseable SCR is not a zero
         return Score(error=f"could not read the proposal: {type(exc).__name__}")
     # The lint's check 3 scans `proposal["body"]` for pasted credentials
-    # (gitleaks-lite, 1.1's "gitleaks on body"), and core's extractor does not set
-    # `body` — so that check has been inert for every SCR it could ever have run on.
-    # Supplying the input a documented check reads is not a second rule; the scan,
-    # the patterns and the finding all stay core's. Reported to core-agent, because
-    # the extractor is the single home and every other caller has the same hole.
+    # (gitleaks-lite, 1.1's "gitleaks on body"). core's extractor did not set `body`,
+    # so the check was inert for every SCR it could ever have run on; core #110 sets
+    # it now, which makes this `setdefault` a no-op against a current bundle and the
+    # whole reason it is `setdefault` rather than an assignment. It stays as the one
+    # line that keeps the scan live on a core that predates #110 — cli pins no core
+    # version, so "the bundle is older" is a real state, not a hypothetical.
     mapping.setdefault("body", body)
     # A proposal with NOT ONE decision-grade section is not a 0 — it is a document
     # written before the rubric existed. Measured on this bus: 19 pending approval

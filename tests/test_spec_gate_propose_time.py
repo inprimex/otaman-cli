@@ -167,16 +167,37 @@ def test_declared_repo_names_tolerates_bare_strings_and_a_missing_file(tmp_path)
     assert declared_repo_names(tmp_path / "nowhere") == []
 
 
-def test_the_outcome_id_key_wins_over_the_outcome_statement():
-    """Measured: 25 markers carry `outcome-id` (always an id) and not one carries an
-    id in `outcome` — that key holds the outcome STATEMENT."""
-    from otaman_cli.commands.spec import _outcome_id_first
+def test_a_marker_is_handed_over_as_written_and_still_scores():
+    """`outcome-id` holds the id; `outcome` holds the STATEMENT — in 25 and 31 of the
+    71 change markers respectively, and not one carries an id in `outcome`.
 
-    marker = {"outcome-id": "JTBD-112-action-required", "outcome": "the human sees what needs them"}
-    assert _outcome_id_first(marker)["outcome"] == "JTBD-112-action-required"
-    # No id present: the statement is left exactly as written rather than invented.
-    assert _outcome_id_first({"outcome": "prose"})["outcome"] == "prose"
-    assert _outcome_id_first({}) == {}
+    A caller-side normalization briefly lived in `_cmd_status` for exactly that, and
+    core #110 made the extractor read `outcome-id` first — so the marker now goes over
+    as written, and this asserts the OUTCOME from the surface's side: prose in
+    `outcome` must not cost a proposal points when the id is right there. It fails on
+    a core that stops reading `outcome-id`, which is the regression worth catching.
+    """
+    marker = {
+        "outcome-id": "JTBD-112-action-required-channel-semantics",
+        "outcome": "the human sees what needs them, grouped and instant",
+    }
+    score = score_for_scr(_scr(), platform_repos=["otaman-bridge"], openspec=marker)
+    if _core_reads_outcome_id():
+        assert score.value == 100
+        assert [c for c, _, _ in score.findings] == []
+    else:
+        # A bundle predating #110 reads the prose and says so — a visible,
+        # uniform -10, not a wrong claim about the proposal. Asserted rather than
+        # skipped so the difference is recorded instead of hidden.
+        assert [c for c, _, _ in score.findings] == ["malformed-outcome"]
+
+
+def _core_reads_outcome_id() -> bool:
+    """Whether core's extractor prefers `outcome-id` over the prose `outcome` (#110)."""
+    from otaman_core.spec_gate import proposal_from_scr
+
+    mapping = proposal_from_scr("## Subject: t\n", {"outcome-id": "JTBD-1", "outcome": "prose"})
+    return mapping.get("outcome") == "JTBD-1"
 
 
 # --- propose time ------------------------------------------------------------------
@@ -381,8 +402,10 @@ def status_root(monkeypatch):
         encoding="utf-8",
     )
     changes.joinpath("tasks.md").write_text("# tasks\n\n- [ ] 1.1 @otaman-cli do it\n", "utf-8")
+    # Both keys carry the id, so the score is the same on either side of core #110 —
+    # which key is READ is core's business and has its own test above.
     changes.joinpath(".openspec.yaml").write_text(
-        "stage: spec-approved\noutcome-id: JTBD-57\noutcome: the gate comments\n", "utf-8"
+        "stage: spec-approved\noutcome-id: JTBD-57\noutcome: JTBD-57\n", "utf-8"
     )
     _write(
         active,
