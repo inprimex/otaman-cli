@@ -20,6 +20,38 @@ from otaman_cli.ui import UI
 EXIT_MOSTLY_UNEXAMINED = 3
 
 
+def _render_backup_stake(report: dict) -> None:
+    """Say how much of what the purge destroys exists NOWHERE ELSE.
+
+    This replaces "Unrecoverable unless this directory is version-controlled" — true,
+    and a condition the operator cannot evaluate at the moment of deciding while the
+    run can. On the tenant that lost 591 messages the condition was FALSE (nothing
+    committed for six weeks) and no line said so; the day's forensics then measured
+    2,627 of 5,317 active messages and 100% of the archive untracked.
+
+    Three states, never collapsed: all committed (restorable), some/all absent from
+    HEAD (gone for good), and git could not be consulted — which reads as
+    unrecoverable, because "I could not check" has the same consequence as "no
+    backup" and the opposite one from "all committed".
+    """
+    detail = report.get("deleted_detail") or []
+    unknown = [d["month"] for d in detail if d.get("unbacked") is None]
+    unbacked = report.get("deleted_unbacked", 0)
+    if unbacked:
+        UI.error(
+            f"  {unbacked} of those message(s) are NOT in git HEAD — deleting them is "
+            "permanent, with nothing to restore them from."
+        )
+    if unknown:
+        UI.warn(
+            "  git could not be consulted for "
+            + ", ".join(unknown)
+            + " — treat those as unrecoverable."
+        )
+    if not unbacked and not unknown and detail:
+        UI.muted("  All of them are committed to git HEAD and restorable from it.")
+
+
 def _examined_remainder(report: dict) -> int:
     """Messages that were read and simply did not qualify — young, or already archived.
 
@@ -103,7 +135,7 @@ def cmd_cleanup(args: list[str]) -> int:
     months = report.get("deleted_months", [])
     n_msgs = report.get("deleted_message_count", 0)
     if months:
-        where = ", ".join(months)
+        where = ", ".join(report.get("deleted", [])) or ", ".join(months)
         if report.get("purge_withheld"):
             UI.warn(
                 f"WITHHELD: {n_msgs} message(s) in {len(months)} month(s) are past "
@@ -113,7 +145,7 @@ def cmd_cleanup(args: list[str]) -> int:
         else:
             destroyed = "Would DELETE PERMANENTLY" if dry_run else "DELETED PERMANENTLY"
             UI.error(f"{destroyed}: {n_msgs} message(s) in {len(months)} month(s): {where}")
-            UI.muted("  Unrecoverable unless this directory is version-controlled.")
+        _render_backup_stake(report)
 
     # identity-divergence 1.4 — name every reaped phantom; a status file with no
     # agents.yaml entry must never vanish silently any more than it should persist.
