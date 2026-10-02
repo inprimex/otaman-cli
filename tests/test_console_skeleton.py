@@ -288,7 +288,7 @@ def test_picker_mounts_and_lists_programs(ws):
 def test_selecting_program_shows_pending_list(ws):
     prog_root = _make_program(ws / "p", "p")
     _stage_proposal(prog_root, "20260101T000000-a-to-human-spec-change-request", subject="widget")
-    from otaman_cli.console.app import InboxScreen, OtamanConsole, _ProposalItem
+    from otaman_cli.console.app import InboxScreen, OtamanConsole
 
     progs = bus.discover_programs(ws)
 
@@ -301,9 +301,7 @@ def test_selecting_program_shows_pending_list(ws):
             assert isinstance(app.screen, InboxScreen)
             await app.workers.wait_for_complete()  # paint-then-fill async load
             await pilot.pause()
-            lv = app.screen.query_one("#inbox-list")
-            items = [c for c in lv.children if isinstance(c, _ProposalItem)]
-            assert len(items) == 1
+            assert len(app.screen.visible_rows()) == 1
             await app.action_quit()
 
     asyncio.run(go())
@@ -312,7 +310,7 @@ def test_selecting_program_shows_pending_list(ws):
 @pytestmark_textual
 def test_empty_program_shows_no_pending(ws):
     _make_program(ws / "p", "p")
-    from otaman_cli.console.app import InboxScreen, OtamanConsole, _ProposalItem
+    from otaman_cli.console.app import InboxScreen, OtamanConsole
 
     progs = bus.discover_programs(ws)
 
@@ -324,8 +322,7 @@ def test_empty_program_shows_no_pending(ws):
             await pilot.pause()
             await app.workers.wait_for_complete()
             await pilot.pause()
-            lv = app.screen.query_one("#inbox-list")
-            assert not [c for c in lv.children if isinstance(c, _ProposalItem)]
+            assert not app.screen.visible_rows()
             await app.action_quit()
 
     asyncio.run(go())

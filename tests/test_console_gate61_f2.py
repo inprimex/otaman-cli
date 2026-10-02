@@ -94,7 +94,6 @@ def _events(app) -> list[dict]:
 
 async def _open_messages(app, pilot, program):
     """Push the merged Messages list and highlight its first row."""
-    from textual.widgets import ListView
 
     from otaman_cli.console.app import InboxScreen
 
@@ -103,7 +102,7 @@ async def _open_messages(app, pilot, program):
     await pilot.pause()
     await app.workers.wait_for_complete()
     await pilot.pause()
-    screen.query_one("#inbox-list", ListView).index = 0
+    screen.focus_row(0)
     await pilot.pause()
     return screen
 
@@ -155,7 +154,6 @@ def test_the_decision_survives_the_list_reloading_under_the_modal(program, log_d
     """The exact mechanism: dismissing the modal fires on_screen_resume ->
     _load(), which rebuilds the list and clears the highlight BEFORE the
     callback runs. The captured target must carry the decision through."""
-    from textual.widgets import ListView
 
     from otaman_cli.console.app import OtamanConsole
 
@@ -167,7 +165,7 @@ def test_the_decision_survives_the_list_reloading_under_the_modal(program, log_d
             await pilot.press("a")
             await pilot.pause()
             # simulate the reload race deterministically: the highlight is gone
-            screen.query_one("#inbox-list", ListView).index = None
+            screen.query_one("#inbox-tree").cursor_line = -1
             assert screen._decision_target() is None  # re-deriving would fail
             await pilot.press("enter")
             await pilot.pause()

@@ -86,7 +86,7 @@ def test_header_has_no_stray_glyph():
 @_textual
 def test_async_load_shows_loading_then_fills(tmp_path, monkeypatch):
     program = _program(tmp_path, monkeypatch)
-    from otaman_cli.console.app import InboxScreen, OtamanConsole, _ProposalItem
+    from otaman_cli.console.app import InboxScreen, OtamanConsole
 
     async def go():
         app = OtamanConsole([program], search_root=program.root)
@@ -101,8 +101,9 @@ def test_async_load_shows_loading_then_fills(tmp_path, monkeypatch):
             # paint; waiting for the worker then shows the proposal.
             await app.workers.wait_for_complete()
             await pilot.pause()
-            lv = app.screen.query_one("#inbox-list")
-            assert len([c for c in lv.children if isinstance(c, _ProposalItem)]) == 1
+            # cmt 1.2 — the Messages list is a grouped tree; `visible_rows` is the
+            # same question ("what is on screen") the ProposalItem count asked.
+            assert len(app.screen.visible_rows()) == 1
             await app.action_quit()
 
     asyncio.run(go())
@@ -116,7 +117,7 @@ def test_back_navigation_renders_from_cache_instantly(tmp_path, monkeypatch):
     # after on_screen_resume() (with no await in between), it came from the
     # cache, not a rescan.
     program = _program(tmp_path, monkeypatch)
-    from otaman_cli.console.app import InboxScreen, OtamanConsole, _ProposalItem
+    from otaman_cli.console.app import InboxScreen, OtamanConsole
 
     async def go():
         app = OtamanConsole([program], search_root=program.root)
@@ -127,8 +128,7 @@ def test_back_navigation_renders_from_cache_instantly(tmp_path, monkeypatch):
             await pilot.pause()
             await app.workers.wait_for_complete()  # first load fills the cache
             await pilot.pause()
-            lv = screen.query_one("#inbox-list")
-            assert len([c for c in lv.children if isinstance(c, _ProposalItem)]) == 1
+            assert len(screen.visible_rows()) == 1
             assert screen._cache is not None and len(screen._cache) == 1  # cache filled
 
             # Spy the paint: on_screen_resume must paint from the cache

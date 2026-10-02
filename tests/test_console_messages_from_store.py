@@ -90,8 +90,6 @@ def test_the_canonical_row_object_survives_the_store(program):
 
 @_textual
 def test_messages_renders_what_the_store_holds(program):
-    from textual.widgets import ListView
-
     from otaman_cli.console.app import InboxScreen, OtamanConsole
 
     store, loader = _wired(program, [Row("m1"), Row("m2"), Row("m3")])
@@ -105,7 +103,10 @@ def test_messages_renders_what_the_store_holds(program):
             await pilot.pause()
             await app.workers.wait_for_complete()
             await pilot.pause()
-            assert len(screen.query_one("#inbox-list", ListView).children) == 3
+            # `visible_rows` rather than a widget's children: cmt 1.2 made this a
+            # grouped tree, and what the human can SEE is the question either way.
+            # These rows are spec-change-requests — mandatory, so never collapsed.
+            assert len(screen.visible_rows()) == 3
             await app.action_quit()
 
     asyncio.run(go())
@@ -142,9 +143,7 @@ def test_returning_to_the_list_repaints_without_re_reading(program):
             screen.on_screen_resume()
             await pilot.pause()
             assert scans["n"] == 0, "resume triggered a rescan — the store already had it"
-            from textual.widgets import ListView
-
-            assert len(screen.query_one("#inbox-list", ListView).children) == 2
+            assert len(screen.visible_rows()) == 2
             await app.action_quit()
 
     asyncio.run(go())
@@ -152,8 +151,6 @@ def test_returning_to_the_list_repaints_without_re_reading(program):
 
 @_textual
 def test_a_store_update_repaints_with_no_keypress(program):
-    from textual.widgets import ListView
-
     from otaman_cli.console.app import InboxScreen, OtamanConsole
     from otaman_cli.console.store import Upsert
 
@@ -168,11 +165,11 @@ def test_a_store_update_repaints_with_no_keypress(program):
             await pilot.pause()
             await app.workers.wait_for_complete()
             await pilot.pause()
-            assert len(screen.query_one("#inbox-list", ListView).children) == 1
+            assert len(screen.visible_rows()) == 1
 
             store.dispatch(Upsert(KIND_MESSAGE, "m2", {"proposal": Row("m2")}))
             await pilot.pause()
-            assert len(screen.query_one("#inbox-list", ListView).children) == 2
+            assert len(screen.visible_rows()) == 2
             await app.action_quit()
 
     asyncio.run(go())
@@ -193,8 +190,6 @@ def test_the_keymap_is_unchanged():
 
 @_textual
 def test_an_empty_queue_still_says_so(program):
-    from textual.widgets import ListView
-
     from otaman_cli.console.app import InboxScreen, OtamanConsole
 
     store, loader = _wired(program, [])
@@ -208,8 +203,9 @@ def test_an_empty_queue_still_says_so(program):
             await pilot.pause()
             await app.workers.wait_for_complete()
             await pilot.pause()
-            lv = screen.query_one("#inbox-list", ListView)
-            assert len(lv.children) == 1  # the "nothing addressed to you" row
+            tree = screen.query_one("#inbox-tree")
+            assert len(tree.root.children) == 1  # the "nothing addressed to you" leaf
+            assert screen.visible_rows() == []
             await app.action_quit()
 
     asyncio.run(go())
