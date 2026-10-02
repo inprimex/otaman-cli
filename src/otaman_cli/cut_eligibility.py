@@ -181,11 +181,14 @@ def _blanket_count(
     filed") and the retraction rule cannot catch it, because a task never ticked was never
     un-ticked.
 
-    Reported to core-agent for the ruling, because the verdict is theirs. What is MINE is
-    not to hand deploy the word "eligible" with no sign that it rests on one agent's
-    blanket claim rather than on a filing per task — so this counts them and `label` says
-    so. It never changes the status: a second opinion on eligibility is not this file's
-    job, and an annotated verdict is still core's verdict.
+    Reported to core-agent for the ruling, because the verdict is theirs — and the
+    ruling came back the same day: core #109 passes `honor_all=False` for a cut, so a
+    blanket claim no longer closes another agent's task. The count stays, for two
+    reasons. The STATUS now moves on its own (such a change reads
+    `tasks-outstanding`), and the reader still needs to know WHY a change that looks
+    finished is not: three tasks filed only by somebody's `--all`. And on a bundle
+    that predates #109 the old behaviour is still live, where the annotation is the
+    only sign at all.
     """
     if completed_all not in filed:
         return 0
@@ -232,8 +235,17 @@ def verdict_for(
         # The gate arm is mine to establish — core's verdict takes it as a parameter —
         # and it uses core's own RETRACTION-AWARE predicate, so a retracted gate filing
         # does not read as a passed gate.
+        #
+        # `honor_all=False` when core offers it (core #109, from this surface's own
+        # report): a blanket `--all` filing must not pass a MANDATORY verification
+        # gate any more than it may close another agent's task. team-mode's 3.1
+        # test-tenant gate read as passed on one such filing. Probed rather than
+        # pinned, so this works either side of core's merge.
+        gate_kwargs = {}
+        if "honor_all" in inspect.signature(is_effectively_complete).parameters:
+            gate_kwargs["honor_all"] = False
         gate_passed = bool(gate) and all(
-            is_effectively_complete(tid, filed, tasks_path) for tid in gate
+            is_effectively_complete(tid, filed, tasks_path, **gate_kwargs) for tid in gate
         )
         via_all = _blanket_count(filed, [*implementation, *gate], COMPLETED_ALL)
     except Exception as exc:  # noqa: BLE001 - unreadable filings → not-checked

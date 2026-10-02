@@ -106,6 +106,28 @@ def test_split_distinguishes_unauthored_from_unreadable(root):
 # --- the three verdicts, and the fourth that is mine ------------------------------
 
 
+def test_a_blanket_filing_cannot_pass_a_mandatory_gate_where_core_allows_the_ask(root):
+    """team-mode's MANDATORY 3.1 test-tenant gate read as PASSED on one `--all`.
+
+    The gate arm is this surface's to establish, so it asks core's predicate to ignore
+    the sentinel when core offers that (`honor_all`, core #109). On a bundle without
+    the kwarg the old behaviour stands — which is why this asserts the two admissible
+    outcomes rather than one, and why the annotation (asserted above) matters there.
+    """
+    import inspect
+
+    from otaman_core.task_complete import is_effectively_complete
+
+    _change(root, "c", impl=["1.1"], gate=["2.1"])
+    _filing(root, "c", "tasks 1.1")
+    _filing(root, "c", "all tasks", ts="20260102T120000", frm="plugin-agent")
+    verdict = ce.verdict_for(root, "c", _changes_dir(root), {})
+    honors = "honor_all" in inspect.signature(is_effectively_complete).parameters
+    assert verdict.gate_passed is not honors, (
+        "with the kwarg the blanket filing must NOT pass the gate; without it, it does"
+    )
+
+
 def test_eligible_when_every_task_and_the_gate_are_filed(root):
     _change(root, "c", impl=["1.1", "1.2"], gate=["2.1"])
     _filing(root, "c", "tasks 1.1, 1.2, 2.1")
@@ -160,12 +182,21 @@ def test_core_without_release_gate_is_not_checked_never_eligible(root, monkeypat
 
 
 def test_a_verdict_resting_on_an_all_filing_says_so(root):
-    """Found live: one `--all` filing made a change with an unticked task cut-eligible."""
+    """Found live: one `--all` filing made a change with an unticked task cut-eligible.
+
+    The STATUS is deliberately not asserted. It was core's ruling to make and the
+    ruling landed (#109: `honor_all=False` for a cut), so the same fixture reads
+    `eligible` on a bundle that predates it and `tasks-outstanding` on one that
+    carries it. What this surface owns either way is the COUNT — a reader has to be
+    able to see that three tasks are filed only by somebody's blanket claim, whichever
+    status that produces. Pinning the status here would have broken cli main on the
+    day the defect this test reported was fixed.
+    """
     _change(root, "c", impl=["1.1", "1.2"], gate=["2.1"])
     _filing(root, "c", "tasks 1.1")
     _filing(root, "c", "all tasks", ts="20260102T120000", frm="plugin-agent")
     verdict = ce.verdict_for(root, "c", _changes_dir(root), {})
-    assert verdict.status == "eligible"  # core's verdict, unchanged
+    assert verdict.checked is True
     assert verdict.via_all == 2  # 1.2 and the gate task 2.1
     assert "2 via --all" in verdict.label
 
@@ -313,7 +344,11 @@ def test_status_computes_without_the_flag_once_core_takes_pre_read_filings(
     assert "cut: gate-unpassed (1/1 filed)" in out
 
 
-def test_status_json_states_whether_the_cut_view_ran(root, capsys):
+def test_status_json_states_whether_the_cut_view_ran(root, capsys, monkeypatch):
+    # The seam decides whether the DEFAULT path computes, so it is forced here rather
+    # than left to whichever core is installed — core #109 adds the kwarg the probe
+    # looks for, which flips this test's premise without touching its subject.
+    monkeypatch.setattr(ce, "batch_seam_present", lambda: False)
     _change(root, "c", impl=["1.1"], gate=["2.1"], stage="spec-approved")
     _filing(root, "c", "tasks 1.1, 2.1")
 
@@ -337,11 +372,12 @@ def test_status_json_states_whether_the_cut_view_ran(root, capsys):
 
 
 def test_status_json_carries_the_blanket_filing_count(root, capsys):
+    """The count travels to deploy whatever core's ruling says the status is."""
     _change(root, "c", impl=["1.1", "1.2"], gate=["2.1"], stage="spec-approved")
     _filing(root, "c", "all tasks", frm="plugin-agent")
     spec_cmd.cmd_spec(["status", "--cut-eligibility", "--json"])
     payload = json.loads(capsys.readouterr().out)
     row = next(c for c in payload["changes"] if c["change"] == "c")
-    assert row["cut_status"] == "eligible"
+    assert row["cut_status"] in ("eligible", "tasks-outstanding")
     assert row["cut_via_all"] == 3
     assert "resting on an --all filing" in payload["cut_eligibility"]["summary"]
