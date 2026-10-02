@@ -1303,6 +1303,53 @@ def _print_enforcement_map_report(result: dict) -> None:
         print("  values must be one of block | warn | self-waive.")
 
 
+#: The keys a producer may use for an issue's text. `issue` is the original contract;
+#: `message` is what nineteen newer sites in `doctor.py` write (critic_policy, llm
+#: routing, security gates, knowledge health, human roster, branch policy). Both are
+#: accepted here and normalised in `doctor.run_doctor`, because a health surface that
+#: dies on its own finding is worse than one that reports it awkwardly.
+ISSUE_TEXT_KEYS: tuple[str, ...] = ("issue", "message", "detail", "text")
+
+
+def issue_text(issue: object) -> str:
+    """The human-readable text of *issue*, or a LOUD marker naming the defect.
+
+    `otaman doctor` crashed with `KeyError: 'issue'` on a `branch_policy` finding that
+    carried `message` instead (2026-10-02, measured on the live program: 1 malformed
+    of 31). The crash landed inside the Issues loop, which suppressed everything after
+    it — the pm-sync section, ~20 further checks, the summary line AND the exit code.
+    One finding with the wrong key turned the fleet's health surface into a traceback.
+
+    So: never raise. An unrenderable finding renders as a marker that names the check
+    and the keys it did carry — visible enough to fix, which is the opposite of the
+    silent truncation it replaces.
+    """
+    if not isinstance(issue, dict):
+        return f"[malformed finding: {type(issue).__name__} {str(issue)[:80]!r}]"
+    for key in ISSUE_TEXT_KEYS:
+        value = issue.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    check = issue.get("check", "?")
+    keys = ", ".join(sorted(str(k) for k in issue)) or "none"
+    return f"[malformed finding from check {check!r}: no text key (has: {keys})]"
+
+
+def render_issue(issue: object) -> None:
+    """Print one issue at its severity, plus its fix when it has one."""
+    severity = issue.get("severity", "medium") if isinstance(issue, dict) else "medium"
+    text = issue_text(issue)
+    if severity == "critical":
+        UI.blocked(text)
+    elif severity == "high":
+        UI.error(text)
+    else:
+        UI.warn(text)
+    fix = issue.get("fix") if isinstance(issue, dict) else None
+    if isinstance(fix, str) and fix.strip():
+        UI.muted(f"Fix: {fix}")
+
+
 def cmd_doctor(args: list[str]) -> int:
     """Check environment readiness — git, runtimes, CLI tools, MCP.
 
@@ -1445,14 +1492,7 @@ def cmd_doctor(args: list[str]) -> int:
     if issues:
         UI.subheader(f"Issues ({len(issues)}):")
         for issue in issues:
-            severity = issue.get("severity", "medium")
-            if severity == "critical":
-                UI.blocked(issue["issue"])
-            elif severity == "high":
-                UI.error(issue["issue"])
-            else:
-                UI.warn(issue["issue"])
-            UI.muted(f"Fix: {issue['fix']}")
+            render_issue(issue)
 
     # pm-sync health check
     print()

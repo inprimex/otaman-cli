@@ -2221,6 +2221,34 @@ def check_branch_policy(config: dict[str, Any], project_root: Path) -> dict[str,
     return {"check": "branch_policy", "status": status, "details": details, "issues": issues}
 
 
+def normalise_issues(checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Every check's issues, stamped with their check and carrying BOTH text keys.
+
+    Nineteen producer sites in this module write `message` while the renderer and the
+    original contract read `issue`. The mismatch crashed `otaman doctor` outright
+    (`KeyError: 'issue'`, 2026-10-02) and took the summary line, the exit code and
+    ~20 later checks with it — one finding with the wrong key turned the fleet's
+    health surface into a traceback.
+
+    So normalisation happens HERE rather than only in the renderer: this list is also
+    the `--json` contract that plugin and web read, and a consumer reading either key
+    should get the text. A non-dict entry becomes one instead of crashing the stamp.
+    """
+    out: list[dict[str, Any]] = []
+    for c in checks:
+        for raw in c.get("issues", []):
+            issue = (
+                dict(raw) if isinstance(raw, dict) else {"issue": str(raw), "severity": "medium"}
+            )
+            text = issue.get("issue") or issue.get("message")
+            if text:
+                issue.setdefault("issue", text)
+                issue.setdefault("message", text)
+            issue["check"] = c.get("check", "?")
+            out.append(issue)
+    return out
+
+
 def run_doctor(project_root: Path) -> dict[str, Any]:
     """Run all doctor checks and return comprehensive report."""
     config_path = project_root / "platform.yaml"
@@ -2268,11 +2296,7 @@ def run_doctor(project_root: Path) -> dict[str, Any]:
     warned = sum(1 for c in checks if c["status"] == "warn")
     failed = sum(1 for c in checks if c["status"] == "fail")
 
-    all_issues = []
-    for c in checks:
-        for issue in c.get("issues", []):
-            issue["check"] = c["check"]
-            all_issues.append(issue)
+    all_issues = normalise_issues(checks)
 
     # Sort by severity
     severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
