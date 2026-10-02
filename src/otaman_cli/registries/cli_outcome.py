@@ -21,12 +21,8 @@ from typing import Any
 
 from otaman_cli.bus_paths import _resolve_bus_paths
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.registries import bus_messages
-from otaman_cli.registries.loader import (
-    resolve_registry_path,
-    yaml_dump,
-    yaml_load,
-)
+from otaman_cli.registries import access, bus_messages
+from otaman_cli.registries.loader import resolve_registry_path
 from otaman_cli.registries.outcomes import (
     OutcomeRegistry,
     OutcomeStatus,
@@ -40,8 +36,22 @@ from otaman_cli.registries.roles import (
     resolve_operating_actor,
     resolve_roles,
 )
-from otaman_cli.registries.transitions import append_transition, make_transition
+from otaman_cli.registries.transitions import make_transition
 from otaman_cli.ui import UI
+
+#: What `approval.spec` names: the capability whose clauses grant the authority this
+#: record attests to. Core requires a non-empty string and does not interpret it; naming
+#: the SPEC rather than the change keeps the record meaningful after the change archives.
+APPROVAL_SPEC = "outcome-registry"
+
+#: The hat each authority action is granted by (team-mode "roles are hats"). Recorded in
+#: the transition note, because core's approval shape carries `via: hat` but not WHICH —
+#: and the delta's founder-mode scenario requires the log to show both hats.
+ACTION_HATS: dict[str, tuple[str, ...]] = {
+    "choose": ("cto",),
+    "accept-cost": ("cofounder", "funder"),
+    "reject-cost": ("cofounder", "funder"),
+}
 
 
 def _bail(msg: str, code: int = 1) -> int:
@@ -49,38 +59,141 @@ def _bail(msg: str, code: int = 1) -> int:
     return code
 
 
-def _load(root: Path) -> tuple[Path, Any] | None:
+def _contract():
+    """core's registry access contract, through this CLI's single door (`access`).
+
+    REQUIRED rather than probed-with-fallback. This module is the write path the change
+    exists to funnel: keeping the old direct `yaml_dump` alive beside the contract would
+    leave exactly the second home the delta calls a conformance defect ("a direct
+    registry-file access outside it is a conformance defect"). So an old bundle refuses
+    with a remedy instead of writing around the chokepoint — the `blocked_gate` shape,
+    for the same reason.
+    """
+    return access.contract()
+
+
+def _no_contract() -> int:
+    return _bail(access.NO_CONTRACT, code=2)
+
+
+def _approval(root: Path, action: str) -> tuple[dict[str, Any] | None, str]:
+    """``(approval record, refusal)`` for an authority action.
+
+    core enforces the approval's PRESENCE and SHAPE inside the write path
+    (`APPROVAL_REQUIRED_ACTIONS`); obtaining it is this surface's job, because deciding
+    needs the human roster and — for a HITL action — a human. So this resolves the
+    acting roster human and attests how the authority was held.
+
+    A missing human is a REFUSAL, not a warning. That is a behaviour change from Mode
+    1's advisory checks, and it is not mine to soften: core raises on a missing or
+    malformed approval for these three actions, so the only choice this surface has is
+    between a clean refusal with a remedy and an exception. An agent with no human
+    behind it files an outcome-proposal instead.
+    """
+    import os as _os
+
+    try:
+        from otaman_core.human_roster import load_human_roster, resolve_roster_human
+    except Exception:  # noqa: BLE001 - no roster reader → cannot attest anything
+        return None, "this otaman-core does not carry the human roster reader"
+    who = _os.environ.get("OTAMAN_HUMAN")
+    try:
+        entry = resolve_roster_human(load_human_roster(root / "platform.yaml"), who)
+    except Exception as exc:  # noqa: BLE001 - an unreadable roster cannot authorize
+        return None, f"the human roster could not be read ({type(exc).__name__})"
+    if entry is None:
+        named = f" (OTAMAN_HUMAN={who!r})" if who else " (OTAMAN_HUMAN is unset)"
+        return None, (
+            f"`otaman outcome {action}` records an approval, and no acting human "
+            f"resolves from this program's human-roster{named}.\n"
+            "  Run it from the human console, or set OTAMAN_HUMAN to a roster name.\n"
+            "  An agent with no human behind it files an outcome-proposal instead."
+        )
+    hats = ACTION_HATS.get(action, ())
+    held = {str(r) for r in (getattr(entry, "roles", None) or [])}
+    via = "hat" if (hats and held & set(hats)) else "roster-role"
+    return {
+        "by": entry.name,
+        "at": bus_messages.utc_now_iso(),
+        "via": via,
+        "spec": APPROVAL_SPEC,
+    }, ""
+
+
+def _solution(root: Path, solution_id: str) -> dict | None:
+    """The solution record, read THROUGH the contract (the cross-register invariant).
+
+    `accept-cost` and `choose` refuse a solution that belongs to another outcome or is
+    Discarded. The contract takes one register at a time, so this invariant stays in the
+    surface — core flagged that to spec-agent for the delta — but the READ is the
+    contract's, so no verb opens a register file itself any more.
+    """
+    core = _contract()
+    if core is None:
+        return None
+    path = resolve_registry_path(root, "solutions")
+    if path is None or not path.is_file():
+        return None
+    register = core.load_register(path, records_key="solutions")
+    return core.get(register, solution_id)
+
+
+def _hat_note(action: str, approval: dict[str, Any]) -> str:
+    """`hat: cto` for the transition note — which hat, not merely that one was used."""
+    hats = ACTION_HATS.get(action, ())
+    if approval.get("via") == "hat" and hats:
+        return f"hat: {hats[0]}"
+    return f"authority: {approval.get('via', 'unknown')}"
+
+
+def _load(root: Path) -> tuple[Path, Any] | int:
+    """``(path, Register)`` — the register as CORE loads it (rac 1.2).
+
+    `load_register` is the contract's read: a ruamel round-trip, so the human's comments
+    and key order survive the write that follows. Returns the `Register` rather than the
+    raw dict, because every mutation below now goes through `apply_transition` /
+    `create_record` and those take the register.
+    """
+    core = _contract()
+    if core is None:
+        # The exit CODE, not None: a contract-less bundle is a refusal (2), and the
+        # read path must not report it as the generic error (1) the unresolvable
+        # registry home below is.
+        return _no_contract()
     path = resolve_registry_path(root, "outcomes")
     if path is None:
-        _bail(
+        return _bail(
             "Cannot locate outcomes.yaml — no business repo found.\n"
             "  Set program.registries.strategy_repo in platform.yaml (or OTAMAN_STRATEGY_DIR)."
         )
-        return None
-    raw = yaml_load(path)
-    if not isinstance(raw, dict):
-        raw = {}
-    if "outcomes" not in raw or raw["outcomes"] is None:
-        raw["outcomes"] = []
-    return path, raw
+    return path, access.open_register(core, path, records_key="outcomes")
 
 
-def _save(path: Path, raw: dict, *, validate: bool = True) -> int:
-    """Save with re-validation. Returns 0 on success, 2 on validation error."""
+def _save(path: Path, register: Any, *, validate: bool = True) -> int:
+    """Write through the contract, after the same pydantic gate as before.
+
+    The validation stays on this side deliberately: `save_register` is the serializer,
+    and losing the Appendix-A check at the one place that touches every write would make
+    the chokepoint the place that stopped checking. (rac 1.3 moves schema validation into
+    the contract; until then this is the gate.)
+    """
+    core = _contract()
+    if core is None:
+        return _no_contract()
     if validate:
         try:
-            OutcomeRegistry.model_validate(raw)
+            OutcomeRegistry.model_validate(register.data)
         except Exception as exc:
             return _bail(f"Validation failed; refusing to write outcomes.yaml:\n{exc}", code=2)
-    yaml_dump(raw, path)
+    core.save_register(register, path)
     return 0
 
 
-def _find_outcome(raw: dict, outcome_id: str) -> dict | None:
-    for o in raw.get("outcomes", []):
-        if o.get("id") == outcome_id:
-            return o
-    return None
+def _find_outcome(register: Any, outcome_id: str) -> dict | None:
+    core = _contract()
+    if core is None:
+        return None
+    return core.get(register, outcome_id)
 
 
 def _ctx(root: Path):
@@ -117,11 +230,12 @@ def cmd_add(args: dict[str, Any]) -> int:
         )
 
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    path, raw = loaded
+    if isinstance(loaded, int):
+        return loaded
+    path, register = loaded
+    core = _contract()
 
-    if _find_outcome(raw, args["id"]):
+    if _find_outcome(register, args["id"]):
         return _bail(f"Outcome already exists: {args['id']}", code=1)
 
     today = bus_messages.utc_now_iso()[:10]  # YYYY-MM-DD
@@ -152,8 +266,10 @@ def cmd_add(args: dict[str, Any]) -> int:
     if args.get("ultimate_outcome"):
         new_entry["statement"]["ultimate-outcome"] = args["ultimate_outcome"]
 
-    raw["outcomes"].append(new_entry)
-    rc = _save(path, raw)
+    # The one path that invents a record — core refuses a blank or duplicate id, which
+    # is what makes `add` a contract method rather than a transition.
+    core.create_record(register, new_entry)
+    rc = _save(path, register)
     if rc != 0:
         return rc
 
@@ -171,11 +287,11 @@ def cmd_list(args: dict[str, Any]) -> int:
     if not root:
         return _bail(not_in_project_message())
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    _, raw = loaded
+    if isinstance(loaded, int):
+        return loaded
+    _, register = loaded
 
-    outcomes = raw.get("outcomes", [])
+    outcomes = register.records()
     status_filter = args.get("status")
     priority_filter = args.get("priority")
     category_filter = args.get("category")
@@ -219,11 +335,11 @@ def cmd_show(args: dict[str, Any]) -> int:
     if not root:
         return _bail(not_in_project_message())
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    _, raw = loaded
+    if isinstance(loaded, int):
+        return loaded
+    _, register = loaded
 
-    outcome = _find_outcome(raw, args["id"])
+    outcome = _find_outcome(register, args["id"])
     if not outcome:
         return _bail(f"Outcome not found: {args['id']}")
 
@@ -261,10 +377,10 @@ def cmd_history(args: dict[str, Any]) -> int:
     if not root:
         return _bail(not_in_project_message())
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    _, raw = loaded
-    outcome = _find_outcome(raw, args["id"])
+    if isinstance(loaded, int):
+        return loaded
+    _, register = loaded
+    outcome = _find_outcome(register, args["id"])
     if not outcome:
         return _bail(f"Outcome not found: {args['id']}")
 
@@ -304,10 +420,11 @@ def _mutate_status(args: dict[str, Any], op: str, action: str, target: str | Non
     authz_advisory(op, actor, roles)
 
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    path, raw = loaded
-    outcome = _find_outcome(raw, args["id"])
+    if isinstance(loaded, int):
+        return loaded
+    path, register = loaded
+    core = _contract()
+    outcome = _find_outcome(register, args["id"])
     if not outcome:
         return _bail(f"Outcome not found: {args['id']}")
 
@@ -330,19 +447,17 @@ def _mutate_status(args: dict[str, Any], op: str, action: str, target: str | Non
 
     from_value = current.value
     to_value = new_status.value
-    outcome["status"] = to_value
-    outcome["updated"] = bus_messages.utc_now_iso()[:10]
-    append_transition(
-        outcome,
-        make_transition(
-            actor=actor,
-            action=action,
-            from_=from_value,
-            to=to_value,
-            note=args.get("reason"),
-        ),
+    core.apply_transition(
+        register,
+        outcome["id"],
+        action=action,
+        by=actor,
+        at=bus_messages.utc_now_iso(),
+        to_status=to_value,
+        fields={"updated": bus_messages.utc_now_iso()[:10]},
+        note=args.get("reason"),
     )
-    rc = _save(path, raw)
+    rc = _save(path, register)
     if rc != 0:
         return rc
 
@@ -373,23 +488,32 @@ def cmd_request_estimate(args: dict[str, Any]) -> int:
     authz_advisory("outcome.request-estimate", actor, roles)
 
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    path, raw = loaded
-    outcome = _find_outcome(raw, args["id"])
+    if isinstance(loaded, int):
+        return loaded
+    path, register = loaded
+    core = _contract()
+    outcome = _find_outcome(register, args["id"])
     if not outcome:
         return _bail(f"Outcome not found: {args['id']}")
     if outcome.get("estimate-requested"):
         UI.muted(f"Already marked estimate-requested: {outcome['id']}")
         return 0
 
-    outcome["estimate-requested"] = True
-    outcome["updated"] = bus_messages.utc_now_iso()[:10]
-    append_transition(
-        outcome,
-        make_transition(actor=actor, action="request-estimate", note=args.get("reason")),
+    # No status change: `to_status=None` is the contract's way of saying so, which is
+    # why core takes it as a separate parameter from `fields`.
+    core.apply_transition(
+        register,
+        outcome["id"],
+        action="request-estimate",
+        by=actor,
+        at=bus_messages.utc_now_iso(),
+        fields={
+            "estimate-requested": True,
+            "updated": bus_messages.utc_now_iso()[:10],
+        },
+        note=args.get("reason"),
     )
-    rc = _save(path, raw)
+    rc = _save(path, register)
     if rc != 0:
         return rc
 
@@ -409,22 +533,16 @@ def cmd_accept_cost(args: dict[str, Any]) -> int:
     authz_advisory("outcome.accept-cost", actor, roles)
 
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    path, raw = loaded
-    outcome = _find_outcome(raw, args["id"])
+    if isinstance(loaded, int):
+        return loaded
+    path, register = loaded
+    core = _contract()
+    outcome = _find_outcome(register, args["id"])
     if not outcome:
         return _bail(f"Outcome not found: {args['id']}")
 
-    # Locate the solution in solutions.yaml for the payload data
-    sol_path = resolve_registry_path(root, "solutions")
-    solution = None
-    if sol_path and sol_path.is_file():
-        sol_raw = yaml_load(sol_path) or {}
-        for s in sol_raw.get("solutions", []):
-            if s.get("id") == args["solution"]:
-                solution = s
-                break
+    # Locate the solution for the payload data — through the contract (rac 1.2).
+    solution = _solution(root, args["solution"])
     if solution is None:
         return _bail(f"Solution not found in solutions.yaml: {args['solution']}")
     if solution.get("outcome-id") != outcome["id"]:
@@ -452,22 +570,26 @@ def cmd_accept_cost(args: dict[str, Any]) -> int:
     if not verdict.allowed:
         return _bail(verdict.reason)
 
-    outcome["cost-accepted"] = True
-    outcome["chosen-solution"] = args["solution"]
-    if from_status == "Backlog":
-        outcome["status"] = "Approved"
-    outcome["updated"] = bus_messages.utc_now_iso()[:10]
-    append_transition(
-        outcome,
-        make_transition(
-            actor=actor,
-            action="accept-cost",
-            from_=from_status if outcome["status"] != from_status else None,
-            to=outcome["status"] if outcome["status"] != from_status else None,
-            note=args.get("reason"),
-        ),
+    approval, refusal = _approval(root, "accept-cost")
+    if approval is None:
+        return _bail(refusal, code=2)
+    note = args.get("reason") or _hat_note("accept-cost", approval)
+    core.apply_transition(
+        register,
+        outcome["id"],
+        action="accept-cost",
+        by=actor,
+        at=bus_messages.utc_now_iso(),
+        to_status="Approved" if from_status == "Backlog" else None,
+        fields={
+            "cost-accepted": True,
+            "chosen-solution": args["solution"],
+            "updated": bus_messages.utc_now_iso()[:10],
+        },
+        approval=approval,
+        note=note,
     )
-    rc = _save(path, raw)
+    rc = _save(path, register)
     if rc != 0:
         return rc
 
@@ -491,20 +613,15 @@ def cmd_choose(args: dict[str, Any]) -> int:
     hat_advisory("outcome.choose", ("cto",), root)
 
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    path, raw = loaded
-    outcome = _find_outcome(raw, args["id"])
+    if isinstance(loaded, int):
+        return loaded
+    path, register = loaded
+    core = _contract()
+    outcome = _find_outcome(register, args["id"])
     if not outcome:
         return _bail(f"Outcome not found: {args['id']}")
 
-    sol_path = resolve_registry_path(root, "solutions")
-    solution = None
-    if sol_path and sol_path.is_file():
-        for s in (yaml_load(sol_path) or {}).get("solutions", []):
-            if s.get("id") == args["solution"]:
-                solution = s
-                break
+    solution = _solution(root, args["solution"])
     if solution is None:
         return _bail(f"Solution not found in solutions.yaml: {args['solution']}")
     if solution.get("outcome-id") != outcome["id"]:
@@ -522,21 +639,37 @@ def cmd_choose(args: dict[str, Any]) -> int:
     # could not tell what the previous choice was except by inferring from
     # order. The action stays `choose`, which is what makes the decision
     # queryable; the old/new pair is what makes it auditable. Both, not either.
-    previous = outcome.get("chosen-solution")
-    outcome["chosen-solution"] = args["solution"]
-    outcome["updated"] = bus_messages.utc_now_iso()[:10]
-    append_transition(
-        outcome,
-        make_transition(
-            actor=actor,
-            action="choose",
-            field="chosen-solution",
-            old=previous,
-            new=args["solution"],
-            note=f"chose {args['solution']}",
-        ),
+    approval, refusal = _approval(root, "choose")
+    if approval is None:
+        return _bail(refusal, code=2)
+    # `chosen-solution` is the ONLY field in this transition, and deliberately so: core
+    # records the field/old/new triple only for a single-field transition, and that triple
+    # is what keeps the previous choice auditable (cofounder-agent 20260919T232356).
+    #
+    # `updated` therefore gets its own `update-field` entry below. The alternative —
+    # putting it in this transition — collapses the triple, and dropping it is not
+    # available either: the schema REQUIRES `updated` on an outcome. One bookkeeping row
+    # in the log is the cheapest of the three. Asked core to record a triple per changed
+    # field, which collapses the two back into one.
+    core.apply_transition(
+        register,
+        outcome["id"],
+        action="choose",
+        by=actor,
+        at=bus_messages.utc_now_iso(),
+        fields={"chosen-solution": args["solution"]},
+        approval=approval,
+        note=f"chose {args['solution']} ({_hat_note('choose', approval)})",
     )
-    rc = _save(path, raw)
+    core.apply_transition(
+        register,
+        outcome["id"],
+        action="update-field",
+        by=actor,
+        at=bus_messages.utc_now_iso(),
+        fields={"updated": bus_messages.utc_now_iso()[:10]},
+    )
+    rc = _save(path, register)
     if rc != 0:
         return rc
 
@@ -556,23 +689,34 @@ def cmd_reject_cost(args: dict[str, Any]) -> int:
     authz_advisory("outcome.reject-cost", actor, roles)
 
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    path, raw = loaded
-    outcome = _find_outcome(raw, args["id"])
+    if isinstance(loaded, int):
+        return loaded
+    path, register = loaded
+    core = _contract()
+    outcome = _find_outcome(register, args["id"])
     if not outcome:
         return _bail(f"Outcome not found: {args['id']}")
 
-    outcome["cost-accepted"] = False
     # If a previous accept-cost set chosen-solution, clear it on rejection
     rejected_solution = outcome.get("chosen-solution")
-    outcome["chosen-solution"] = None
-    outcome["updated"] = bus_messages.utc_now_iso()[:10]
-    append_transition(
-        outcome,
-        make_transition(actor=actor, action="reject-cost", note=args.get("reason")),
+    approval, refusal = _approval(root, "reject-cost")
+    if approval is None:
+        return _bail(refusal, code=2)
+    core.apply_transition(
+        register,
+        outcome["id"],
+        action="reject-cost",
+        by=actor,
+        at=bus_messages.utc_now_iso(),
+        fields={
+            "cost-accepted": False,
+            "chosen-solution": None,
+            "updated": bus_messages.utc_now_iso()[:10],
+        },
+        approval=approval,
+        note=args.get("reason") or _hat_note("reject-cost", approval),
     )
-    rc = _save(path, raw)
+    rc = _save(path, register)
     if rc != 0:
         return rc
 

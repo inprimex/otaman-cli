@@ -170,6 +170,25 @@ class Statement(BaseModel):
         return v
 
 
+class Approval(BaseModel):
+    """The authority a transition attests to (registry-access-contract 1.1/1.2).
+
+    Written by `otaman_core.registry_access.apply_transition` for the three authority
+    actions, whose approval core enforces the presence and shape of. Modelled here
+    because this validator runs on the contract's OUTPUT: without it, every
+    accept-cost / choose / reject-cost fails the gate immediately after the contract
+    wrote a correct record. Appendix A.5 needs the same field — reported to spec-agent
+    and core for rac 1.3, which is where the one schema lands.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    by: str
+    at: datetime
+    via: Literal["hitl", "roster-role", "hat"]
+    spec: str
+
+
 class Transition(BaseModel):
     """Audit-trail entry (Appendix A.5)."""
 
@@ -184,6 +203,7 @@ class Transition(BaseModel):
     old: Any | None = None
     new: Any | None = None
     note: str | None = None
+    approval: Approval | None = None
 
 
 class Outcome(BaseModel):

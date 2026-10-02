@@ -24,7 +24,14 @@ def program(tmp_path, monkeypatch):
     strat = tmp_path / "strategy"
     root.mkdir()
     strat.mkdir()
-    (root / "platform.yaml").write_text("project: d\nversion: '1.0'\nrepos: []\n", encoding="utf-8")
+    # A human-roster entry + OTAMAN_HUMAN: `choose` is an APPROVAL_REQUIRED_ACTION as of
+    # rac 1.2, so the write carries an approval naming a resolved roster human and core
+    # refuses without one. The fixture supplies the authority the verb now attests to.
+    (root / "platform.yaml").write_text(
+        "project: d\nversion: '1.0'\nrepos: []\n"
+        "human-roster:\n  - name: roman\n    roles: [cto, cofounder, approver]\n",
+        encoding="utf-8",
+    )
     # Schema-valid: the writer VALIDATES before saving, so a minimal stub is
     # refused (id pattern, statement, created are all required).
     (strat / "outcomes.yaml").write_text(
@@ -59,6 +66,7 @@ def program(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setenv("OTAMAN_STRATEGY_DIR", str(strat))
+    monkeypatch.setenv("OTAMAN_HUMAN", "roman")
     monkeypatch.setattr(CO, "find_project_root", lambda: root)
     monkeypatch.setattr(CO, "_ctx", lambda r: ("roman", ["cto"], None))
     monkeypatch.setattr(CO, "hat_advisory", lambda *a, **k: None)
@@ -81,15 +89,26 @@ def test_a_first_choose_records_the_field_and_new_value(program):
     assert entry["action"] == "choose"  # stays queryable by action
     assert entry["field"] == "chosen-solution"
     assert entry["new"] == "SOL-A"
-    assert entry["note"] == "chose SOL-A"
+    # The hat rides the note as of rac 1.2: core's approval carries `via: hat` but not
+    # WHICH hat, and the delta's founder-mode scenario requires the log to show it.
+    assert "chose SOL-A" in entry["note"]
+    assert "hat: cto" in entry["note"]
 
 
-def test_a_first_choose_emits_no_empty_old(program):
-    """`make_transition` omits None, so nothing replaced means no `old:` noise —
-    the reporter was explicit that first-time choose stays unaffected."""
+def test_a_first_choose_records_no_MISLEADING_old(program):
+    """Nothing was replaced, so nothing may claim to have been.
+
+    The reporter's ask was that a first-time choose stays unaffected, and cli's
+    `make_transition` delivered it by omitting a None `old`. The contract's
+    `apply_transition` (rac 1.1) sets `old` unconditionally, so the key can now be
+    present with a null value. That is noise rather than a wrong claim — reported to
+    core as a nit — so this asserts what the ask was actually about: no PREVIOUS
+    solution is attributed to a first choice.
+    """
     CO.cmd_choose({"id": "JTBD-1-signin", "solution": "SOL-A"})
     (entry,) = _chooses(program)
-    assert "old" not in entry
+    assert entry.get("old") is None
+    assert entry["new"] == "SOL-A"
 
 
 def test_a_re_choose_records_what_it_replaced(program):
@@ -106,10 +125,23 @@ def test_a_re_choose_records_what_it_replaced(program):
 
 def test_the_action_is_not_downgraded_to_update_field(program):
     """Explicitly requested: keep `choose`. The named action is what makes the
-    decision queryable; old/new is what makes it auditable."""
+    decision queryable; old/new is what makes it auditable.
+
+    Asserted on the CHOOSE entries rather than on the whole list, which is what the ask
+    was about. As of rac 1.2 each choose is followed by an `update-field` row carrying
+    `updated`: the contract records the field/old/new triple only for a single-field
+    transition, the schema REQUIRES `updated`, so the date cannot ride along and cannot
+    be dropped either. The decision is still recorded as `choose`, which is the
+    invariant — and asking core for a triple per changed field removes the extra row.
+    """
     CO.cmd_choose({"id": "JTBD-1-signin", "solution": "SOL-A"})
     CO.cmd_choose({"id": "JTBD-1-signin", "solution": "SOL-B"})
-    assert [t["action"] for t in _transitions(program)] == ["choose", "choose"]
+    assert [t["action"] for t in _chooses(program)] == ["choose", "choose"]
+    assert "update-field" not in [t["action"] for t in _chooses(program)]
+    bookkeeping = [t for t in _transitions(program) if t["action"] == "update-field"]
+    assert all(t.get("field") == "updated" for t in bookkeeping), (
+        "an update-field row may only ever carry bookkeeping, never a decision"
+    )
 
 
 def test_the_chosen_solution_still_lands(program):

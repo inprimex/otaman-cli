@@ -13,11 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.registries.loader import (
-    resolve_registry_path,
-    yaml_dump,
-    yaml_load,
-)
+from otaman_cli.registries import access
+from otaman_cli.registries.loader import resolve_registry_path
 from otaman_cli.registries.personas import PersonaKind, PersonaRegistry
 from otaman_cli.registries.platform_ext import load_program_extensions
 from otaman_cli.registries.roles import (
@@ -33,37 +30,55 @@ def _bail(msg: str, code: int = 1) -> int:
     return code
 
 
-def _load(root: Path) -> tuple[Path, Any] | None:
+def _contract():
+    """core's registry access contract, or None — see `access.contract`."""
+    return access.contract()
+
+
+def _no_contract() -> int:
+    return _bail(access.NO_CONTRACT, code=2)
+
+
+def _load(root: Path) -> tuple[Path, Any] | int:
+    """``(path, Register)`` — the register as CORE loads it (rac 1.2)."""
+    core = _contract()
+    if core is None:
+        # The exit CODE, not None: a contract-less bundle is a refusal (2), and the
+        # read path must not report it as the generic error (1) the unresolvable
+        # registry home below is.
+        return _no_contract()
     path = resolve_registry_path(root, "personas")
     if path is None:
-        _bail(
+        return _bail(
             "Cannot locate personas.yaml — no business repo found.\n"
             "  Set program.registries.strategy_repo in platform.yaml (or OTAMAN_STRATEGY_DIR)."
         )
-        return None
-    raw = yaml_load(path)
-    if not isinstance(raw, dict):
-        raw = {}
-    if "personas" not in raw or raw["personas"] is None:
-        raw["personas"] = []
-    return path, raw
+    return path, access.open_register(core, path, records_key="personas")
 
 
-def _save(path: Path, raw: dict, *, validate: bool = True) -> int:
+def _save(path: Path, register: Any, *, validate: bool = True) -> int:
+    core = _contract()
+    if core is None:
+        return _no_contract()
     if validate:
         try:
-            PersonaRegistry.model_validate(raw)
+            PersonaRegistry.model_validate(register.data)
         except Exception as exc:
             return _bail(f"Validation failed; refusing to write personas.yaml:\n{exc}", code=2)
-    yaml_dump(raw, path)
+    core.save_register(register, path)
     return 0
 
 
-def _find(raw: dict, persona_id: str) -> dict | None:
-    for p in raw.get("personas", []):
-        if p.get("id") == persona_id:
-            return p
-    return None
+def _find(register: Any, persona_id: str) -> dict | None:
+    core = _contract()
+    if core is None:
+        return None
+    return core.get(register, persona_id)
+
+
+def _records(register: Any) -> list[dict]:
+    data = getattr(register, "data", register)
+    return list(data.get("personas") or [])
 
 
 def _ctx(root: Path):
@@ -95,10 +110,10 @@ def cmd_add(args: dict[str, Any]) -> int:
         return _bail(f"Invalid kind: {args['kind']!r}. Must be one of: {sorted(valid_kinds)}")
 
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    path, raw = loaded
-    if _find(raw, args["id"]):
+    if isinstance(loaded, int):
+        return loaded
+    path, register = loaded
+    if _find(register, args["id"]):
         return _bail(f"Persona already exists: {args['id']}")
 
     new_entry = {
@@ -109,8 +124,14 @@ def cmd_add(args: dict[str, Any]) -> int:
         "domain-prefill-source": args.get("domain_prefill_source"),
         "status": "active",
     }
-    raw["personas"].append(new_entry)
-    rc = _save(path, raw)
+    core = _contract()
+    if core is None:
+        return _no_contract()
+    try:
+        core.create_record(register, new_entry)
+    except Exception as exc:  # noqa: BLE001 - blank/duplicate id is the contract's refusal
+        return _bail(f"Cannot add persona {args['id']}: {exc}", code=2)
+    rc = _save(path, register)
     if rc != 0:
         return rc
 
@@ -123,10 +144,10 @@ def cmd_list(args: dict[str, Any]) -> int:
     if not root:
         return _bail(not_in_project_message())
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    _, raw = loaded
-    personas = raw.get("personas", [])
+    if isinstance(loaded, int):
+        return loaded
+    _, register = loaded
+    personas = _records(register)
     kind_filter = args.get("kind")
     status_filter = args.get("status")
 
@@ -158,10 +179,10 @@ def cmd_show(args: dict[str, Any]) -> int:
     if not root:
         return _bail(not_in_project_message())
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    _, raw = loaded
-    p = _find(raw, args["id"])
+    if isinstance(loaded, int):
+        return loaded
+    _, register = loaded
+    p = _find(register, args["id"])
     if not p:
         return _bail(f"Persona not found: {args['id']}")
 
@@ -185,18 +206,27 @@ def cmd_retire(args: dict[str, Any]) -> int:
     authz_advisory("persona.retire", actor, roles)
 
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    path, raw = loaded
-    p = _find(raw, args["id"])
+    if isinstance(loaded, int):
+        return loaded
+    path, register = loaded
+    p = _find(register, args["id"])
     if not p:
         return _bail(f"Persona not found: {args['id']}")
     if p.get("status") == "retired":
         UI.muted(f"Already retired: {args['id']}")
         return 0
 
+    # The one field write in this module that is NOT `apply_transition`: the persona
+    # schema carries no `transitions[]` (Appendix: `extra="forbid"`, id/name/description/
+    # kind/status only), and the contract's field writer always appends an audit entry —
+    # which this register cannot hold without failing its own validator. So retire sets
+    # the soft-delete marker on the record the contract handed back, and the file is
+    # still opened and written only by `load_register`/`save_register`. Reported to core
+    # and spec-agent: either personas grow an audit trail or the contract grows a
+    # transitionless field write; inventing a schema field here is not this surface's
+    # call. Tracked in docs/registry-access-debt.md.
     p["status"] = "retired"
-    rc = _save(path, raw)
+    rc = _save(path, register)
     if rc != 0:
         return rc
 

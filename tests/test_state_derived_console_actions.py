@@ -99,7 +99,12 @@ def test_the_cli_verb_refuses_before_writing_anything():
     body = source[source.index("def cmd_accept_cost") :]
     body = body[: body.index("\ndef ")]
     check_at = body.index('check_action("accept-cost"')
-    mutate_at = body.index('outcome["cost-accepted"] = True')
+    # The first mutation is `apply_transition` as of registry-access-contract 1.2 —
+    # the record is no longer assigned in this module at all (the contract is the one
+    # write path). The invariant is unchanged: nothing may be written before the state
+    # check, and `cost-accepted` is still what gets written.
+    mutate_at = body.index("core.apply_transition(")
+    assert '"cost-accepted": True' in body, "accept-cost no longer writes cost-accepted"
     assert check_at < mutate_at, "accept-cost mutates before it validates"
 
 

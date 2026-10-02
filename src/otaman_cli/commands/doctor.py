@@ -647,12 +647,14 @@ def _check_outcome_verification(root: Path) -> dict:
         return out  # the lint fires ONLY at the verified level (lower levels untaxed)
     out["applicable"] = True
     try:
-        from otaman_cli.registries.loader import resolve_registry_path, yaml_load
+        from otaman_cli.registries import access
+        from otaman_cli.registries.loader import resolve_registry_path
 
+        core = access.contract()
         path = resolve_registry_path(root, "outcomes")
-        if path is None:
+        if path is None or core is None or not path.is_file():
             return out
-        raw = yaml_load(path) or {}
+        raw = core.load_register(path, records_key="outcomes").data or {}
     except Exception:  # noqa: BLE001 - registry absent/unreadable → nothing to lint
         return out
     outcomes = raw.get("outcomes") if isinstance(raw, dict) else None
@@ -1016,16 +1018,18 @@ def _check_solution_disposition(root: Path) -> dict:
         "inline": 0,
     }
     try:
-        from otaman_cli.registries.loader import resolve_registry_path, yaml_load
+        from otaman_cli.registries import access
+        from otaman_cli.registries.loader import resolve_registry_path
         from otaman_cli.registries.platform_ext import load_program_extensions
 
         ext = load_program_extensions(root / "platform.yaml")
         if not getattr(ext.processes.outcomes, "enabled", False):
             return out
+        core = access.contract()
         op = resolve_registry_path(root, "outcomes")
-        if not (op and op.is_file()):
+        if not (op and op.is_file()) or core is None:
             return out  # absent/unresolved → the Registry Home check owns that
-        outcomes = (yaml_load(op) or {}).get("outcomes") or []
+        outcomes = (core.load_register(op, records_key="outcomes").data or {}).get("outcomes") or []
         if not isinstance(outcomes, list):
             return out
         out["applicable"] = True
@@ -1034,7 +1038,8 @@ def _check_solution_disposition(root: Path) -> dict:
         live_linked: set[str] = set()
         sp = resolve_registry_path(root, "solutions")
         if sp and sp.is_file():
-            for s in (yaml_load(sp) or {}).get("solutions") or []:
+            srecs = (core.load_register(sp, records_key="solutions").data or {}).get("solutions")
+            for s in srecs or []:
                 if not isinstance(s, dict):
                     continue
                 if str(s.get("status") or "").strip().lower() == "discarded":
