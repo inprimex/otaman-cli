@@ -83,12 +83,25 @@ def _chooses(path):
     return [t for t in _transitions(path) if t.get("action") == "choose"]
 
 
+def _change(entry, field="chosen-solution"):
+    """The field audit, whichever shape the contract wrote it in.
+
+    Shape-agnostic ON PURPOSE. core's A.5 pin replaces the flat `field`/`old`/`new`
+    trio with a `changes` list (one entry per changed field), and these tests are about
+    the DECISION RECORD, not about which of the two shapes carries it — a test that
+    pinned the shape would go red on a sibling's merge and say nothing about the
+    property the reporter asked for.
+    """
+    from otaman_cli.registries.transitions import changed_field
+
+    return changed_field(entry, field) or {}
+
+
 def test_a_first_choose_records_the_field_and_new_value(program):
     assert CO.cmd_choose({"id": "JTBD-1-signin", "solution": "SOL-A"}) == 0
     (entry,) = _chooses(program)
     assert entry["action"] == "choose"  # stays queryable by action
-    assert entry["field"] == "chosen-solution"
-    assert entry["new"] == "SOL-A"
+    assert _change(entry)["new"] == "SOL-A"
     # The hat rides the note as of rac 1.2: core's approval carries `via: hat` but not
     # WHICH hat, and the delta's founder-mode scenario requires the log to show it.
     assert "chose SOL-A" in entry["note"]
@@ -107,8 +120,9 @@ def test_a_first_choose_records_no_MISLEADING_old(program):
     """
     CO.cmd_choose({"id": "JTBD-1-signin", "solution": "SOL-A"})
     (entry,) = _chooses(program)
-    assert entry.get("old") is None
-    assert entry["new"] == "SOL-A"
+    change = _change(entry)
+    assert change.get("old") is None, "a first choice replaced nothing"
+    assert change["new"] == "SOL-A"
 
 
 def test_a_re_choose_records_what_it_replaced(program):
@@ -117,10 +131,10 @@ def test_a_re_choose_records_what_it_replaced(program):
     CO.cmd_choose({"id": "JTBD-1-signin", "solution": "SOL-A"})
     CO.cmd_choose({"id": "JTBD-1-signin", "solution": "SOL-B"})
     first, second = _chooses(program)
-    assert second["old"] == "SOL-A"
-    assert second["new"] == "SOL-B"
+    assert _change(second)["old"] == "SOL-A"
+    assert _change(second)["new"] == "SOL-B"
     # and the entry is self-contained: readable without consulting the first
-    assert first["new"] == "SOL-A"
+    assert _change(first)["new"] == "SOL-A"
 
 
 def test_the_action_is_not_downgraded_to_update_field(program):
@@ -128,20 +142,23 @@ def test_the_action_is_not_downgraded_to_update_field(program):
     decision queryable; old/new is what makes it auditable.
 
     Asserted on the CHOOSE entries rather than on the whole list, which is what the ask
-    was about. As of rac 1.2 each choose is followed by an `update-field` row carrying
-    `updated`: the contract records the field/old/new triple only for a single-field
-    transition, the schema REQUIRES `updated`, so the date cannot ride along and cannot
-    be dropped either. The decision is still recorded as `choose`, which is the
-    invariant — and asking core for a triple per changed field removes the extra row.
+    was about. A bookkeeping `update-field` row carrying `updated` MAY follow a choose
+    (it does on a core whose contract records only a single field's triple, and does
+    not on one that records a `changes` list) — either way an `update-field` row may
+    only ever carry bookkeeping, never a decision, which is what this pins.
     """
     CO.cmd_choose({"id": "JTBD-1-signin", "solution": "SOL-A"})
     CO.cmd_choose({"id": "JTBD-1-signin", "solution": "SOL-B"})
     assert [t["action"] for t in _chooses(program)] == ["choose", "choose"]
     assert "update-field" not in [t["action"] for t in _chooses(program)]
     bookkeeping = [t for t in _transitions(program) if t["action"] == "update-field"]
-    assert all(t.get("field") == "updated" for t in bookkeeping), (
-        "an update-field row may only ever carry bookkeeping, never a decision"
-    )
+    from otaman_cli.registries.transitions import changes_of
+
+    for row in bookkeeping:
+        fields = {c.get("field") for c in changes_of(row)}
+        assert fields <= {"updated"}, (
+            f"an update-field row may only ever carry bookkeeping, never a decision: {fields}"
+        )
 
 
 def test_the_chosen_solution_still_lands(program):

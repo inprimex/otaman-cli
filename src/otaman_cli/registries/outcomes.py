@@ -187,6 +187,30 @@ class Approval(BaseModel):
     at: datetime
     via: Literal["hitl", "roster-role", "hat"]
     spec: str
+    #: WHICH hat authorized, when one did (core #118 / A.5). Optional: `via` may be
+    #: `hitl` or `roster-role`, and a historical row predates the field.
+    hat: str | None = None
+
+
+class Change(BaseModel):
+    """One field's before/after inside a transition — Appendix A.5's `changes` entry.
+
+    The flat `field`/`old`/`new` trio on the transition could only carry ONE field, so
+    a multi-field write (accept-cost sets three) recorded no field audit at all. core's
+    contract now emits a `changes` LIST instead, one entry per changed field (the shape
+    this rewire measured and asked for).
+
+    `old` is ABSENT when the field had no previous value, rather than `old: None` —
+    so `"old" in entry` means "there was a previous value" instead of "the previous
+    value was null". A first-ever `choose` has no old choice; saying it was null is a
+    different claim.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    field: str
+    old: Any | None = None
+    new: Any | None = None
 
 
 class Transition(BaseModel):
@@ -199,9 +223,13 @@ class Transition(BaseModel):
     action: OutcomeTransitionAction
     from_: str | None = Field(default=None, alias="from")
     to: str | None = None
+    # BOTH shapes are accepted, deliberately. Historical rows carry the flat trio and
+    # must keep validating; new rows from the contract carry `changes`. A reader wanting
+    # the field audit should use `transitions.changes_of`, which normalises the two.
     field: str | None = None
     old: Any | None = None
     new: Any | None = None
+    changes: list[Change] | None = None
     note: str | None = None
     approval: Approval | None = None
 
@@ -352,7 +380,12 @@ class OutcomeRegistry(BaseModel):
 
 def load_outcomes(path: Path) -> OutcomeRegistry:
     """Load and validate `outcomes.yaml`."""
-    from otaman_cli.yaml_fast import load_file
+    from otaman_cli.registries import access
 
-    raw = load_file(path, {}) or {}
-    return OutcomeRegistry.model_validate(raw)
+    # The contract's fast display read (core #116), memoised by `access` — this used
+    # to open the file itself, which was this module's share of the second access home
+    # registry-access-contract 1.2 removed. `strict=True`: a present-but-unloadable
+    # register must RAISE here, because the console's loud fallback notice and
+    # doctor's unloadable-register check are both read off this call failing.
+    register = access.read_fast(path, records_key="outcomes", strict=True)
+    return OutcomeRegistry.model_validate(register.data or {})

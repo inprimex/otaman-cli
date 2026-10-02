@@ -120,13 +120,20 @@ def _approval(root: Path, action: str) -> tuple[dict[str, Any] | None, str]:
         )
     hats = ACTION_HATS.get(action, ())
     held = frozenset(str(r).lower() for r in (getattr(entry, "roles", None) or []))
-    via = "hat" if held_hat(held, hats) else "roster-role"
-    return {
+    hat = held_hat(held, hats)
+    record: dict[str, Any] = {
         "by": entry.name,
         "at": bus_messages.utc_now_iso(),
-        "via": via,
+        "via": "hat" if hat else "roster-role",
         "spec": APPROVAL_SPEC,
-    }, ""
+    }
+    if hat:
+        # `approval.hat` is the structured record of WHICH hat (core #118, A.5). The
+        # prose note stays for a human reading the log, but this is what a query reads:
+        # `via: hat` says a hat was used and not whose, and D2's founder-mode scenario
+        # is about seeing BOTH hats on a combined choose+fund.
+        record["hat"] = hat
+    return record, ""
 
 
 def _solution(root: Path, solution_id: str) -> dict | None:
@@ -739,32 +746,24 @@ def cmd_choose(args: dict[str, Any]) -> int:
     approval, refusal = _approval(root, "choose")
     if approval is None:
         return _bail(refusal, code=2)
-    # `chosen-solution` is the ONLY field in this transition, and deliberately so: core
-    # records the field/old/new triple only for a single-field transition, and that triple
-    # is what keeps the previous choice auditable (cofounder-agent 20260919T232356).
-    #
-    # `updated` therefore gets its own `update-field` entry below. The alternative —
-    # putting it in this transition — collapses the triple, and dropping it is not
-    # available either: the schema REQUIRES `updated` on an outcome. One bookkeeping row
-    # in the log is the cheapest of the three. Asked core to record a triple per changed
-    # field, which collapses the two back into one.
+    # ONE transition, both fields. core #118 pinned A.5's `changes` list — a triple per
+    # changed field — so `chosen-solution`'s old/new (what keeps the previous choice
+    # auditable, cofounder-agent 20260919T232356) survives alongside the `updated` bump
+    # the schema requires. rac 1.2 had to split those into a `choose` plus a bookkeeping
+    # `update-field` row because the contract recorded a triple only for a single-field
+    # transition; that row is gone.
     core.apply_transition(
         register,
         outcome["id"],
         action="choose",
         by=actor,
         at=bus_messages.utc_now_iso(),
-        fields={"chosen-solution": args["solution"]},
+        fields={
+            "chosen-solution": args["solution"],
+            "updated": bus_messages.utc_now_iso()[:10],
+        },
         approval=approval,
         note=f"chose {args['solution']} ({_hat_note('choose', approval, root)})",
-    )
-    core.apply_transition(
-        register,
-        outcome["id"],
-        action="update-field",
-        by=actor,
-        at=bus_messages.utc_now_iso(),
-        fields={"updated": bus_messages.utc_now_iso()[:10]},
     )
     rc = _save(path, register)
     if rc != 0:

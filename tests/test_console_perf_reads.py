@@ -26,6 +26,7 @@ import yaml
 
 from otaman_cli import yaml_fast
 from otaman_cli.console import bus_index
+from otaman_cli.registries import access
 
 
 @pytest.fixture(autouse=True)
@@ -273,40 +274,98 @@ def test_every_refresh_action_invalidates_the_caches():
 def test_invalidate_clears_both_caches(tmp_path):
     from otaman_cli.console.app import invalidate_read_caches
 
+    # Start from a known state: another test in this process may have warmed either
+    # cache, and what is under test is that refresh clears ALL of them, not the count.
+    invalidate_read_caches()
+
     f = tmp_path / "a.yaml"
     f.write_text("k: v\n", encoding="utf-8")
     yaml_fast.load_file(f)
     assert yaml_fast.cache_size() == 1
+    # the register display reads carry their own cache behind the access contract
+    reg = tmp_path / "outcomes.yaml"
+    reg.write_text("outcomes: []\n", encoding="utf-8")
+    access.read_fast(reg, records_key="outcomes")
+    assert access.cache_size() == 1
+
     invalidate_read_caches()
+
     assert yaml_fast.cache_size() == 0
     assert bus_index.cache_size() == (0, 0)
+    assert access.cache_size() == 0, (
+        "refresh cleared two caches of three — the third would serve a stale register"
+    )
 
 
 # ---------------------------------------------------------------------------
 # read-only vs round-trip
 
 
-def test_yaml_read_is_documented_as_display_only():
-    """`yaml_load` round-trips through ruamel so `yaml_dump` preserves a
-    human's comments; `yaml_read` discards them for speed. Feeding a yaml_read
-    result back to yaml_dump would silently strip those comments."""
-    from otaman_cli.registries.loader import yaml_read
+def test_the_display_read_cannot_be_written_back(tmp_path):
+    """The lossy read is read-ONLY, and core enforces it rather than a comment.
 
-    assert "DISPLAY ONLY" in (yaml_read.__doc__ or "")
-    assert "NEVER" in (yaml_read.__doc__ or "")
+    `yaml_read` (the reader this replaces) returned a plain dict whose only defence
+    was a docstring saying NEVER feed it to `yaml_dump` — and nothing stopped you.
+    The contract's fast register carries `read_only`, and `save_register` refuses it,
+    so stripping a human's comments by writing back a display read is now impossible
+    rather than merely discouraged.
+    """
+    from otaman_core import registry_access as ra
+
+    from otaman_cli.registries import access
+
+    f = tmp_path / "outcomes.yaml"
+    f.write_text("# a human's note\noutcomes:\n  - id: JTBD-1\n", encoding="utf-8")
+
+    register = access.read_fast(f, records_key="outcomes")
+
+    assert register.read_only is True
+    with pytest.raises(ra.RegistryAccessError):
+        ra.save_register(register, f)
+    assert "a human's note" in f.read_text(encoding="utf-8")
 
 
-def test_yaml_read_returns_plain_data(tmp_path):
-    from otaman_cli.registries.loader import yaml_read
+def test_the_display_read_is_memoised_and_sees_an_edit(tmp_path):
+    """0.03ms warm vs 34ms per parse on the live register — and never stale.
 
-    f = tmp_path / "r.yaml"
-    f.write_text("# a comment\noutcomes:\n  - id: JTBD-1\n", encoding="utf-8")
-    data = yaml_read(f)
-    assert data == {"outcomes": [{"id": "JTBD-1"}]}
-    assert type(data) is dict  # not a ruamel CommentedMap
+    Home reads six registers per frame; the key carries mtime and size so a human's
+    edit re-parses on the next read.
+    """
+    from otaman_cli.registries import access
+
+    f = tmp_path / "outcomes.yaml"
+    f.write_text("outcomes:\n  - id: JTBD-1\n", encoding="utf-8")
+    access.clear_fast_cache()
+
+    first = access.read_fast(f, records_key="outcomes")
+    again = access.read_fast(f, records_key="outcomes")
+    assert again is first, "a second read of an unchanged register must be the cached one"
+
+    f.write_text("outcomes:\n  - id: JTBD-1\n  - id: JTBD-2\n", encoding="utf-8")
+    after = access.read_fast(f, records_key="outcomes")
+    assert len(after.records()) == 2, "an edited register must re-parse"
 
 
-def test_yaml_read_missing_file(tmp_path):
-    from otaman_cli.registries.loader import yaml_read
+def test_a_panel_read_renders_empty_but_a_loader_read_raises(tmp_path):
+    """One reader, two contracts — and the difference is not incidental.
 
-    assert yaml_read(tmp_path / "nope.yaml") == {}
+    A panel must not take down the frame over an unparseable register; the validating
+    loaders must raise, because the console's loud fallback notice and doctor's
+    unloadable-register check are both read off that failure (the silent-approval-loss
+    class: a silently empty tree is worse than a visible error).
+    """
+    from otaman_cli.registries import access
+
+    bad = tmp_path / "outcomes.yaml"
+    bad.write_text("outcomes: [unclosed\n", encoding="utf-8")
+
+    assert access.read_fast(bad, records_key="outcomes").records() == []
+    with pytest.raises(yaml.YAMLError):
+        access.read_fast(bad, records_key="outcomes", strict=True)
+
+
+def test_a_missing_register_reads_as_empty_for_a_panel(tmp_path):
+    """A program without the register yet renders zero rows, not an error."""
+    from otaman_cli.registries import access
+
+    assert access.read_fast(tmp_path / "nope.yaml", records_key="outcomes").records() == []

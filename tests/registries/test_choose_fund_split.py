@@ -132,7 +132,11 @@ def test_founder_mode_combined_records_both_decisions(program):
         "the combined invocation must append BOTH decisions, choose first"
     )
     choose, fund = record["transitions"]
-    assert choose["field"] == "chosen-solution" and choose["new"] == "SOL-B"
+    # shape-agnostic: the field audit is a `changes` list as of core #118, the flat
+    # trio before it — the property is what was chosen, not which shape says so.
+    from otaman_cli.registries.transitions import changed_field
+
+    assert (changed_field(choose, "chosen-solution") or {}).get("new") == "SOL-B"
     assert "hat: cto" in choose["note"], f"the choose must carry the CTO hat: {choose}"
     assert "hat: ceo" in fund["note"], f"the fund must carry the CEO hat: {fund}"
     assert choose["approval"]["by"] == "roman"

@@ -19,12 +19,13 @@ def _load_raw(program: Program, kind: str) -> dict | None:
     """Raw registry dict for *kind* (``outcomes`` | ``solutions``), or None when
     the file doesn't resolve/exist."""
     try:
-        from otaman_cli.registries.loader import resolve_registry_path, yaml_read
+        from otaman_cli.registries import access
+        from otaman_cli.registries.loader import resolve_registry_path
 
         p = resolve_registry_path(program.root, kind)
         if not (p and p.is_file()):
             return None
-        return yaml_read(p) or {}
+        return access.read_fast(p, records_key=kind).data or {}
     except Exception:  # noqa: BLE001 - unreadable/unresolved registry → no detail
         return None
 
