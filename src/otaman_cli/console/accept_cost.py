@@ -13,9 +13,13 @@ import os
 
 from otaman_cli.console.bus import Program
 from otaman_cli.console.registry_detail import _find, _load_raw
+from otaman_cli.registries.roles import FUND_HATS
 
 #: The hats that own cost-acceptance (Appendix E — the CEO/founder decision).
-ACCEPT_COST_HATS = ("ceo", "founder")
+#: Re-exported from the registries layer, which is where the pair lives now that the
+#: CLI verb gates on it too (rac 2.1): two copies of a hat table is two answers to
+#: "who may fund this", and the console and the verb must give the same one.
+ACCEPT_COST_HATS = FUND_HATS
 
 
 def accept_cost_candidate(program: Program, outcome_id: str) -> tuple[str | None, str]:
@@ -110,15 +114,25 @@ def acting_hat_holds(program: Program, hats=ACCEPT_COST_HATS) -> tuple[bool, str
 
 
 def run_accept_cost(program: Program, outcome_id: str, solution_id: str, *, runner=None):
-    """Run `otaman outcome accept-cost <id> --solution <sol>` in the program root
-    (the one canon write path). Returns a VerbResult (ok/output)."""
+    """Run `otaman outcome accept-cost <id> [--solution <sol>]` in the program root
+    (the one canon write path). Returns a VerbResult (ok/output).
+
+    `--solution` is passed only when it would actually CHOOSE something: since rac 2.1
+    the flag makes this the combined choose+fund invocation, which team-mode refuses by
+    design. When the outcome has already chosen this solution there is nothing to
+    choose, so the bare verb funds the existing decision and the key works for a CEO
+    who holds no choose hat. An unchosen outcome still sends the flag — and a team-mode
+    operator gets the verb's own refusal naming the two verbs, which is the routing
+    the console should not try to paraphrase.
+    """
     from otaman_cli.console.setup import run_verb
 
-    return run_verb(
-        program,
-        ["outcome", "accept-cost", outcome_id, "--solution", solution_id],
-        runner=runner,
-    )
+    verb = ["outcome", "accept-cost", outcome_id]
+    data = _load_raw(program, "outcomes") or {}
+    outcome = _find(data.get("outcomes") or [], outcome_id) or {}
+    if outcome.get("chosen-solution") != solution_id:
+        verb += ["--solution", solution_id]
+    return run_verb(program, verb, runner=runner)
 
 
 __all__ = [

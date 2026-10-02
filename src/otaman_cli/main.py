@@ -167,7 +167,7 @@ def cmd_help() -> int:
   {C.GREEN}policy{C.RESET} <action> [...]         Policy engine: list packs / show effective policy / validate
   {C.GREEN}release{C.RESET} clear-fragments <m>   Clear changelog fragments a release cut consumed (by manifest)
   {C.GREEN}console{C.RESET} seat [--socket S]     Seat the human console on its private tmux server
-  {C.GREEN}outcome{C.RESET} <action> [...]        Program outcome registry (JTBD); actions: add, list, show, history, promote, demote, retire, request-estimate, accept-cost, reject-cost
+  {C.GREEN}outcome{C.RESET} <action> [...]        Program outcome registry (JTBD); actions: add, list, show, history, promote, demote, retire, request-estimate, choose, accept-cost, reject-cost
   {C.GREEN}solution{C.RESET} <action> [...]       Program solution registry; actions: add, list, show, history, propose, promote-to-complete, discard
   {C.GREEN}persona{C.RESET} <action> [...]        Program persona registry; actions: add, list, show, retire
   {C.GREEN}set-agent{C.RESET} <name>              DEPRECATED — see 'otaman set-agent --help' for migration

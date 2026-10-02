@@ -159,6 +159,71 @@ def hat_advisory(
     return True  # Mode 1: proceed anyway
 
 
+# ---------------------------------------------------------------------------
+# The two hats of a funding decision, and the mode that follows from them
+# (registry-access-contract D2)
+
+
+#: Who may CHOOSE a solution — technical judgment. `founder` stands in, the same
+#: way core's `resolve_spec_approver` lets the default approver stand in when no cto
+#: exists (D5/Q8); the console has used this pair since team-mode 2.4b.
+CHOOSE_HATS: tuple[str, ...] = ("cto", "founder")
+
+#: Who may FUND it — budget authority. The console's accept-cost key has used this
+#: pair since team-mode 2.4a.
+FUND_HATS: tuple[str, ...] = ("ceo", "founder")
+
+
+def acting_hats(root: Path) -> tuple[frozenset[str], str | None]:
+    """``(hats, name)`` for the human `OTAMAN_HUMAN` resolves to, lowercased.
+
+    `(frozenset(), None)` when nothing resolves — an absent or unreadable roster
+    yields no hats rather than an exception, because every caller here is either
+    advisory or refuses on its own terms.
+    """
+    try:
+        from otaman_core.human_roster import load_human_roster, resolve_roster_human
+
+        entry = resolve_roster_human(
+            load_human_roster(root / "platform.yaml"), os.environ.get("OTAMAN_HUMAN")
+        )
+    except Exception:  # noqa: BLE001 - no roster → no hats, never a crash
+        return frozenset(), None
+    if entry is None:
+        return frozenset(), None
+    roles = frozenset(str(r).lower() for r in (getattr(entry, "roles", None) or []))
+    return roles, getattr(entry, "name", None)
+
+
+def held_hat(hats: frozenset[str], required: Iterable[str]) -> str | None:
+    """The FIRST of *required* the acting human actually holds, or None.
+
+    Returns which hat, not merely whether one was held: core's approval record
+    carries `via: hat` but not WHICH, and D2 requires the log to show both hats on a
+    founder-mode choose+fund. Ordered by *required* so the specific hat wins over the
+    `founder` stand-in — a log saying `hat: cto` for someone who holds cto is more
+    useful than one saying `founder`.
+    """
+    for hat in required:
+        if hat.lower() in hats:
+            return hat
+    return None
+
+
+def operating_mode(root: Path) -> str:
+    """``"founder"`` when ONE human holds both hats, else ``"team"`` (D2).
+
+    Not a config switch, deliberately: the mode is a property of the acting human's
+    hats. One person holding both the choose and the fund hat IS founder-mode, and
+    that is precisely what makes the combined keystroke safe to offer them — there is
+    no second party whose decision it would collapse. A program whose hats are split
+    across people is team-mode for the same reason, with no setting to get wrong.
+    """
+    hats, _ = acting_hats(root)
+    both = held_hat(hats, CHOOSE_HATS) and held_hat(hats, FUND_HATS)
+    return "founder" if both else "team"
+
+
 def is_transition_only_field(field: str) -> bool:
     """Return True if *field* must be mutated via a named transition command,
     not via a generic ``update-field`` command (Appendix E.5).
@@ -174,5 +239,10 @@ __all__ = [
     "required_roles_for",
     "authz_advisory",
     "hat_advisory",
+    "CHOOSE_HATS",
+    "FUND_HATS",
+    "acting_hats",
+    "held_hat",
+    "operating_mode",
     "is_transition_only_field",
 ]

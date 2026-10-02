@@ -14,9 +14,11 @@ from __future__ import annotations
 from otaman_cli.console.accept_cost import acting_hat_holds
 from otaman_cli.console.bus import Program
 from otaman_cli.console.registry_detail import _find, _load_raw
+from otaman_cli.registries.roles import CHOOSE_HATS
 
 #: CHOOSE/DISCARD are CTO decisions; founder-mode sees every key (canon).
-DECISION_HATS = ("cto", "founder")
+#: Re-exported from the registries layer for the reason ACCEPT_COST_HATS is (rac 2.1).
+DECISION_HATS = CHOOSE_HATS
 
 
 def _solution(program: Program, solution_id: str) -> dict | None:
