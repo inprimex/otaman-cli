@@ -473,22 +473,80 @@ def _critiques_from_entries(entries) -> dict:
     return out
 
 
-def _gate_suffix_for(subject: str, critiques: dict) -> str:
-    """The row annotation for a proposal whose subject names a change.
+def _critique_for(subject: str, critiques: dict):
+    """The critique for a proposal whose subject names a change.
 
     Matched on the change name appearing in the proposal's subject — D6 forbids a
     parallel state store, so the join has to come out of the messages themselves.
     Longest name first, because `console-lens` is a substring of
     `console-lens-navigation-and-filtering` and the shorter one would otherwise win.
     """
-    if not subject or not critiques:
-        return ""
-    from otaman_cli.spec_gate_surface import Score, row_suffix
+    from otaman_cli.spec_gate_surface import Critique
 
-    for change in sorted(critiques, key=len, reverse=True):
-        if change and change in subject:
-            return row_suffix(Score(), critiques[change])
-    return ""
+    if subject and critiques:
+        for change in sorted(critiques, key=len, reverse=True):
+            if change and change in subject:
+                return critiques[change]
+    return Critique()
+
+
+#: Types whose row carries a stage-1 score. `spec-change-request` IS the proposal;
+#: `spec-approval-pending` is the triage item `otaman propose` enqueues next to it
+#: and names it, and is what the human's queue actually holds (19 of them on this
+#: bus against 0 pending SCRs) — so the score has to reach that row or the number
+#: never gets in front of the reviewer it was built for. No other type is scored:
+#: core's required fields are the SCR's seven decision-grade sections, and an
+#: outcome-proposal measured against them would score terribly for being a
+#: different document.
+_SCORED_TYPES = ("spec-change-request", "spec-approval-pending")
+
+#: The SCR stem a `spec-approval-pending` body names, in backticks.
+_SCR_REF = re.compile(r"`(?P<stem>\d{8}T\d{6}[A-Za-z0-9._-]*)`")
+
+
+def _scr_path_for(path: Path, msg_type: str) -> Path | None:
+    """The SCR file a scored row's score should be computed from, if any.
+
+    The ONE type gate, and it lives here because this is the function that opens a
+    file: every other type returns None without a read. That is the cost guard — the
+    row loop above does a BOUNDED subject read for a reason (full reads of every row
+    measured ~1.6s on this bus's 5,473 messages), and scoring needs a whole body.
+    """
+    if msg_type not in _SCORED_TYPES:
+        return None
+    if msg_type == "spec-change-request":
+        return path
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = _SCR_REF.search(text)
+    if match is None:
+        return None
+    candidate = path.parent / f"{match.group('stem')}.md"
+    return candidate if candidate.is_file() else None
+
+
+def _score_for(path: Path, msg_type: str, repos: list[str]):
+    """Stage 1's score for one row, or an empty Score (JTBD-57 1.3 / D5).
+
+    Reads a body for the two SCORED types only — 19 rows here, not 5,473; the type
+    gate is in `_scr_path_for`, next to the read it guards. Derived at INGEST so the
+    render path stays free of IO (crs D1), and it never raises: an unscoreable
+    proposal renders `not scored`, never a zero.
+    """
+    from otaman_cli.spec_gate_surface import Score
+
+    scr = _scr_path_for(path, msg_type)
+    if scr is None:
+        return Score()
+    try:
+        from otaman_cli.spec_gate_surface import score_for_scr
+
+        body = scr.read_text(encoding="utf-8")
+    except OSError as exc:
+        return Score(error=f"proposal unreadable ({type(exc).__name__})")
+    return score_for_scr(body, subject=_subject_head(scr) or "", platform_repos=repos)
 
 
 def list_human_queue(program: Program) -> list[Proposal]:
@@ -526,6 +584,12 @@ def list_human_queue(program: Program) -> list[Proposal]:
     # already-walked entry set. A second scan would be a second cost on the screen
     # Roman opens most, and the critique messages are right here.
     critiques = _critiques_from_entries(active_entries(program))
+    # Read once for the whole listing, not per row: the lint compares a proposal's
+    # affected repos against what the program declares.
+    from otaman_cli.platform_config import declared_repo_names
+    from otaman_cli.spec_gate_surface import row_suffix
+
+    repos = declared_repo_names(program.root)
 
     out: list[Proposal] = []
     for entry in active_entries(program):
@@ -577,7 +641,9 @@ def list_human_queue(program: Program) -> list[Proposal]:
                 # can mark the change that is waiting on this answer.
                 blocks=str(fm.get("blocks", "") or ""),
                 # D5 — derived HERE, at ingest, so the row renders it without IO.
-                gate_suffix=_gate_suffix_for(subject or "", critiques),
+                gate_suffix=row_suffix(
+                    _score_for(f, msg_type, repos), _critique_for(subject or "", critiques)
+                ),
             )
         )
     # Decisions first — they are the rows that need the human to act; then by

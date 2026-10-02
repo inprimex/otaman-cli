@@ -93,6 +93,46 @@ def _parse_sections(args: list[str]) -> tuple[dict[str, str], str | None, list[s
     return sections, level, rest
 
 
+def _report_stage1(root: Path, body: str, title: str) -> None:
+    """Show the proposer stage 1's score and findings, immediately (JTBD-57 1.3/D1).
+
+    1.1 promised the lint "runs synchronously at propose-time (failures returned to
+    the proposer immediately)". Core shipped the rule (#48) and then the SCR
+    extractor that makes it callable on a real proposal (#106); this is the call. It
+    prints AFTER the file is written and returns nothing, because D1 is
+    comment-never-block: a 25/100 proposal still reaches the human's queue, and the
+    person best placed to fix a thin Evidence section is the one who just wrote it,
+    while they are still here.
+
+    Never raises and never changes the exit code. A proposer whose `otaman propose`
+    failed because the OPTIONAL gate could not run would have lost the thing they
+    came to file.
+    """
+    try:
+        from otaman_cli.platform_config import declared_repo_names
+        from otaman_cli.spec_gate_surface import score_for_scr
+
+        score = score_for_scr(body, subject=title, platform_repos=declared_repo_names(root))
+    except Exception as exc:  # noqa: BLE001 - the gate is advisory; propose is not
+        UI.muted(f"  (stage-1 gate did not run: {type(exc).__name__})")
+        return
+    if not score.scored:
+        UI.muted(f"  stage-1 gate: {score.label}" + (f" — {score.error}" if score.error else ""))
+        return
+    # An ERROR finding never renders green, whatever the number: 75/100 with
+    # `unknown-repo` is a proposal routed at a repo that does not exist, and a tier
+    # label is not the whole truth about it.
+    has_error = any(level == "error" for _, level, _ in score.findings)
+    render = UI.warn if has_error or score.value < 75 else UI.ok
+    render(f"Stage-1 gate: {score.label}")
+    for code, level, message in score.findings:
+        UI.muted(f"  {level}: {message} [{code}]")
+    if score.findings:
+        UI.muted("  The gate COMMENTS — this proposal is filed either way. Edit the")
+        UI.muted("  message file to answer a finding before the human reads it.")
+    print()
+
+
 def cmd_propose(args: list[str]) -> int:
     """Create a spec-change-request on the bus for human approval."""
     if _help_requested(args):
@@ -267,6 +307,7 @@ status: pending
     UI.kv("Type", "spec-change-request (pending human approval)", C.YELLOW)
     UI.kv("Blocked", str(blocked_file.relative_to(root)), C.YELLOW)
     print()
+    _report_stage1(root, body, title)
     UI.blocked("STOP: Do NOT implement features that depend on this spec change.")
     UI.action(f"Switch to other tasks. Run {C.BOLD}otaman check{C.RESET} to poll for approval.")
     print()

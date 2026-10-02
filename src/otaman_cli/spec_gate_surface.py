@@ -55,6 +55,11 @@ NOT_CRITIQUED = "not critiqued"
 #: and "we could not score it" is not a score at all.
 NOT_SCORED = "not scored"
 
+#: Why a proposal written before the seven-section template cannot be scored. A
+#: DATING fact, not a verdict: the row stays unannotated for it (`row_suffix`), while
+#: the fuller renderings, which have room to explain, still say it.
+PREDATES_TEMPLATE = "predates the decision-grade SCR template — no sections to score"
+
 _FINDING_ITEM = re.compile(r"^\s*-\s*item:\s*(?P<item>\d+)\s*$")
 _FINDING_RESULT = re.compile(r"^\s*result:\s*(?P<result>\S+)\s*$")
 _FINDING_NOTE = re.compile(r"^\s*note:\s*(?P<note>.*)$")
@@ -112,25 +117,39 @@ class Score:
         return self.value is not None
 
     @property
+    def predates(self) -> bool:
+        """This proposal was written before the rubric existed (not a low score)."""
+        return self.error == PREDATES_TEMPLATE
+
+    @property
     def label(self) -> str:
         if not self.scored:
             return NOT_SCORED
         return f"{self.value}/100 {self.tier}"
 
 
-def score_for(proposal: dict[str, Any], *, platform_repos: list[str] | tuple[str, ...]) -> Score:
+def score_for(
+    proposal: dict[str, Any],
+    *,
+    platform_repos: list[str] | tuple[str, ...],
+    required_fields: tuple[str, ...] | None = None,
+) -> Score:
     """Stage 1's score for an already-parsed *proposal* mapping.
 
-    Delegates to core's `lint_proposal` — the single home for the rule, and this is
-    its first caller anywhere. Takes a mapping rather than a path because the console
-    derives at ingest (crs D1: the render path does no IO), and because a surface that
-    re-read the file per row would be the thing the no-render-path-IO guard forbids.
+    Delegates to core's `lint_proposal` — the single home for the rule. Takes a
+    mapping rather than a path because the console derives at ingest (crs D1: the
+    render path does no IO), and because a surface that re-read the file per row
+    would be the thing the no-render-path-IO guard forbids.
+
+    *required_fields* narrows core's default set; `score_for_scr` is where the one
+    narrowing this surface makes is decided and explained.
     """
     core = _core()
     if core is None:
         return Score(error="otaman-core does not carry the stage-1 lint (JTBD-57 1.1)")
+    extra = {} if required_fields is None else {"required_fields": required_fields}
     try:
-        result = core.lint_proposal(proposal, platform_repos=platform_repos)
+        result = core.lint_proposal(proposal, platform_repos=platform_repos, **extra)
     except Exception as exc:  # noqa: BLE001 - an unlintable proposal is not a zero
         return Score(error=f"could not lint: {type(exc).__name__}")
     findings = tuple(
@@ -138,6 +157,66 @@ def score_for(proposal: dict[str, Any], *, platform_repos: list[str] | tuple[str
         for f in getattr(result, "findings", ())
     )
     return Score(value=int(result.score), tier=str(result.tier), findings=findings)
+
+
+def score_for_scr(
+    body: str,
+    *,
+    subject: str = "",
+    platform_repos: list[str] | tuple[str, ...],
+    openspec: dict[str, Any] | None = None,
+) -> Score:
+    """Stage 1's score for a real SCR BODY, via core's own extractor (core #106).
+
+    The score arm of this surface was empty until now for a concrete reason: scoring
+    a real SCR needs a mapping from the seven decision-grade sections to lint fields,
+    and hand-rolling that in cli would have been a second extractor beside core's
+    rule. `proposal_from_scr` (spec-agent ruling A, core #106) is that single home,
+    so this is a two-call wrapper and nothing more.
+
+    **`outcome` is required only when an `.openspec.yaml` is supplied.** The outcome
+    id is assigned by spec-agent at AUTHORING; a proposer filing an SCR cannot know
+    it, and `.openspec.yaml` does not exist yet. Measured on a complete, honest SCR:
+    75/100 `strong` with the field required, 100/100 `excellent` without — a
+    permanent error finding on every proposal ever filed, for a field nobody could
+    have supplied. That is the same reasoning core applied when it dropped
+    `artifacts` from the required set ("there are no artifacts at SCR time"), applied
+    to the one field whose answer arrives one stage later.
+    """
+    core = _core()
+    if core is None:
+        return Score(error="otaman-core does not carry the stage-1 lint (JTBD-57 1.1)")
+    if not hasattr(core, "proposal_from_scr"):
+        return Score(error="otaman-core does not carry the SCR extractor (JTBD-57, core #106)")
+    try:
+        mapping = core.proposal_from_scr(body, openspec, subject=subject or None)
+    except Exception as exc:  # noqa: BLE001 - an unparseable SCR is not a zero
+        return Score(error=f"could not read the proposal: {type(exc).__name__}")
+    # The lint's check 3 scans `proposal["body"]` for pasted credentials
+    # (gitleaks-lite, 1.1's "gitleaks on body"), and core's extractor does not set
+    # `body` — so that check has been inert for every SCR it could ever have run on.
+    # Supplying the input a documented check reads is not a second rule; the scan,
+    # the patterns and the finding all stay core's. Reported to core-agent, because
+    # the extractor is the single home and every other caller has the same hole.
+    mapping.setdefault("body", body)
+    # A proposal with NOT ONE decision-grade section is not a 0 — it is a document
+    # written before the rubric existed. Measured on this bus: 19 pending approval
+    # items resolve to SCRs filed 2026-09-11, all seven sections absent because the
+    # template did not exist yet, every one scoring 0/100 `failing`. A red badge on
+    # 19 legitimate items is how a reviewer learns to ignore the number. A NEW SCR
+    # cannot reach this state — `otaman propose` refuses to file one with unfilled
+    # sections — so an empty section set dates the document rather than judging it.
+    sections = tuple(getattr(core, "SECTION_KEYS", ()) or ())
+    if sections and not any(str(mapping.get(key) or "").strip() for key in sections):
+        return Score(error=PREDATES_TEMPLATE)
+    required = None
+    if openspec is None:
+        required = tuple(
+            field_name
+            for field_name in getattr(core, "DEFAULT_REQUIRED_FIELDS", ())
+            if field_name != "outcome"
+        )
+    return score_for(mapping, platform_repos=platform_repos, required_fields=required)
 
 
 def parse_critique(body: str) -> Critique:
@@ -233,7 +312,11 @@ def row_suffix(score: Score, critique: Critique) -> str:
     parts: list[str] = []
     if score.scored:
         parts.append(f"gate {score.label}")
-    elif score.error:
+    elif score.error and not score.predates:
+        # A pre-template proposal is NOT annotated: 9 of the 19 approval items on this
+        # fleet resolve to SCRs filed before the sections existed, and `gate not
+        # scored` on each is the column of "unknown" this function exists to avoid —
+        # nobody can make a 2026-09-11 proposal decision-grade retroactively.
         parts.append(f"gate {NOT_SCORED}")
     if critique.ran:
         parts.append(f"critique {critique.verdict}")
