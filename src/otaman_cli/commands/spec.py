@@ -57,7 +57,7 @@ def resolve_action_enforcement(root: Path, action: str) -> str:
 def cmd_spec(args: list[str]) -> int:
     if not args or args[0] in ("-h", "--help"):
         UI.error("Usage: otaman spec <status|gate|approve|reconcile> [options]")
-        UI.muted("  status [--json]                       — the lifecycle surface (D3)")
+        UI.muted("  status [--json] [--cut-eligibility]   — the lifecycle surface (D3)")
         UI.muted("  gate <change> [--at dispatch|archive|merge] [--no-delta] [--json]")
         UI.muted(
             '  approve <change> [--reason "..."]     — mint spec-approved (human, approver hat)'
@@ -571,6 +571,43 @@ def _collect_ratifications(changes_dir: Path | None):
 
 _SEV_MARK = {"ok": "", "warn": "  [WARN]", "error": "  [ERROR]"}
 
+#: Printed where the pre-cut view was not computed. The flag is named in the output
+#: because "no cut-eligibility shown" must not read as "nothing blocks a cut".
+_CUT_OPT_IN = "`otaman spec status --cut-eligibility`"
+
+
+def _cut_view(root: Path, changes_dir: Path | None, rows: list, rest: list[str]):
+    """``(verdicts, skipped, note)`` — the cut-eligibility view, or why there is none.
+
+    rcg 1.3 is the pre-cut view deploy consults. It is OPT-IN while core's verdict reads
+    the bus once per change: measured on this bus, that is 377ms a change, so annotating
+    the 68 rows here costs 25.7s on a command that takes 1.87s. Computing only what a
+    2s budget reached would show verdicts for an arbitrary handful that changes between
+    runs, which is worse than saying nothing — so it says nothing, names the flag, and
+    turns itself on automatically once core accepts pre-read filings
+    (`cut_eligibility.batch_seam_present`, one bus pass for the whole fleet).
+
+    Informational only, exactly like the proposal-gate critique above (D1): no exit code
+    and no lifecycle severity moves on a cut verdict. The cut itself is deploy's gate
+    step (rcg 1.2), which asserts against core directly and fails the run.
+    """
+    from otaman_cli import cut_eligibility as ce
+
+    if changes_dir is None:
+        return {}, 0, "no specs changes directory configured"
+    if not rows:
+        return {}, 0, ""
+    if "--cut-eligibility" not in rest and not ce.batch_seam_present():
+        return (
+            {},
+            0,
+            f"not computed — {len(rows)} change(s) at one bus read each; {_CUT_OPT_IN}",
+        )
+    verdicts, skipped = ce.verdicts_for(
+        root, [r.change for r in rows], changes_dir, _sweep_config(root)
+    )
+    return verdicts, skipped, ""
+
 
 def _cmd_status(root: Path, rest: list[str]) -> int:
     from datetime import datetime, timezone
@@ -587,9 +624,12 @@ def _cmd_status(root: Path, rest: list[str]) -> int:
     ratif_count = ratifications_in_month(
         _collect_ratifications(changes_dir), year=now.year, month=now.month
     )
+    cut_verdicts, cut_skipped, cut_note = _cut_view(root, changes_dir, rows, rest)
 
     if "--json" in rest:
         import json
+
+        from otaman_cli import cut_eligibility as from_cut
 
         payload = {
             "policy": {
@@ -597,6 +637,15 @@ def _cmd_status(root: Path, rest: list[str]) -> int:
                 "enforcement": policy.enforcement,
             },
             "ratifications_this_month": ratif_count,
+            # rcg 1.3 — deploy's machine-readable pre-cut read. `computed` is explicit so
+            # an absent cut block is never mistaken for a clean one, and a change whose
+            # verdict was not computed carries cut_status `null`, not `eligible`.
+            "cut_eligibility": {
+                "computed": bool(cut_verdicts),
+                "note": cut_note,
+                "skipped": cut_skipped,
+                "summary": from_cut.summarize(cut_verdicts, cut_skipped) if cut_verdicts else "",
+            },
             "changes": [
                 {
                     "change": r.change,
@@ -607,6 +656,23 @@ def _cmd_status(root: Path, rest: list[str]) -> int:
                     "owner": r.owner,
                     "next_actor": r.next_actor,
                     "severity": r.severity,
+                    "cut_status": (
+                        cut_verdicts[r.change].status if r.change in cut_verdicts else None
+                    ),
+                    "cut_eligible": (
+                        cut_verdicts[r.change].eligible if r.change in cut_verdicts else None
+                    ),
+                    "cut_outstanding": (
+                        list(cut_verdicts[r.change].outstanding) if r.change in cut_verdicts else []
+                    ),
+                    "cut_reason": (
+                        cut_verdicts[r.change].reason if r.change in cut_verdicts else ""
+                    ),
+                    # Non-zero means the verdict rests on an `--all` filing for that many
+                    # tasks, gate tasks included — deploy sees it before it cuts.
+                    "cut_via_all": (
+                        cut_verdicts[r.change].via_all if r.change in cut_verdicts else None
+                    ),
                 }
                 for r in rows
             ],
@@ -626,6 +692,17 @@ def _cmd_status(root: Path, rest: list[str]) -> int:
         UI.kv("awaiting tick", f"NOT CHECKED — {note}")
     elif awaiting:
         UI.kv("awaiting tick", f"{awaiting}  (`otaman spec sweep`)")
+
+    # rcg 1.3 — the pre-cut view. Always one line, even when it computed nothing: the
+    # four months `otaman cleanup` spent printing "nothing to clean up" over 6,980
+    # unexamined messages is this repo's standing reason why an absent check announces
+    # itself (no-silent-success).
+    from otaman_cli import cut_eligibility as ce
+
+    if cut_note:
+        UI.kv("cut-eligibility", cut_note)
+    elif cut_verdicts:
+        UI.kv("cut-eligibility", ce.summarize(cut_verdicts, cut_skipped))
     if not rows:
         UI.muted("No changes in flight, awaiting authoring, or awaiting archive — all clear.")
         return 0
@@ -651,6 +728,9 @@ def _cmd_status(root: Path, rest: list[str]) -> int:
             where = f" by {critique.critic}" if critique.critic else ""
             UI.kv("  critique", f"{critique.verdict}{where} (pass {critique.pass_index})")
             UI.muted("  the gate comments; it does not block")
+        verdict = cut_verdicts.get(r.change)
+        if verdict is not None:
+            UI.kv("  cut", verdict.label)
     n_err = sum(1 for r in rows if r.severity == "error")
     n_warn = sum(1 for r in rows if r.severity == "warn")
     if n_err or n_warn:
