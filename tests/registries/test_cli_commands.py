@@ -844,12 +844,14 @@ def test_choose_sets_chosen_solution_without_cost(project: Path) -> None:
     assert o["chosen-solution"] == "SOL-2-a"
     assert o.get("cost-accepted") in (None, False)  # choose does NOT accept cost
     assert o["status"] == "Backlog"  # status unchanged (that's accept-cost's job)
-    # The choose entry, not the last entry: as of rac 1.2 a bookkeeping `update-field`
-    # row carrying `updated` follows it (the contract records the field/old/new triple
-    # only for a single-field transition, and the schema requires `updated`).
+    # The choose entry, not the last entry — a bookkeeping `update-field` row MAY
+    # follow it on a core whose contract records a triple for one field only. Since
+    # core #118 (`changes` list) both fields ride the one `choose`.
     chooses = [t for t in o["transitions"] if t["action"] == "choose"]
     assert len(chooses) == 1
-    assert chooses[-1]["new"] == "SOL-2-a"
+    from otaman_cli.registries.transitions import changed_field
+
+    assert (changed_field(chooses[-1], "chosen-solution") or {}).get("new") == "SOL-2-a"
 
 
 def test_choose_rejects_solution_of_another_outcome(project: Path) -> None:

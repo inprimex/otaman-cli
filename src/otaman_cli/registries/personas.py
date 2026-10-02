@@ -79,7 +79,12 @@ class PersonaRegistry(BaseModel):
 
 def load_personas(path: Path) -> PersonaRegistry:
     """Load and validate `personas.yaml`. Returns a `PersonaRegistry`."""
-    from otaman_cli.yaml_fast import load_file
+    from otaman_cli.registries import access
 
-    raw = load_file(path, {}) or {}
-    return PersonaRegistry.model_validate(raw)
+    # The contract's fast display read (core #116), memoised by `access` — this used
+    # to open the file itself, which was this module's share of the second access home
+    # registry-access-contract 1.2 removed. `strict=True`: a present-but-unloadable
+    # register must RAISE here, because the console's loud fallback notice and
+    # doctor's unloadable-register check are both read off this call failing.
+    register = access.read_fast(path, records_key="personas", strict=True)
+    return PersonaRegistry.model_validate(register.data or {})

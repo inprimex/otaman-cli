@@ -133,10 +133,16 @@ def invalidate_read_caches() -> None:
     binding-conformance test asserts that.
     """
     from otaman_cli.console.bus_index import clear_cache as clear_bus_cache
+    from otaman_cli.registries.access import clear_fast_cache as clear_register_cache
     from otaman_cli.yaml_fast import clear_cache as clear_yaml_cache
 
     clear_yaml_cache()
     clear_bus_cache()
+    # The register display reads moved behind the access contract (rac 1.2 debt
+    # paydown), and they carry their own cache with the same key. A refresh that
+    # cleared two of the three caches would serve a stale register from the third —
+    # the exact lie this function exists to prevent.
+    clear_register_cache()
 
 
 class ProgramPickerScreen(Screen):

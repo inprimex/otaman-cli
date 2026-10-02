@@ -190,12 +190,13 @@ def _registry_queue_counts(program) -> tuple[int, int, int]:
     than an error, and a zero row simply does not render.
     """
     try:
-        from otaman_cli.registries.loader import resolve_registry_path, yaml_read
+        from otaman_cli.registries import access
+        from otaman_cli.registries.loader import resolve_registry_path
 
         op = resolve_registry_path(program.root, "outcomes")
         sp = resolve_registry_path(program.root, "solutions")
-        outcomes = (yaml_read(op) or {}).get("outcomes") or [] if op and op.is_file() else []
-        solutions = (yaml_read(sp) or {}).get("solutions") or [] if sp and sp.is_file() else []
+        outcomes = access.read_fast(op, records_key="outcomes").records() if op else []
+        solutions = access.read_fast(sp, records_key="solutions").records() if sp else []
     except Exception:  # noqa: BLE001 - registries absent/broken → nothing queued
         return 0, 0, 0
 

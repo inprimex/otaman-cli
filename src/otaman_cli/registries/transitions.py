@@ -64,3 +64,35 @@ __all__ = [
     "make_transition",
     "append_transition",
 ]
+
+
+def changes_of(entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """The field audit of *entry*, in one shape, whichever shape it was written in.
+
+    Two shapes exist on purpose (Appendix A.5): historical rows carry the flat
+    `field`/`old`/`new` trio, which could only describe ONE field; rows from core's
+    access contract carry a `changes` list with an entry per changed field. Readers
+    should ask here rather than branch, so a transition written before the pin and one
+    written after answer the same question the same way.
+
+    `old` is omitted — not None — when the field had no previous value, in both shapes.
+    """
+    raw = entry.get("changes")
+    if isinstance(raw, list):
+        return [dict(c) for c in raw if isinstance(c, dict)]
+    if entry.get("field") is None:
+        return []
+    one: dict[str, Any] = {"field": entry["field"]}
+    if "old" in entry and entry["old"] is not None:
+        one["old"] = entry["old"]
+    if "new" in entry:
+        one["new"] = entry["new"]
+    return [one]
+
+
+def changed_field(entry: dict[str, Any], field: str) -> dict[str, Any] | None:
+    """The change entry for *field* in *entry*, or None if that field did not change."""
+    for change in changes_of(entry):
+        if change.get("field") == field:
+            return change
+    return None

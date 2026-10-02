@@ -68,6 +68,27 @@ class Dependency(BaseModel):
         return self
 
 
+class Change(BaseModel):
+    """One field's before/after inside a transition — Appendix A.5's `changes` entry.
+
+    The flat `field`/`old`/`new` trio on the transition could only carry ONE field, so
+    a multi-field write (accept-cost sets three) recorded no field audit at all. core's
+    contract now emits a `changes` LIST instead, one entry per changed field (the shape
+    this rewire measured and asked for).
+
+    `old` is ABSENT when the field had no previous value, rather than `old: None` —
+    so `"old" in entry` means "there was a previous value" instead of "the previous
+    value was null". A first-ever `choose` has no old choice; saying it was null is a
+    different claim.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    field: str
+    old: Any | None = None
+    new: Any | None = None
+
+
 class SolutionTransition(BaseModel):
     """Audit-trail entry. Same shape as outcome transition (Appendix A.5)."""
 
@@ -78,9 +99,11 @@ class SolutionTransition(BaseModel):
     action: SolutionTransitionAction
     from_: str | None = Field(default=None, alias="from")
     to: str | None = None
+    # Both shapes, for the reason `outcomes.Transition` carries both.
     field: str | None = None
     old: Any | None = None
     new: Any | None = None
+    changes: list[Change] | None = None
     note: str | None = None
 
 
@@ -182,7 +205,12 @@ class SolutionRegistry(BaseModel):
 
 def load_solutions(path: Path) -> SolutionRegistry:
     """Load and validate `solutions.yaml`."""
-    from otaman_cli.yaml_fast import load_file
+    from otaman_cli.registries import access
 
-    raw = load_file(path, {}) or {}
-    return SolutionRegistry.model_validate(raw)
+    # The contract's fast display read (core #116), memoised by `access` — this used
+    # to open the file itself, which was this module's share of the second access home
+    # registry-access-contract 1.2 removed. `strict=True`: a present-but-unloadable
+    # register must RAISE here, because the console's loud fallback notice and
+    # doctor's unloadable-register check are both read off this call failing.
+    register = access.read_fast(path, records_key="solutions", strict=True)
+    return SolutionRegistry.model_validate(register.data or {})
