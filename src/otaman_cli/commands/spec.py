@@ -625,6 +625,9 @@ def _cmd_status(root: Path, rest: list[str]) -> int:
         _collect_ratifications(changes_dir), year=now.year, month=now.month
     )
     cut_verdicts, cut_skipped, cut_note = _cut_view(root, changes_dir, rows, rest)
+    # JTBD-57 1.3 — stage 1's score per change, before the --json branch so a
+    # scripted reader gets the same number a human sees.
+    scores = _scores_by_change(root, active_bus, [r.change for r in rows], changes_dir)
 
     if "--json" in rest:
         import json
@@ -673,6 +676,10 @@ def _cmd_status(root: Path, rest: list[str]) -> int:
                     "cut_via_all": (
                         cut_verdicts[r.change].via_all if r.change in cut_verdicts else None
                     ),
+                    # JTBD-57 1.3 / D5 — stage 1's number, for a reviewer triaging
+                    # by it. `null` where no SCR for this change is on the bus.
+                    "gate_score": (scores[r.change].value if r.change in scores else None),
+                    "gate_tier": (scores[r.change].tier if r.change in scores else ""),
                 }
                 for r in rows
             ],
@@ -713,7 +720,13 @@ def _cmd_status(root: Path, rest: list[str]) -> int:
     # rather than per row: the critique messages live on the bus and one scan beats
     # N. D1 means this is information only — nothing below branches on a score, and
     # the exit code is unchanged by any verdict.
+    # Stage 1's score (above) and stage 2's verdict are both information (D1):
+    # nothing below branches on either, and the exit code is unchanged by them.
     critiques = _critiques_by_change(active_bus)
+    #: Set once a row showed a gate number or verdict, so the comment-not-block line
+    #: is a FOOTER rather than a refrain under every scored row (it printed seven
+    #: times on this fleet before it was moved).
+    gate_shown = False
 
     for r in rows:
         stage = f"stage={r.stage} " if r.stage else ""
@@ -724,13 +737,21 @@ def _cmd_status(root: Path, rest: list[str]) -> int:
         UI.kv("  state", f"{stage}{r.state} ({r.age} in state)")
         UI.kv("  next", r.next_actor)
         critique = critiques.get(r.change)
+        score = scores.get(r.change)
+        if score is not None and score.scored:
+            UI.kv("  gate", score.label)
+            for code, level, message in score.findings:
+                UI.muted(f"    {level}: {message} [{code}]")
         if critique is not None and critique.ran:
             where = f" by {critique.critic}" if critique.critic else ""
             UI.kv("  critique", f"{critique.verdict}{where} (pass {critique.pass_index})")
-            UI.muted("  the gate comments; it does not block")
+        if (score is not None and score.scored) or (critique is not None and critique.ran):
+            gate_shown = True
         verdict = cut_verdicts.get(r.change)
         if verdict is not None:
             UI.kv("  cut", verdict.label)
+    if gate_shown:
+        UI.muted("the gate comments; it does not block — approval stays with the human")
     n_err = sum(1 for r in rows if r.severity == "error")
     n_warn = sum(1 for r in rows if r.severity == "warn")
     if n_err or n_warn:
@@ -778,6 +799,80 @@ def _critiques_by_change(active_bus) -> dict:
         existing = out.get(change)
         if existing is None or parsed.pass_index >= existing.pass_index:
             out[change] = parsed
+    return out
+
+
+def _outcome_id_first(openspec: dict) -> dict:
+    """The change marker with `outcome` set to the OUTCOME ID, not the statement.
+
+    Measured across this corpus (71 changes): 25 `.openspec.yaml` files carry
+    `outcome-id`, always an id (`JTBD-118-interactive-spec-editing`), and NOT ONE
+    carries an id in `outcome` — that key holds the outcome STATEMENT, prose, in all
+    31 cases where it is set. core's extractor reads `outcome`, so every authored
+    change scores a `malformed-outcome` warn for prose that was never meant to be an
+    id, while the real id sits one key away unread.
+
+    Which key of its own config means "the outcome id" is the caller's question to
+    answer, so this answers it here and leaves core's extractor alone (reported to
+    core-agent, since every other caller reads the same markers).
+    """
+    data = dict(openspec or {})
+    outcome_id = str(data.get("outcome-id") or "").strip()
+    if outcome_id:
+        data["outcome"] = outcome_id
+    return data
+
+
+def _scores_by_change(root: Path, active_bus, changes: list[str], changes_dir) -> dict:
+    """`{change: Score}` — stage 1's score for each change that has an SCR on the bus.
+
+    The join is the one the delta already accepts as fuzzy: an SCR's subject carries
+    the change name. Longest name first, because `console-lens` is a substring of
+    `console-lens-navigation-and-filtering`.
+
+    Bounded by the SCRs on the bus (19 here), not by changes (71): the files are
+    globbed by name, read once, and scored once. The change's `.openspec.yaml` is
+    passed when it exists, which is what makes `outcome` a REQUIRED field for an
+    authored change and not for a proposal that has not reached authoring — see
+    `score_for_scr`.
+    """
+    from otaman_cli.platform_config import declared_repo_names
+    from otaman_cli.spec_gate_surface import score_for_scr
+
+    out: dict = {}
+    if active_bus is None or not changes:
+        return out
+    repos = declared_repo_names(root)
+    ordered = sorted(changes, key=len, reverse=True)
+    try:
+        candidates = sorted(active_bus.glob("*spec-change-request*.md"))
+    except OSError:
+        return out
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        subject = ""
+        for line in text.splitlines():
+            if line.startswith("## Subject:"):
+                subject = line.split(":", 1)[1].strip()
+                break
+        if not subject:
+            continue
+        for change in ordered:
+            if change and change in subject and change not in out:
+                openspec = None
+                if changes_dir is not None:
+                    marker = changes_dir / change / ".openspec.yaml"
+                    if marker.is_file():
+                        from otaman_core.spec_lifecycle import read_openspec
+
+                        openspec = _outcome_id_first(read_openspec(marker))
+                out[change] = score_for_scr(
+                    text, subject=subject, platform_repos=repos, openspec=openspec
+                )
+                break
     return out
 
 

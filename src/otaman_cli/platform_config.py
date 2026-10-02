@@ -31,6 +31,41 @@ def _read_platform_specs_path(root: Path) -> str:
         return ""
 
 
+def declared_repo_names(root: Path) -> list[str]:
+    """The repo NAMES platform.yaml declares, in declaration order.
+
+    What core's stage-1 lint compares a proposal's `affected_repos` against (JTBD-57
+    1.1): a proposal routed at a repo the program does not declare is an error
+    finding. Names, not paths — `_declared_repo_dirs` in the console answers a
+    different question (which directories belong to this program) off the same list.
+
+    Returns `[]` on an unreadable or repo-less platform.yaml, which the lint treats
+    as "declares nothing" — so every named repo would be flagged. The callers pass
+    the result straight through; a program with no `repos:` block has no repo
+    vocabulary to check against, and saying so loudly in a score is better than
+    silently accepting any name.
+    """
+    try:
+        import yaml as _yaml
+
+        config_path = root / "platform.yaml"
+        if not config_path.is_file():
+            return []
+        with open(config_path, encoding="utf-8") as f:
+            config = _yaml.safe_load(f) or {}
+    except Exception:  # noqa: BLE001 - unreadable config → no declared vocabulary
+        return []
+    names: list[str] = []
+    for repo in (config.get("repos") if isinstance(config, dict) else None) or []:
+        if isinstance(repo, dict):
+            name = str(repo.get("name") or "").strip()
+        else:
+            name = str(repo or "").strip()
+        if name:
+            names.append(name)
+    return names
+
+
 def _normalize_ce_platform_yaml_for_validation(config_path: Path) -> tuple[Path, list[str]]:
     """ce-org-agent-bootstrap task 4.1 — normalize CE-shaped platform.yaml in-memory.
 
