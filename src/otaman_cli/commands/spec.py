@@ -802,27 +802,6 @@ def _critiques_by_change(active_bus) -> dict:
     return out
 
 
-def _outcome_id_first(openspec: dict) -> dict:
-    """The change marker with `outcome` set to the OUTCOME ID, not the statement.
-
-    Measured across this corpus (71 changes): 25 `.openspec.yaml` files carry
-    `outcome-id`, always an id (`JTBD-118-interactive-spec-editing`), and NOT ONE
-    carries an id in `outcome` — that key holds the outcome STATEMENT, prose, in all
-    31 cases where it is set. core's extractor reads `outcome`, so every authored
-    change scores a `malformed-outcome` warn for prose that was never meant to be an
-    id, while the real id sits one key away unread.
-
-    Which key of its own config means "the outcome id" is the caller's question to
-    answer, so this answers it here and leaves core's extractor alone (reported to
-    core-agent, since every other caller reads the same markers).
-    """
-    data = dict(openspec or {})
-    outcome_id = str(data.get("outcome-id") or "").strip()
-    if outcome_id:
-        data["outcome"] = outcome_id
-    return data
-
-
 def _scores_by_change(root: Path, active_bus, changes: list[str], changes_dir) -> dict:
     """`{change: Score}` — stage 1's score for each change that has an SCR on the bus.
 
@@ -868,7 +847,11 @@ def _scores_by_change(root: Path, active_bus, changes: list[str], changes_dir) -
                     if marker.is_file():
                         from otaman_core.spec_lifecycle import read_openspec
 
-                        openspec = _outcome_id_first(read_openspec(marker))
+                        # Handed over as written: core's extractor reads `outcome-id`
+                        # before the prose `outcome` as of core #110, so the caller-side
+                        # normalization that briefly lived here would now be a second
+                        # home for the same key choice.
+                        openspec = read_openspec(marker)
                 out[change] = score_for_scr(
                     text, subject=subject, platform_repos=repos, openspec=openspec
                 )
