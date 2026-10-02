@@ -110,6 +110,47 @@ def ack_is_terminal(acks_dir: Path, msg_id: str, agent: str) -> bool:
     return any(word in state for word in TERMINAL_ACK_STATES)
 
 
+def head_tracked_names(directory: Path) -> set[str] | None:
+    """Filenames in *directory* that git HEAD carries, or None when git cannot say.
+
+    HEAD, not the index: what makes a deleted file recoverable is a commit. The bus
+    of the program that lost messages had not been committed in six weeks, so a purge
+    there was permanent in a way the operator had no way to see — the warning said
+    "unrecoverable unless this directory is version-controlled" and left them to
+    guess which it was.
+
+    None (not an empty set) when the directory is outside a repo, git is absent, or
+    the call fails: the caller must render that as unrecoverable, because "I could not
+    check" and "there is no backup" have the same consequence and the opposite
+    consequence from "all committed".
+    """
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(directory), "ls-tree", "--name-only", "HEAD", "--", "."],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return {line.strip() for line in out.stdout.splitlines() if line.strip()}
+
+
+def unbacked_count(month_dir: Path) -> int | None:
+    """How many `*.md` files in *month_dir* git HEAD does NOT carry (None = unknown)."""
+    if not month_dir.is_dir():
+        return None
+    tracked = head_tracked_names(month_dir)
+    if tracked is None:
+        return None
+    return sum(1 for f in month_dir.glob("*.md") if f.name not in tracked)
+
+
 def is_fully_acked(msg_path: Path, acks_dir: Path, agents: list[str], fm: dict[str, Any]) -> bool:
     """Whether every recipient has reached a TERMINAL ack state for this message."""
     to = fm.get("to", "")
@@ -243,8 +284,21 @@ def cleanup(
         #                           requires an explicit opt-in.
         #   purge_skipped_fresh   — months THIS run archived into, which it refuses to
         #                           purge in the same invocation.
+        #   deleted_unbacked      — of those messages, how many git HEAD does NOT
+        #                           carry, i.e. how many exist NOWHERE ELSE. The line
+        #                           this replaces said "unrecoverable unless this
+        #                           directory is version-controlled" — a condition the
+        #                           operator cannot evaluate and the run can. On the
+        #                           tenant that lost 591 messages the condition was
+        #                           FALSE and nothing said so (deploy/plugin/cli
+        #                           forensics 2026-10-02: 2,627 of 5,317 active
+        #                           messages untracked, and the archive 0% tracked).
+        #                           None means git could not answer; that reads as
+        #                           unrecoverable, never as safe.
         "deleted_months": [],
         "deleted_message_count": 0,
+        "deleted_unbacked": 0,
+        "deleted_detail": [],
         "purge_withheld": False,
         "purge_skipped_fresh": [],
     }
@@ -379,9 +433,22 @@ def cleanup(
             report["purge_skipped_fresh"].append(f"{month_name} ({count} messages)")
             continue
 
+        # The stake, measured before anything is removed — and in a dry run too, so
+        # the preview describes the same operation the real run would perform.
+        unbacked = unbacked_count(month_subdir)
         report["deleted_months"].append(month_name)
         report["deleted_message_count"] += count
-        report["deleted"].append(f"{month_name} ({count} messages)")
+        if unbacked is None:
+            stake = "git could not be consulted — treat as unrecoverable"
+        elif unbacked == 0:
+            stake = "all committed to git"
+        else:
+            stake = f"{unbacked} with NO git backup"
+            report["deleted_unbacked"] += unbacked
+        report["deleted_detail"].append(
+            {"month": month_name, "messages": count, "unbacked": unbacked}
+        )
+        report["deleted"].append(f"{month_name} ({count} messages, {stake})")
 
         if not purge:
             # (b) — identified, not performed. The caller is told, and nothing is lost.

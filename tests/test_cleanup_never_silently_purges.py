@@ -241,15 +241,49 @@ def test_the_dry_run_counts_messages_not_directories(tmp_path, monkeypatch, caps
 
 
 def test_the_dry_run_says_permanently_and_unrecoverable(tmp_path, monkeypatch, capsys):
+    """ "Permanently", plus the recoverability of what is being destroyed.
+
+    The second half used to read "Unrecoverable unless this directory is
+    version-controlled" — true, and a condition the operator could not evaluate while
+    the run could. It is now MEASURED per month (cli: purge-names-the-unrecoverable),
+    so this asserts the measured sentence for each of the three states instead of one
+    conditional. A report with no `deleted_detail` is the pre-measurement shape, which
+    must still warn rather than fall silent.
+    """
     report = {
         **_BASE,
         "deleted_months": ["2026-05"],
         "deleted_message_count": 212,
+        "deleted_unbacked": 212,
+        "deleted_detail": [{"month": "2026-05", "messages": 212, "unbacked": 212}],
     }
     out = _render(tmp_path, monkeypatch, capsys, report, ["--dry-run", "--purge"])
 
     assert "Would DELETE PERMANENTLY" in out
-    assert "Unrecoverable unless" in out
+    assert "212 of those message(s) are NOT in git HEAD" in out
+    assert "nothing to restore them from" in out
+
+    unknown = {
+        **_BASE,
+        "deleted_months": ["2026-05"],
+        "deleted_message_count": 212,
+        "deleted_unbacked": 0,
+        "deleted_detail": [{"month": "2026-05", "messages": 212, "unbacked": None}],
+    }
+    out = _render(tmp_path, monkeypatch, capsys, unknown, ["--dry-run", "--purge"])
+    assert "Would DELETE PERMANENTLY" in out
+    assert "unrecoverable" in out, "an unmeasurable month must still warn"
+
+    backed = {
+        **_BASE,
+        "deleted_months": ["2026-05"],
+        "deleted_message_count": 212,
+        "deleted_unbacked": 0,
+        "deleted_detail": [{"month": "2026-05", "messages": 212, "unbacked": 0}],
+    }
+    out = _render(tmp_path, monkeypatch, capsys, backed, ["--dry-run", "--purge"])
+    assert "Would DELETE PERMANENTLY" in out, "committed does not mean harmless"
+    assert "restorable" in out
 
 
 def test_archival_is_labelled_recoverable(tmp_path, monkeypatch, capsys):
