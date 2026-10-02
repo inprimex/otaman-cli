@@ -264,3 +264,90 @@ def test_the_launch_path_prints_the_warning(tmp_path, monkeypatch, capsys):
     assert rc == 0
     assert "warning:" in out
     assert str(org / "platform.yaml") in out
+
+
+# ---------------------------------------------------------------------------
+# program-crud-and-context-resolution 1.2 — the canonical arm consumes CORE.
+
+
+def test_the_canonical_arm_follows_cores_enumeration(riseapps_shape, monkeypatch):
+    """Make core enumerate something the directory walk would not, and require the
+    picker to follow it.
+
+    Asserting the five programs alone could not tell core's answer from the local
+    walk's — both find them. The only way to see which one answered is to make them
+    disagree, which is the guard core asked for on the resolver and the same shape as
+    `test_the_org_slug_for_a_program_path_comes_from_core`.
+    """
+    import otaman_core.program_context as core
+
+    base, org = riseapps_shape
+    only = org / "programs" / "prog3"
+    monkeypatch.setattr(
+        core,
+        "enumerate_programs",
+        lambda root: [core.Program(name="prog3", org="riseapps", path=only)],
+    )
+    names = {p.name for p in bus.discover_programs(base)}
+    assert "prog3" in names
+    for dropped in ("prog0", "prog1", "prog2", "prog4"):
+        assert dropped not in names, "the canonical arm must take core's list, not its own walk"
+
+
+def test_the_console_gate_still_runs_on_what_core_returns(riseapps_shape, monkeypatch):
+    """Both gates apply. Core's predicate rejects debris under `programs/`; if a core
+    without it hands one up, the console's own full-shape/bus gate still drops it."""
+    import otaman_core.program_context as core
+
+    base, org = riseapps_shape
+    debris = org / "programs" / "debris"
+    debris.mkdir(parents=True)
+    (debris / "LICENSE").write_text("x\n", encoding="utf-8")
+    monkeypatch.setattr(
+        core,
+        "enumerate_programs",
+        lambda root: [
+            core.Program(name="debris", org="riseapps", path=debris),
+            core.Program(name="prog0", org="riseapps", path=org / "programs" / "prog0"),
+        ],
+    )
+    names = {p.name for p in bus.discover_programs(base)}
+    assert "prog0" in names
+    assert "debris" not in names
+
+
+def test_an_old_bundle_without_the_resolver_still_lists_programs(riseapps_shape, monkeypatch):
+    """5.1 finding #3 is the reason the local walk survives as a fallback: launched from
+    home, the bounded walk cannot reach a meta dir five levels down, so losing the
+    canonical arm on an old bundle means an EMPTY picker in the human's own home dir."""
+    import builtins
+
+    base, org = riseapps_shape
+    real_import = builtins.__import__
+
+    def no_resolver(name, *args, **kwargs):
+        if name == "otaman_core.program_context":
+            raise ImportError("no program_context in this bundle")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_resolver)
+    names = {p.name for p in bus.discover_programs(base)}
+    assert len([n for n in names if n.startswith("prog")]) == N_PROGRAMS
+
+
+def test_the_meta_hop_is_the_consoles_own_question(tmp_path):
+    """Core answers WHICH programs exist; the console needs their META root, which is
+    what every console read opens. A program dir with no meta dir yields nothing."""
+    program = tmp_path / "orgs" / "acme" / "programs" / "p1"
+    program.mkdir(parents=True)
+    assert bus._meta_dirs_of(program) == []
+
+    # A program dir holds its REPOS beside the meta dir, and a repo is a directory with
+    # no platform.yaml. Without one in the fixture, "any child dir" and "a child dir
+    # with a platform.yaml" are the same answer and the check is untested.
+    (program / "some-repo" / "src").mkdir(parents=True)
+    assert bus._meta_dirs_of(program) == [], "a repo is not a meta dir"
+
+    _program(program / "p1-otaman", "p1")
+    assert bus._meta_dirs_of(program) == [program / "p1-otaman"]
+    assert bus._meta_dirs_of(tmp_path / "nowhere") == []

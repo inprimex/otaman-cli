@@ -21,15 +21,15 @@ four levels above the program dir (`<ws>/orgs/<org>/programs/<program>`), and fr
 anywhere else it is the human's home — which is where a human launches `otaman -i`
 from, and the same assumption the console's picker already makes.
 
-One thing is NOT delegated, and deliberately: whether an enumerated directory is a
-PROGRAM. Core's enumeration tests the path SHAPE, and on this machine that reports
-three programs where one exists — `orgs/otaman-dev/programs/` also holds two stray
-directories (one with `LICENSE`/`SECURITY.md`, one with `scripts/`) left by a botched
-copy. So `rows()` annotates each candidate with whether a program can actually be
-READ there, using the gate the console picker has used since picker-canonical-
-precedence, and the listing says which are not programs instead of offering debris as
-if it were. Reported to core-agent; when `enumerate_programs` learns the predicate the
-annotation becomes uniformly `True` and this comment is what to delete.
+`rows()` still ANNOTATES each candidate with whether a program can actually be READ
+there, and that is now a backstop rather than a correction. Core's enumeration tested
+the path SHAPE when this was written, which on this machine reported three programs
+where one exists — `orgs/otaman-dev/programs/` also holds two stray directories (one
+with `LICENSE`/`SECURITY.md`, one with `scripts/`) left by a botched copy. Reported, and
+core #112 added the program-marker predicate the same hour, so the annotation reads
+uniformly `True` on a healthy machine and a current bundle. It stays for the two cases
+that remain: an older core without the predicate, and a program whose meta dir
+disappears between core's enumeration and this read.
 """
 
 from __future__ import annotations

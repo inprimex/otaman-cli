@@ -184,28 +184,65 @@ def _canonical_bases(search_root: Path) -> list[Path]:
     return bases
 
 
-def _canonical_meta_dirs(search_root: Path) -> list[Path]:
-    """Program meta dirs under the canonical CE layout beneath *search_root*'s
-    base(s): ``orgs/<org>/programs/<program>/<meta>`` holding a platform.yaml.
+def _meta_dirs_of(program_dir: Path) -> list[Path]:
+    """The meta dirs inside *program_dir* — a child dir holding a platform.yaml.
 
-    This reaches the meta dir directly (it sits 5 levels below ``$HOME``, past
-    the bounded walk's ``max_depth``) — the fix for 5.1 finding #3: launched
-    from home, the walk found nothing, so the picker showed "No programs
-    found". The full-shape/bus gate still runs on each candidate.
+    Core answers WHICH programs exist; the console needs their META root, because that
+    is what every console read (the bus, platform.yaml) opens. This is the hop between
+    the two, and the only part of the canonical arm that is the console's own question.
     """
     out: list[Path] = []
+    try:
+        for meta in sorted(program_dir.iterdir()):
+            if meta.is_dir() and (meta / "platform.yaml").is_file():
+                out.append(meta)
+    except OSError:
+        return []
+    return out
+
+
+def _canonical_meta_dirs(search_root: Path) -> list[Path]:
+    """Program meta dirs under the canonical CE layout beneath *search_root*'s base(s).
+
+    Enumeration is CORE's as of program-crud-and-context-resolution 1.2:
+    `otaman_core.program_context.enumerate_programs` walks
+    ``orgs/<org>/programs/<program>`` and — since core #112, which this surface's
+    measurement prompted — requires a program MARKER rather than the path shape alone.
+    That matters here specifically: this machine's `programs/` dir also holds two
+    directories from a botched copy (a `LICENSE`, a `scripts/`), and before the
+    predicate core's list and this picker disagreed 3 to 1.
+
+    This reaches the meta dir directly (it sits 5 levels below ``$HOME``, past the
+    bounded walk's ``max_depth``) — the fix for 5.1 finding #3: launched from home, the
+    walk found nothing and the picker showed "No programs found". The full-shape/bus
+    gate still runs on each candidate afterwards, so core's predicate and this
+    surface's gate both apply.
+
+    The local walk survives ONLY as the no-resolver fallback. cli pins no core version,
+    and an old bundle losing this arm would reproduce finding #3 — an empty picker from
+    the human's own home directory. It is the duplication to delete when the floor
+    moves, not a second opinion: when core answers, core wins.
+    """
+    out: list[Path] = []
+    try:
+        from otaman_core.program_context import enumerate_programs
+    except Exception:  # noqa: BLE001 - old bundle → the local walk below
+        enumerate_programs = None  # type: ignore[assignment]
+
     for base in _canonical_bases(search_root):
+        if enumerate_programs is not None:
+            for program in enumerate_programs(base):
+                out.extend(_meta_dirs_of(program.path))
+            continue
         try:
             for org in (base / "orgs").iterdir():
                 programs = org / "programs"
                 if not (org.is_dir() and not org.name.startswith(".") and programs.is_dir()):
                     continue
-                for program in programs.iterdir():
-                    if not program.is_dir() or program.name.startswith("."):
+                for program_dir in programs.iterdir():
+                    if not program_dir.is_dir() or program_dir.name.startswith("."):
                         continue
-                    for meta in program.iterdir():
-                        if meta.is_dir() and (meta / "platform.yaml").is_file():
-                            out.append(meta)
+                    out.extend(_meta_dirs_of(program_dir))
         except OSError:
             continue
     return out
