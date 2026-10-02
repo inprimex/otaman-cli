@@ -1017,8 +1017,42 @@ def _cmd_check_changelog(
     return _GUARD_REFUSED
 
 
+def _declare_route(root, agent: str, family: str, model: str, local: bool) -> int:
+    """`otaman policy routes --declare <agent> --family F [--model M] [--local]` (1.4).
+
+    The write half of the route surfaces. Validated by CORE before it touches a file
+    — the candidate declaration goes through `effective_route`, the same parser the
+    bridge dispatch reads — and written through the round-trip YAML loader so the
+    human's comments in the registry survive.
+    """
+    from otaman_cli import llm_routes
+
+    result = llm_routes.declare(root, agent, family, model=model, local=local)
+    if result.error:
+        UI.error(f"Not declared: {result.error}")
+        return 2
+    if not result.changed:
+        # nss — a verb that did no work must not report success as if it had.
+        UI.muted(f"{agent} already routes to {result.after} ({result.where}) — unchanged")
+        return 0
+    UI.ok(f"{agent}: {result.before} → {result.after}")
+    UI.kv("written", result.where)
+    surface = llm_routes.load(root, agent=agent)
+    if not surface.configured:
+        UI.muted(
+            "  no `router:` block is configured, so this route stays on the native "
+            "path until one is (the opt-in scenario)."
+        )
+    if surface.guarded_routes:
+        UI.warn(
+            "  this route leaves the tenant while local-only classes are declared — "
+            "guarded calls on this agent refuse at dispatch"
+        )
+    return 0
+
+
 def _cmd_routes(rest: list[str]) -> int:
-    """`otaman policy routes [--agent A] [--json]` — llm-router 1.4's config surface.
+    """`otaman policy routes [--agent A] [--json] | --declare …` — llm-router 1.4.
 
     Shows the active backend and the effective route per declared agent, resolved by
     `otaman_core.llm_router.effective_route` — the single resolution point, so this
@@ -1039,16 +1073,37 @@ def _cmd_routes(rest: list[str]) -> int:
 
     agent = ""
     as_json = False
+    declare_for = ""
+    family = ""
+    model = ""
+    local = False
     i = 0
     while i < len(rest):
         if rest[i] == "--agent" and i + 1 < len(rest):
             agent = rest[i + 1]
             i += 2
+        elif rest[i] == "--declare" and i + 1 < len(rest):
+            declare_for = rest[i + 1]
+            i += 2
+        elif rest[i] == "--family" and i + 1 < len(rest):
+            family = rest[i + 1]
+            i += 2
+        elif rest[i] == "--model" and i + 1 < len(rest):
+            model = rest[i + 1]
+            i += 2
+        elif rest[i] == "--local":
+            local = True
+            i += 1
         elif rest[i] == "--json":
             as_json = True
             i += 1
         else:
             return _bail(f"Unexpected argument: {rest[i]}")
+
+    if declare_for:
+        return _declare_route(root, declare_for, family, model, local)
+    if family or model or local:
+        return _bail("--family/--model/--local only apply with --declare <agent>")
 
     surface = llm_routes.load(root, agent=agent)
 
@@ -1062,6 +1117,7 @@ def _cmd_routes(rest: list[str]) -> int:
                     "backend": surface.backend,
                     "base_url": surface.base_url,
                     "local_only_classes": list(surface.local_only_classes),
+                    "agents_source": surface.agents_source,
                     "routes": [
                         {
                             "agent": r.agent,
@@ -1229,6 +1285,7 @@ def cmd_policy(args: list[str]) -> int:
         UI.muted("       otaman policy validate")
         UI.muted("       otaman policy critics [--hook H] [--sensitivity C] [--json]")
         UI.muted("       otaman policy routes [--agent A] [--json]")
+        UI.muted("       otaman policy routes --declare <agent> --family F [--model M] [--local]")
         return 0 if args else 1
 
     action, rest = args[0], args[1:]
