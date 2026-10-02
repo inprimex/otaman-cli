@@ -53,29 +53,44 @@ class LocalContext:
 
 
 def derive_local_context(program_root: Path) -> LocalContext | None:
-    """Interpret *program_root* against the declared CE layout.
+    """Interpret *program_root* against the declared CE layout — via CORE.
 
-    ``program_root`` is the already-resolved project root (the program meta
-    dir). Under the ce-directory-layout it sits at
-    ``orgs/<org>/programs/<program>/<meta-dir>`` — positional
-    interpretation of that declared structure, not discovery. Returns None
-    when the tree does not conform (legacy layouts): bare-name sends then
-    keep their exact legacy behavior and cross-program forms are refused.
+    ``program_root`` is the already-resolved project root (the program meta dir).
+    Under the ce-directory-layout it sits at
+    ``orgs/<org>/programs/<program>/<meta-dir>``, and reading that position is now
+    `otaman_core.program_context.program_of_path` — the single home core #111 shipped
+    and that cli 1.2 is the rewiring half of. This file used to walk the three parent
+    directories itself; that walk is deleted rather than kept beside core's, because
+    two interpretations of one layout is the drift the change exists to end.
+
+    Returns None when the tree does not conform (legacy layouts) OR when the bundle
+    has no resolver — both already mean the same thing here, and it is specified:
+    bare-name sends keep their exact legacy behavior and cross-program forms are
+    refused. So an old bundle degrades to "no cross-program sends", never to a second
+    reading of the layout.
+
+    The segment grammar stays local and is still enforced: core answers WHERE the
+    program sits, and this surface still decides whether that org/program pair is a
+    legal bus address.
     """
     try:
         resolved = program_root.resolve()
     except OSError:
         return None
-    program_dir = resolved.parent
-    programs_dir = program_dir.parent
-    org_dir = programs_dir.parent
-    if programs_dir.name != "programs" or org_dir.parent.name != "orgs":
+    try:
+        from otaman_core.program_context import program_of_path
+    except Exception:  # noqa: BLE001 - no resolver → the non-conforming path, as specified
         return None
-    org = org_dir.name
-    program = program_dir.name
+    found = program_of_path(resolved)
+    if found is None:
+        return None
+    org, program = found.org, found.name
     if not (_SEGMENT.match(org) and _SEGMENT.match(program)):
         return None
-    return LocalContext(org=org, program=program, program_root=resolved, org_root=org_dir)
+    # `found.path` is the PROGRAM dir; the org root is two levels above it.
+    return LocalContext(
+        org=org, program=program, program_root=resolved, org_root=found.path.parent.parent
+    )
 
 
 def _declared_program_roots(org_root: Path) -> list[Path]:

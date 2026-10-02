@@ -108,20 +108,35 @@ def _program_name(root) -> str:
 
 
 def _infer_org_from_path(root) -> str | None:
-    """Best-effort org slug from the fleet's ``orgs/<org>/programs/<program>``
-    layout (e.g. ``.../orgs/otaman-dev/programs/otaman-dev/otaman-meta`` → org
-    ``otaman-dev``). No dedicated org resolver exists anywhere in
-    otaman-core/otaman-cli, so the cascade's org layer is otherwise dropped from
-    every read here — the aca-1.5 gate bug (org secrets.env holds the live PATs).
+    """The org slug for *root* — core's resolver first, the path scan only beyond it.
 
-    Mirrors otaman-plugin's ``_infer_org_from_path`` (aca 1.4) so the ``map``
-    verb and the generated CLAUDE.local.md block resolve the SAME three layers.
-    Returns ``None`` on any non-fleet layout — callers then degrade to
-    program+tenant rather than guess an org wrong.
+    A program's org is `otaman_core.program_context.program_of_path(...).org` as of
+    core #111, and this asks that first: inside a program tree there is now one
+    answer, and the cascade's org layer reads the same slug every other surface does.
+    The old docstring here said "no dedicated org resolver exists anywhere in
+    otaman-core/otaman-cli" — true when it was written (aca 1.4), and the reason this
+    function existed.
+
+    The path scan stays for the case core does NOT answer and never claimed to: a path
+    under `orgs/<org>/` that is not inside a program at all (an org-level config dir,
+    which this cascade also reads). That is a strictly wider question than "which
+    program is this", so it is a fallback rather than a competing interpretation.
+
+    Returns ``None`` on any non-fleet layout — callers then degrade to program+tenant
+    rather than guess an org wrong.
     """
     from pathlib import Path
 
-    parts = Path(root).resolve().parts
+    resolved = Path(root).resolve()
+    try:
+        from otaman_core.program_context import program_of_path
+
+        found = program_of_path(resolved)
+        if found is not None:
+            return found.org
+    except Exception:  # noqa: BLE001 - old bundle → the path scan below
+        pass
+    parts = resolved.parts
     for i, part in enumerate(parts):
         if part == "orgs" and i + 1 < len(parts):
             return parts[i + 1]
