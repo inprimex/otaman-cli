@@ -101,13 +101,24 @@ def test_the_score_comes_from_cores_lint():
 
 
 def test_a_deficient_proposal_scores_lower_than_a_clean_one():
-    """D5's whole purpose: reviewers triage by number before reading."""
+    """D5's whole purpose: reviewers triage by number before reading.
+
+    The clean proposal is built FROM core's `SECTION_KEYS` rather than from a list
+    restated here. core #106 (JTBD-57 ruling A) made the seven decision-grade SCR
+    sections required and tightened the outcome id to a resolvable shape, at which
+    point the old literal fixture — title/outcome/affected_repos/artifacts, outcome
+    `JTBD-1-something` — scored 0 just like the deficient one and this assertion
+    could no longer tell them apart. Reading the contract from its single home is
+    what keeps the comparison meaningful the next time it tightens.
+    """
     pytest.importorskip("otaman_core.spec_gate")
+    from otaman_core.spec_gate import SECTION_KEYS
+
     clean = {
         "title": "rate limiting on the bridge",
-        "outcome": "JTBD-1-something",
+        "outcome": "JTBD-57",
         "affected_repos": ["otaman-cli"],
-        "artifacts": ["proposal.md"],
+        **{key: f"a decision-grade {key} paragraph" for key in SECTION_KEYS},
     }
     deficient = {"title": "TBD", "outcome": "", "affected_repos": ["nope"], "artifacts": []}
 
