@@ -120,13 +120,6 @@ _KNOWN_REMAINING = {
         "containment check before writing a new entry — a write path, not a parse"
     ),
     "``^## Blocked:`` regex.": "docstring prose describing the sweep's pattern — not code",
-    'r"^(## Blocked: .+?)(?=\\n## Blocked: |\\Z)",': (
-        "clear-by-stem: splits the file into sections for rewriting — the NINTH "
-        "instance, not yet converted"
-    ),
-    'title_re = re.compile(r"^## Blocked:\\s*(.+)$", re.MULTILINE)': (
-        "clear-by-stem: reads a section title while rewriting — same instance"
-    ),
 }
 
 
@@ -146,7 +139,9 @@ def test_the_list_path_carries_no_surface_local_entry_regex():
     """The generalized guard spec-agent asked for.
 
     It found the seventh instance's siblings immediately; the eighth (the
-    --clear matching path) is now converted. What remains is registered above.
+    --clear matching path) and the NINTH (clear-by-stem) are now converted. What
+    remains is registered above: a containment check on a write path, and prose.
+    No blocked-entry PARSING is left in this surface.
     """
     unregistered = sorted(set(_remaining_sites()) - set(_KNOWN_REMAINING))
     assert not unregistered, (

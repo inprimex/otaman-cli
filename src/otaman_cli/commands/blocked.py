@@ -527,18 +527,30 @@ def _cmd_blocked_clear_by_stem(root: Path, stem: str) -> int:
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    # Same regex shape as plugin-agent's `_auto_tombstone_blocked` in
-    # bus_server.py, kept in sync deliberately so the tombstone format
-    # is identical regardless of which agent / which trigger fired it.
-    entry_re = re.compile(
-        r"^(## Blocked: .+?)(?=\n## Blocked: |\Z)",
-        re.DOTALL | re.MULTILINE,
-    )
-    proposal_field_re = re.compile(
-        r"^\s*-\s*\*\*Proposal\*\*:\s*(\S+)",
-        re.MULTILINE,
-    )
-    title_re = re.compile(r"^## Blocked:\s*(.+)$", re.MULTILINE)
+    # The NINTH surface-local blocked-entry parser, now consumed (shared-logic-
+    # single-home). It kept its own three regexes — a section splitter, a
+    # `**Proposal**` reader and a title reader — and matched on the Proposal field
+    # ALONE. Measured on a two-entry fixture before the change:
+    #
+    #   clear <proposal-stem>  -> tombstoned, rc 0
+    #   clear <change-slug>    -> "No blocked entry found", rc 0, nothing written
+    #
+    # So a dependency wait (`Kind: awaiting-dependency`, keyed by `**Change**` and
+    # carrying no Proposal — the shape `otaman blocked` writes for a wait on another
+    # agent) could not be cleared by this verb at all. The only way to terminate one
+    # was to hand-edit the register, which is how this bookkeeping gets corrupted.
+    #
+    # core's `find_by_ref` matches the entry's stable REF — proposal first, change
+    # second — so both kinds are clearable by the id the operator actually has, and
+    # `tombstone` writes the format plugin's `_auto_tombstone_blocked` writes,
+    # including the trailing-separator preservation whose absence once hid every live
+    # entry after a cleared one (plugin repro 20260921T151120).
+    from otaman_cli.blocked_gate import REMEDY, blocked_entries
+
+    mod = blocked_entries()
+    if mod is None:
+        UI.error(REMEDY)
+        return 1
 
     tombstoned: list[tuple[str, str]] = []  # (agent, title)
 
@@ -549,32 +561,21 @@ def _cmd_blocked_clear_by_stem(root: Path, stem: str) -> int:
         except OSError:
             continue
 
-        modified = False
-        new_parts: list[str] = []
-        last_end = 0
-        for m in entry_re.finditer(text):
-            entry_block = m.group(1)
-            new_parts.append(text[last_end : m.start()])
+        matches = mod.find_by_ref(text, stem)
+        if not matches:
+            continue
 
-            prop_m = proposal_field_re.search(entry_block)
-            if prop_m and prop_m.group(1) == stem:
-                title_m = title_re.search(entry_block)
-                title = title_m.group(1).strip() if title_m else "(untitled)"
-                tombstoned.append((agent_name, title))
-                trailer = f"\ncleared {today} — manually-cleared -->"
-                new_parts.append("<!-- " + entry_block.rstrip() + trailer)
-                modified = True
-            else:
-                new_parts.append(entry_block)
-            last_end = m.end()
-
-        new_parts.append(text[last_end:])
-
-        if modified:
-            try:
-                blocked_file.write_text("".join(new_parts), encoding="utf-8")
-            except OSError as exc:
-                UI.warn(f"Failed to write {blocked_file}: {exc}")
+        new_text = mod.tombstone(text, matches, reason="manually-cleared", today=today)
+        if new_text == text:
+            continue
+        try:
+            blocked_file.write_text(new_text, encoding="utf-8")
+        except OSError as exc:
+            UI.warn(f"Failed to write {blocked_file}: {exc}")
+            continue
+        # `display_title`, not `title`: a malformed entry reads `[malformed]`
+        # identically here and on every other surface, never as a blank line.
+        tombstoned.extend((agent_name, entry.display_title) for entry in matches)
 
     if not tombstoned:
         print(f"No blocked entry found for stem: {stem}")
