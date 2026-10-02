@@ -37,8 +37,12 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         # approval naming a resolved roster human as of rac 1.2, and core refuses the
         # write without one. The roster is what the verb attests to; `_run` sets
         # OTAMAN_HUMAN so it resolves.
+        # Both hats on one human: `accept-cost --solution` is the COMBINED invocation
+        # (rac 2.1 / D2), available only in founder-mode — one person who holds the CTO's
+        # choose hat and the CEO's fund hat. A team-mode roster refuses it by design, and
+        # that refusal has its own test.
         "human-roster:\n"
-        "  - name: roman\n    roles: [cto, cofounder, approver]\n",
+        "  - name: roman\n    roles: [cto, ceo, approver]\n",
         encoding="utf-8",
     )
     biz = parent / "biz"

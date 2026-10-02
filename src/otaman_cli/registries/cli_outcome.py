@@ -31,8 +31,13 @@ from otaman_cli.registries.outcomes import (
 )
 from otaman_cli.registries.platform_ext import load_program_extensions
 from otaman_cli.registries.roles import (
+    CHOOSE_HATS,
+    FUND_HATS,
+    acting_hats,
     authz_advisory,
     hat_advisory,
+    held_hat,
+    operating_mode,
     resolve_operating_actor,
     resolve_roles,
 )
@@ -47,10 +52,14 @@ APPROVAL_SPEC = "outcome-registry"
 #: The hat each authority action is granted by (team-mode "roles are hats"). Recorded in
 #: the transition note, because core's approval shape carries `via: hat` but not WHICH —
 #: and the delta's founder-mode scenario requires the log to show both hats.
+#:
+#: The pairs come from `registries.roles`, which is also where the console's two hat
+#: tables now live (rac 2.1). `choose` is the CTO's technical judgment, `accept-cost` and
+#: `reject-cost` are the CEO's budget authority, and `founder` stands in for either.
 ACTION_HATS: dict[str, tuple[str, ...]] = {
-    "choose": ("cto",),
-    "accept-cost": ("cofounder", "funder"),
-    "reject-cost": ("cofounder", "funder"),
+    "choose": CHOOSE_HATS,
+    "accept-cost": FUND_HATS,
+    "reject-cost": FUND_HATS,
 }
 
 
@@ -110,8 +119,8 @@ def _approval(root: Path, action: str) -> tuple[dict[str, Any] | None, str]:
             "  An agent with no human behind it files an outcome-proposal instead."
         )
     hats = ACTION_HATS.get(action, ())
-    held = {str(r) for r in (getattr(entry, "roles", None) or [])}
-    via = "hat" if (hats and held & set(hats)) else "roster-role"
+    held = frozenset(str(r).lower() for r in (getattr(entry, "roles", None) or []))
+    via = "hat" if held_hat(held, hats) else "roster-role"
     return {
         "by": entry.name,
         "at": bus_messages.utc_now_iso(),
@@ -138,11 +147,17 @@ def _solution(root: Path, solution_id: str) -> dict | None:
     return core.get(register, solution_id)
 
 
-def _hat_note(action: str, approval: dict[str, Any]) -> str:
-    """`hat: cto` for the transition note — which hat, not merely that one was used."""
-    hats = ACTION_HATS.get(action, ())
-    if approval.get("via") == "hat" and hats:
-        return f"hat: {hats[0]}"
+def _hat_note(action: str, approval: dict[str, Any], root: Path) -> str:
+    """`hat: cto` for the transition note — which hat, and the one actually HELD.
+
+    Not `ACTION_HATS[action][0]`: a founder holds `founder`, not `cto`, and a log that
+    named the first acceptable hat would attribute the decision to a hat its author does
+    not wear. D2's founder-mode scenario is read off this note, so it has to be true.
+    """
+    hats, _ = acting_hats(root)
+    held = held_hat(hats, ACTION_HATS.get(action, ()))
+    if approval.get("via") == "hat" and held:
+        return f"hat: {held}"
     return f"authority: {approval.get('via', 'unknown')}"
 
 
@@ -523,12 +538,37 @@ def cmd_request_estimate(args: dict[str, Any]) -> int:
     return 0
 
 
+#: What a team-mode operator is told when they try to fund and choose in one keystroke.
+#: Names BOTH verbs and whose they are, because the refusal's job is to route the work,
+#: not merely to decline it (D2's scenario requires the refusal to name the two verbs).
+_SPLIT_REFUSAL = (
+    "choosing a solution and funding it are different hats, and this program's hats are "
+    "held by different people (team-mode).\n"
+    "  `otaman outcome accept-cost {id} --solution {sol}` would do both in one write.\n"
+    "  Run them separately:\n"
+    "    otaman outcome choose {id} --solution {sol}   # the CTO's call\n"
+    "    otaman outcome accept-cost {id}               # the CEO's call\n"
+    "  (One human holding both hats — founder-mode — may combine them; the log still "
+    "records both decisions.)"
+)
+
+
 def cmd_accept_cost(args: dict[str, Any]) -> int:
+    """`otaman outcome accept-cost <id> [--solution <SOL-id>]` — fund the outcome.
+
+    The choose/fund split (rac 2.1, D2). `--solution` makes this the COMBINED
+    invocation: it chooses the solution and funds it. Two hats own those decisions —
+    the CTO chooses, the CEO funds — so the combined form is available only when ONE
+    human holds both (founder-mode), and even then the log records `choose` and
+    `accept-cost` as separate transitions with their own hats. "The keystroke may
+    collapse, the record may not."
+
+    Without `--solution` it funds what `otaman outcome choose` already chose, which is
+    the team-mode path: the CTO's decision is already in the log, with their hat on it.
+    """
     root = find_project_root()
     if not root:
         return _bail(not_in_project_message())
-    if not args.get("solution"):
-        return _bail("--solution <SOL-id> is required")
     actor, roles, _ = _ctx(root)
     authz_advisory("outcome.accept-cost", actor, roles)
 
@@ -541,15 +581,47 @@ def cmd_accept_cost(args: dict[str, Any]) -> int:
     if not outcome:
         return _bail(f"Outcome not found: {args['id']}")
 
+    # WHO before WHAT: the acting human is resolved before the request is judged,
+    # because the mode below is read off that human's hats — telling an unidentified
+    # caller "this program is team-mode" would report the default as a finding. The
+    # second approval (the choose, further down) is the same human under a different
+    # hat; both are obtained before EITHER write, since half of a combined decision is
+    # worse than none of it.
+    fund_approval, refusal = _approval(root, "accept-cost")
+    if fund_approval is None:
+        return _bail(refusal, code=2)
+
+    # --- the split (D2) -----------------------------------------------------
+    combined = bool(args.get("solution"))
+    chosen = outcome.get("chosen-solution")
+    mode = operating_mode(root)
+    if combined and mode == "team":
+        return _bail(
+            _SPLIT_REFUSAL.format(id=outcome["id"], sol=args["solution"]),
+            code=2,
+        )
+    if not combined and not chosen:
+        return _bail(
+            f"{outcome['id']} has no chosen-solution to fund.\n"
+            f"  otaman outcome choose {outcome['id']} --solution <SOL-id>\n"
+            "  then accept-cost funds what was chosen.",
+            code=2,
+        )
+    solution_id = args.get("solution") or chosen
+
     # Locate the solution for the payload data — through the contract (rac 1.2).
-    solution = _solution(root, args["solution"])
+    solution = _solution(root, solution_id)
     if solution is None:
-        return _bail(f"Solution not found in solutions.yaml: {args['solution']}")
+        return _bail(f"Solution not found in solutions.yaml: {solution_id}")
     if solution.get("outcome-id") != outcome["id"]:
         return _bail(
-            f"Solution {args['solution']} belongs to outcome "
+            f"Solution {solution_id} belongs to outcome "
             f"{solution.get('outcome-id')!r}, not {outcome['id']!r}"
         )
+    if combined and solution.get("status") == "Discarded":
+        # The same refusal `choose` makes: the combined form performs a choose, so it
+        # cannot accept what choose would reject.
+        return _bail(f"Cannot choose a discarded solution: {solution_id}")
 
     from_status = outcome.get("status", "Backlog")
 
@@ -570,10 +642,37 @@ def cmd_accept_cost(args: dict[str, Any]) -> int:
     if not verdict.allowed:
         return _bail(verdict.reason)
 
-    approval, refusal = _approval(root, "accept-cost")
-    if approval is None:
-        return _bail(refusal, code=2)
-    note = args.get("reason") or _hat_note("accept-cost", approval)
+    choose_approval = None
+    if combined and solution_id != chosen:
+        choose_approval, refusal = _approval(root, "choose")
+        if choose_approval is None:
+            return _bail(refusal, code=2)
+
+    # The keystroke may collapse; the record may not (D2). A combined founder-mode
+    # invocation appends `choose` with the CTO hat and `accept-cost` with the CEO hat —
+    # two entries, never one. core composes them on the same register and `save_register`
+    # writes once, so the pair lands together or not at all.
+    if choose_approval is not None:
+        core.apply_transition(
+            register,
+            outcome["id"],
+            action="choose",
+            by=actor,
+            at=bus_messages.utc_now_iso(),
+            fields={"chosen-solution": solution_id},
+            approval=choose_approval,
+            note=f"chose {solution_id} ({_hat_note('choose', choose_approval, root)})",
+        )
+
+    note = args.get("reason") or _hat_note("accept-cost", fund_approval, root)
+    fields: dict[str, Any] = {
+        "cost-accepted": True,
+        "updated": bus_messages.utc_now_iso()[:10],
+    }
+    # `chosen-solution` is NOT in this transition's fields. Every path that reaches
+    # here with a different solution recorded it in the `choose` above; the others
+    # (team-mode, or the combined form naming the existing choice) already hold the
+    # right value, and re-writing it would put a no-op field change in the audit.
     core.apply_transition(
         register,
         outcome["id"],
@@ -581,12 +680,8 @@ def cmd_accept_cost(args: dict[str, Any]) -> int:
         by=actor,
         at=bus_messages.utc_now_iso(),
         to_status="Approved" if from_status == "Backlog" else None,
-        fields={
-            "cost-accepted": True,
-            "chosen-solution": args["solution"],
-            "updated": bus_messages.utc_now_iso()[:10],
-        },
-        approval=approval,
+        fields=fields,
+        approval=fund_approval,
         note=note,
     )
     rc = _save(path, register)
@@ -594,7 +689,9 @@ def cmd_accept_cost(args: dict[str, Any]) -> int:
         return rc
 
     _emit_bus(root, bus_messages.build_outcome_cost_accepted(outcome, solution, actor))
-    UI.ok(f"Accepted cost: {outcome['id']} → chosen-solution: {args['solution']}")
+    UI.ok(f"Accepted cost: {outcome['id']} → chosen-solution: {solution_id}")
+    if choose_approval is not None:
+        UI.muted(f"  recorded two decisions: choose + accept-cost (founder-mode, {mode})")
     return 0
 
 
@@ -659,7 +756,7 @@ def cmd_choose(args: dict[str, Any]) -> int:
         at=bus_messages.utc_now_iso(),
         fields={"chosen-solution": args["solution"]},
         approval=approval,
-        note=f"chose {args['solution']} ({_hat_note('choose', approval)})",
+        note=f"chose {args['solution']} ({_hat_note('choose', approval, root)})",
     )
     core.apply_transition(
         register,
@@ -714,7 +811,7 @@ def cmd_reject_cost(args: dict[str, Any]) -> int:
             "updated": bus_messages.utc_now_iso()[:10],
         },
         approval=approval,
-        note=args.get("reason") or _hat_note("reject-cost", approval),
+        note=args.get("reason") or _hat_note("reject-cost", approval, root),
     )
     rc = _save(path, register)
     if rc != 0:

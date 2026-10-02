@@ -239,3 +239,46 @@ def test_registry_detail_offers_accept_cost_on_solution_node(program, monkeypatc
             await app.action_quit()
 
     asyncio.run(go())
+
+
+# ---------------------------------------------------------------------------
+# rac 2.1 — the console sends the COMBINED invocation only when it would choose
+
+
+def test_the_key_funds_the_existing_choice_without_the_combined_flag(program, monkeypatch):
+    """`--solution` makes accept-cost the combined choose+fund form, which team-mode
+    refuses. An outcome that already chose this solution needs no choose, so the
+    console sends the bare verb and the key keeps working for a CEO with no choose hat.
+    """
+    prog, strat = program
+    _outcomes(strat, "outcomes:\n  - {id: JTBD-1, chosen-solution: SOL-1, cost-accepted: false}\n")
+    calls = {}
+
+    def fake_runner(cmd, **kw):
+        from types import SimpleNamespace
+
+        calls["cmd"] = cmd
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+    accept_cost.run_accept_cost(prog, "JTBD-1", "SOL-1", runner=fake_runner)
+
+    assert "--solution" not in calls["cmd"], calls["cmd"]
+    assert calls["cmd"][-1] == "JTBD-1"
+
+
+def test_the_key_still_sends_the_combined_form_when_nothing_is_chosen(program):
+    """An unchosen outcome DOES need a choose — send the flag and let the verb rule
+    on whether this program's hats allow one keystroke to do both."""
+    prog, strat = program
+    _outcomes(strat, "outcomes:\n  - {id: JTBD-1, cost-accepted: false}\n")
+    calls = {}
+
+    def fake_runner(cmd, **kw):
+        from types import SimpleNamespace
+
+        calls["cmd"] = cmd
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+    accept_cost.run_accept_cost(prog, "JTBD-1", "SOL-1", runner=fake_runner)
+
+    assert "--solution" in calls["cmd"] and "SOL-1" in calls["cmd"]
