@@ -1350,6 +1350,25 @@ def render_issue(issue: object) -> None:
         UI.muted(f"Fix: {fix}")
 
 
+def _exit_with_cause(failures: list[str]) -> int:
+    """Return doctor's exit code, and SAY what set it.
+
+    `otaman doctor` folded eight independent failure conditions into one `base_rc`
+    and returned it bare. The operator (and any automation gating on the code) saw
+    `1` and had to scan the whole report to guess which check meant it — with several
+    WARN-only sections in the same output that look just as alarming and do NOT
+    affect the code. A non-zero exit nobody can attribute is a health signal nobody
+    can act on.
+
+    Zero failures returns 0 and says nothing: the summary line above has already
+    reported the good news, and a line here would be the second voice.
+    """
+    if not failures:
+        return 0
+    UI.error(f"Exit 1 — failing: {', '.join(failures)}")
+    return 1
+
+
 def cmd_doctor(args: list[str]) -> int:
     """Check environment readiness — git, runtimes, CLI tools, MCP.
 
@@ -1569,13 +1588,21 @@ def cmd_doctor(args: list[str]) -> int:
     else:
         UI.error(f"{p} passed, {w} warnings, {f_} failed — fix issues above")
 
-    base_rc = 1 if report["summary"]["failed"] > 0 else 0
+    # The exit code names its cause (CTO review: "doctor's unauditable exit-code
+    # fold"). Eight sites below could set `base_rc = 1`, each printing its own report
+    # among ~200 lines of output, and the bare `return 1` said which of them fired:
+    # nothing. Automation gates on this exit code, so a 1 nobody can attribute is a
+    # health signal nobody can act on. Each contributor appends its NAME here instead.
+    failures: list[str] = []
+    if report["summary"]["failed"] > 0:
+        failures.append(f"{f_} environment check(s)")
 
     # repo-registration-materialization 1.2 — additive registration/
     # materialization drift check (always runs; registration ≠ checkout).
     mat_rc, mat_results = _check_repo_materialization(root)
     _print_repo_materialization_report(mat_results)
-    base_rc = 1 if (base_rc or mat_rc) else 0
+    if mat_rc:
+        failures.append("repo materialization")
 
     # console-roster-verification 1.2 — two-roster drift (enrolled-but-
     # unverifiable). WARN-only, so it doesn't change the exit code.
@@ -1591,7 +1618,8 @@ def cmd_doctor(args: list[str]) -> int:
     # exact opt-out state that must FAIL doctor); folds into the exit code.
     ap_rc, ap_findings = _check_approver_config(root)
     _print_approver_config_report(ap_findings)
-    base_rc = 1 if (base_rc or ap_rc) else 0
+    if ap_rc:
+        failures.append("approver config")
 
     # ce-bootstrap-plugin-wiring 1.2 — WARN on a vendored-but-unwired plugin
     # tree (core PR #41). WARN-only; never folds into the exit code.
@@ -1616,7 +1644,7 @@ def cmd_doctor(args: list[str]) -> int:
     own = _check_local_ownership(deep=scan)
     _print_local_ownership_report(own, deep=scan)
     if own.get("foreign") or own.get("scan"):
-        base_rc = 1
+        failures.append("~/.local ownership")
 
     # scan-init-edition-backfill 1.2 — tenant-wide runner:/terminal: consistency,
     # naming the alphabetical-first primary the runner applies tenant-wide.
@@ -1629,12 +1657,12 @@ def cmd_doctor(args: list[str]) -> int:
     strat = _check_strategy_repo(root)
     _print_strategy_repo_report(strat)
     if strat.get("applicable") and not strat.get("ok"):
-        base_rc = 1
+        failures.append("registry home")
 
     regload = _check_registry_loadability(root)
     _print_registry_loadability_report(regload)
     if regload.get("applicable") and not regload.get("ok"):
-        base_rc = 1
+        failures.append("registry loadability")
 
     # spec-direct-disposition 1.1 — REPORT only, never folded into the exit code:
     # the expected members are research-stage outcomes awaiting spikes (absent by
@@ -1651,15 +1679,16 @@ def cmd_doctor(args: list[str]) -> int:
     enfmap = _check_enforcement_map(root)
     _print_enforcement_map_report(enfmap)
     if enfmap.get("applicable") and not enfmap.get("ok"):
-        base_rc = 1
+        failures.append("enforcement map")
 
     # ce-bootstrap-harness-deps task 3.1 — additive `--org` harness check
     if org:
         org_rc, results = _check_org_harnesses(root, org)
         _print_org_harness_report(org, results)
-        return 1 if (base_rc or org_rc) else 0
+        if org_rc:
+            failures.append(f"org harnesses ({org})")
 
-    return base_rc
+    return _exit_with_cause(failures)
 
 
 register(
