@@ -1237,6 +1237,58 @@ def _refuse_inside_a_repo_of_a_program(args: list[str]) -> int | None:
     return 2
 
 
+def _echo_resolved_target(config_path: Path) -> None:
+    """Print WHAT init is about to write into, before the first write.
+
+    `destructive-command-safety`: a DESTRUCTIVE-CROSS-DIRECTORY command "SHALL print
+    the fully-resolved target path(s) it is about to act on … where the target is a
+    project root, it SHALL additionally print an identity check — the resolved root's
+    `platform.yaml` `project:` name and repo count — so the operator can recognize
+    whether the resolved target matches what they intended."
+
+    `otaman init` resolves a root and then writes `.agents/`, `launcher/`, `policy/`
+    and a `.otaman` marker into every declared repo, which is exactly that tier, and
+    it has never printed the identity check. Both init incidents this week were
+    operators who did not know WHICH program they had just initialised: deploy-agent's
+    `--help` repointed a marker, and the live `spec_policy` hazard is the same write
+    chain reached from a pipe. The echo cannot prevent either, but it is the line that
+    makes the mistake visible at the moment it is still one keystroke from undone.
+
+    Printing only — no prompt, no refusal (the confirmation is sequenced behind
+    deploy's `--yes`, `init-consent-gate` step 2). Never raises: an unreadable
+    platform.yaml still gets the resolved path, and the validator below is what rules
+    on the file.
+    """
+    root = config_path.parent
+    UI.muted(f"Target: {root}")
+    project = None
+    repos: list = []
+    try:
+        import yaml as _yaml
+
+        cfg = _yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        if isinstance(cfg, dict):
+            project = cfg.get("project") or (cfg.get("program") or {}).get("slug")
+            raw = cfg.get("repos")
+            repos = raw if isinstance(raw, list) else []
+    except Exception:  # noqa: BLE001 - the echo must never be the thing that fails
+        UI.muted("  (platform.yaml could not be read for the identity check)")
+        return
+    UI.muted(f"  project: {project or '(unnamed)'}   repos: {len(repos)}")
+    for entry in repos:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name") or "?"
+        rel = entry.get("path") or "?"
+        try:
+            resolved = (root / str(rel)).resolve()
+        except Exception:  # noqa: BLE001 - a bad path is the validator's finding
+            resolved = rel
+        UI.muted(f"    {name}: {resolved}")
+    if repos:
+        UI.muted("  init writes .agents/, launcher/, policy/ and a .otaman marker into these.")
+
+
 def cmd_init(args: list[str]) -> int:
     """Initialize an otaman project. Creates platform.yaml if none exists.
 
@@ -1350,6 +1402,10 @@ def cmd_init(args: list[str]) -> int:
         UI.header("Otaman Init (dry-run)")
     else:
         UI.header("Otaman Init")
+
+    # The resolved target, BEFORE the first write (destructive-command-safety).
+    _echo_resolved_target(config_path)
+    print()
 
     # Validate first.
     # ce-org-agent-bootstrap task 4.1 — accept CE-shaped platform.yaml by
