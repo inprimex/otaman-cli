@@ -76,11 +76,26 @@ def test_resolution_is_delegated_to_core_not_reimplemented(tmp_path, monkeypatch
     assert all(r.local is False for r in surface.routes)
 
 
-def test_the_module_never_parses_the_raw_route_field():
-    """Structural, so the delegation cannot be quietly undone by a later edit."""
-    src = Path(llm_routes.__file__).read_text(encoding="utf-8")
-    assert '"route"' not in src, "reading agents[].route here is a second resolution point"
-    assert "effective_route" in src
+def test_every_label_comes_from_cores_resolution(tmp_path, monkeypatch):
+    """The same guard as above, over the WRITE path too.
+
+    This replaced a source-text ban on the string `"route"` appearing in the module.
+    That proxy held only while the surface was read-only: `declare` has to read the
+    field to tell a re-declaration from a change, and write it — so the ban became
+    false about a module that still delegates every DECISION. Behaviour is the real
+    rule and a stronger one: make core's resolver say something the raw field does
+    not, and require both entry points to follow core.
+    """
+    import otaman_core.llm_router as core
+
+    root = _program(tmp_path, "project: demo\n")
+    _registry(root, "agents:\n  - name: cli-agent\n")
+    fake = core.Route(family="something-else", model="m9", local=True)
+    monkeypatch.setattr(core, "effective_route", lambda config, agent: fake)
+
+    declared = llm_routes.declare(root, "cli-agent", "ollama", model="llama3")
+    assert declared.after == "something-else/m9 (local)", "the label must be core's, not the raw"
+    assert llm_routes.load(root).routes[0].family == "something-else"
 
 
 def test_the_tenant_question_is_cores_bit_not_a_local_guess():
@@ -342,3 +357,236 @@ def test_the_action_is_advertised_in_the_usage(capsys):
 
     policy_cmd.cmd_policy([])
     assert "policy routes" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Where the declarations actually live (the defect this surface shipped with).
+
+
+def _registry(root: Path, body: str) -> Path:
+    agents = root / ".agents"
+    agents.mkdir(parents=True, exist_ok=True)
+    (agents / "agents.yaml").write_text(body, encoding="utf-8")
+    return agents / "agents.yaml"
+
+
+def test_declarations_are_read_from_the_agent_registry(tmp_path):
+    """The first version read platform.yaml ALONE and found zero agents on a program
+    with nineteen in `.agents/agents.yaml` — so "doctor shows effective routing per
+    agent" showed nothing at all on the only program that exists."""
+    root = _program(tmp_path, "project: demo\nversion: '1.0'\n")
+    _registry(
+        root,
+        "project: demo\nagents:\n"
+        "  - name: cli-agent\n    route: {family: llama, model: llama3, local: true}\n"
+        "  - name: core-agent\n",
+    )
+    surface = llm_routes.load(root)
+    assert surface.agents_source == llm_routes.REGISTRY_REL
+    assert [r.agent for r in surface.routes] == ["cli-agent", "core-agent"]
+    assert surface.routes[0].label == "llama/llama3 (local)"
+    assert surface.routes[1].default_path is True
+
+
+def test_an_inlined_agents_block_wins_over_the_registry(tmp_path):
+    """A program that puts its declarations in platform.yaml means them."""
+    root = _program(
+        tmp_path,
+        "project: demo\nagents:\n  - name: web-agent\n    route: anthropic\n",
+    )
+    _registry(root, "agents:\n  - name: cli-agent\n    route: llama\n")
+    surface = llm_routes.load(root)
+    assert surface.agents_source == "platform.yaml"
+    assert [r.agent for r in surface.routes] == ["web-agent"]
+
+
+def test_an_empty_listing_says_both_places_were_checked(tmp_path):
+    root = _program(tmp_path, "project: demo\n")
+    lines = llm_routes.render_lines(llm_routes.load(root))
+    empty = next(line for line in lines if "no agents declared" in line)
+    assert "platform.yaml" in empty
+    assert llm_routes.REGISTRY_REL in empty
+
+
+def test_an_unreadable_registry_is_not_a_program_without_agents(tmp_path):
+    """It yields no declarations, and the source line does not claim platform.yaml."""
+    root = _program(tmp_path, "project: demo\n")
+    _registry(root, "agents: [unclosed\n")
+    surface = llm_routes.load(root)
+    assert surface.routes == []
+    assert surface.agents_source == ""
+
+
+# ---------------------------------------------------------------------------
+# declare — the write half of "declare/list routes".
+
+
+def _with_agent(tmp_path, *, name: str = "cli-agent", extra: str = "") -> Path:
+    root = _program(tmp_path, "project: demo\nversion: '1.0'\n")
+    _registry(root, f"# hand-edited registry\nproject: demo\nagents:\n  - name: {name}\n{extra}")
+    return root
+
+
+def test_the_written_path_is_posix_on_every_platform(tmp_path):
+    """The Windows leg of CI caught this: `str(relative_to(...))` renders
+    `.agents\\agents.yaml`, which is right for the OS and wrong for a string printed
+    beside `REGISTRY_REL` and copied into messages and config."""
+    root = _with_agent(tmp_path)
+    result = llm_routes.declare(root, "cli-agent", "ollama")
+    assert "\\" not in result.where
+    assert result.where == llm_routes.REGISTRY_REL
+
+
+def test_declare_writes_the_route_into_the_file_that_declares_the_agent(tmp_path):
+    root = _with_agent(tmp_path)
+    result = llm_routes.declare(root, "cli-agent", "ollama", model="llama3.1", local=True)
+    assert result.error == ""
+    assert result.changed is True
+    assert result.where == ".agents/agents.yaml"
+    assert result.before == llm_routes.NO_ROUTE
+    assert result.after == "ollama/llama3.1 (local)"
+    # and the surface now resolves it through core
+    assert llm_routes.load(root, agent="cli-agent").routes[0].label == "ollama/llama3.1 (local)"
+
+
+def test_declare_preserves_the_humans_comments(tmp_path):
+    """Written through the round-trip loader, not a reflowing safe_dump."""
+    root = _with_agent(tmp_path)
+    llm_routes.declare(root, "cli-agent", "ollama")
+    text = (root / ".agents" / "agents.yaml").read_text(encoding="utf-8")
+    assert "# hand-edited registry" in text
+
+
+def test_a_family_only_route_is_written_as_a_bare_string(tmp_path):
+    """What a human writing it by hand would put there; core accepts both forms."""
+    root = _with_agent(tmp_path)
+    llm_routes.declare(root, "cli-agent", "anthropic")
+    text = (root / ".agents" / "agents.yaml").read_text(encoding="utf-8")
+    assert "route: anthropic" in text
+
+
+def test_re_declaring_the_same_route_reports_no_work(tmp_path):
+    """nss — a verb that did nothing must not report success as if it had."""
+    root = _with_agent(tmp_path)
+    llm_routes.declare(root, "cli-agent", "ollama", model="llama3.1", local=True)
+    before = (root / ".agents" / "agents.yaml").read_text(encoding="utf-8")
+    again = llm_routes.declare(root, "cli-agent", "ollama", model="llama3.1", local=True)
+    assert again.changed is False
+    assert again.error == ""
+    assert again.after == "ollama/llama3.1 (local)"
+    assert (root / ".agents" / "agents.yaml").read_text(encoding="utf-8") == before
+
+
+def test_declare_replaces_a_prior_route_and_names_both_ends(tmp_path):
+    root = _with_agent(tmp_path, extra="    route: anthropic\n")
+    result = llm_routes.declare(root, "cli-agent", "ollama", local=True)
+    assert result.before == "anthropic (leaves tenant)"
+    assert result.after == "ollama (local)"
+
+
+def test_declare_refuses_an_agent_the_program_does_not_declare(tmp_path):
+    """Creating a declaration for a misspelled name would route nobody."""
+    root = _with_agent(tmp_path)
+    result = llm_routes.declare(root, "nope-agent", "ollama")
+    assert result.changed is False
+    assert "not declared" in result.error
+    assert llm_routes.REGISTRY_REL in result.error
+    assert "nope-agent" not in (root / ".agents" / "agents.yaml").read_text(encoding="utf-8")
+
+
+def test_declare_refuses_a_route_with_no_family(tmp_path):
+    root = _with_agent(tmp_path)
+    result = llm_routes.declare(root, "cli-agent", "")
+    assert "family" in result.error
+    assert "route" not in (root / ".agents" / "agents.yaml").read_text(encoding="utf-8")
+
+
+def test_declare_is_validated_by_core_before_the_write(tmp_path, monkeypatch):
+    """Core's parser is the gate, so a refused declaration never reaches the file."""
+    root = _with_agent(tmp_path)
+
+    class _Refusing:
+        DEFAULT_BACKEND = "default"
+
+        def parse_router_config(self, config):  # pragma: no cover - not reached
+            raise AssertionError
+
+        def effective_route(self, config, agent):
+            raise ValueError("agents[cli-agent].route.family is required")
+
+        def select_backend(self, config):  # pragma: no cover
+            raise AssertionError
+
+        def route_leaves_tenant(self, target):  # pragma: no cover
+            raise AssertionError
+
+    monkeypatch.setattr(llm_routes, "_core", lambda: _Refusing())
+    result = llm_routes.declare(root, "cli-agent", "ollama")
+    assert "refused by core" in result.error
+    assert "route" not in (root / ".agents" / "agents.yaml").read_text(encoding="utf-8")
+
+
+def test_declare_on_a_bundle_without_the_seam_writes_nothing(tmp_path, monkeypatch):
+    root = _with_agent(tmp_path)
+    monkeypatch.setattr(llm_routes, "_core", lambda: None)
+    result = llm_routes.declare(root, "cli-agent", "ollama")
+    assert "llm-router seam" in result.error
+    assert "route" not in (root / ".agents" / "agents.yaml").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# the command surface for declare
+
+
+def _wire(monkeypatch, root):
+    import otaman_cli.commands.policy as P
+
+    monkeypatch.setattr(P, "find_project_root", lambda: root)
+    return P
+
+
+def test_the_command_declares_and_names_the_file(tmp_path, monkeypatch, capsys):
+    root = _with_agent(tmp_path)
+    P = _wire(monkeypatch, root)
+    rc = P.cmd_policy(["routes", "--declare", "cli-agent", "--family", "ollama", "--local"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "ollama (local)" in out
+    assert ".agents/agents.yaml" in out
+    # The opt-in scenario, stated: a route without a router: block stays native.
+    assert "native path" in out
+
+
+def test_the_command_refuses_an_unknown_agent_with_exit_two(tmp_path, monkeypatch, capsys):
+    root = _with_agent(tmp_path)
+    P = _wire(monkeypatch, root)
+    rc = P.cmd_policy(["routes", "--declare", "nope", "--family", "ollama"])
+    assert rc == 2
+    assert "Not declared" in capsys.readouterr().out
+
+
+def test_route_flags_without_declare_are_refused(tmp_path, monkeypatch, capsys):
+    """`--family` alone would silently list instead of declaring."""
+    root = _with_agent(tmp_path)
+    P = _wire(monkeypatch, root)
+    rc = P.cmd_policy(["routes", "--family", "ollama"])
+    assert rc != 0
+    assert "only apply with --declare" in capsys.readouterr().out
+
+
+def test_the_declare_form_is_advertised_in_the_usage(capsys):
+    import otaman_cli.commands.policy as P
+
+    P.cmd_policy(["--help"])
+    assert "--declare" in capsys.readouterr().out
+
+
+def test_the_json_form_names_where_the_declarations_came_from(tmp_path, monkeypatch, capsys):
+    import json
+
+    root = _with_agent(tmp_path, extra="    route: anthropic\n")
+    P = _wire(monkeypatch, root)
+    P.cmd_policy(["routes", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["agents_source"] == llm_routes.REGISTRY_REL
+    assert payload["routes"][0]["family"] == "anthropic"
