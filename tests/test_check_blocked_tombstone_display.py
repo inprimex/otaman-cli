@@ -84,6 +84,23 @@ MIXED = (
 )
 
 
+def _line_with(out: str, needle: str) -> str:
+    """The first output line containing *needle*, or "" .
+
+    Used instead of asserting on a whole rendered line: the separator between a
+    title and its state is an EM DASH, and the Windows runner decodes the
+    subprocess output with the locale codec (cp1252), so a literal
+    `"title \u2014 state"` comparison fails there on the character rather than on
+    the behaviour. Finding the line and asserting the state within it keeps
+    "these two facts are on the SAME row" without pinning a byte sequence that
+    three platforms disagree about.
+    """
+    for line in out.splitlines():
+        if needle in line:
+            return line
+    return ""
+
+
 def test_all_tombstoned_entries_produce_no_blocked_section(project: Path) -> None:
     (project / ".agents" / "blocked" / "cli-agent.md").write_text(
         TOMBSTONED_ONLY,
@@ -175,7 +192,7 @@ def test_a_dependency_wait_names_the_agent_not_a_human_approval(project: Path) -
     (project / ".agents" / "blocked" / "cli-agent.md").write_text(DEPENDENCY, encoding="utf-8")
     out = _run_check(project)
     assert "1 live" in out
-    assert "registry-access-contract-1-2-and-2-1 — waiting on core-agent" in out
+    assert "waiting on core-agent" in _line_with(out, "registry-access-contract-1-2-and-2-1")
     assert "waiting for human approval" not in out
     # The change is the stable ref for a dependency wait; the proposal line is not
     # printed, because there is no proposal.
@@ -221,7 +238,7 @@ def test_both_kinds_in_one_file_each_get_their_own_wording(project: Path) -> Non
     )
     out = _run_check(project)
     assert "2 live" in out
-    assert "Still-active-change — waiting for human approval" in out
+    assert "waiting for human approval" in _line_with(out, "Still-active-change")
     assert f"Proposal: {stem}" in out, "the approval wait keeps its proposal ref"
-    assert "registry-access-contract-1-2-and-2-1 — waiting on core-agent" in out
+    assert "waiting on core-agent" in _line_with(out, "registry-access-contract-1-2-and-2-1")
     assert "Change: registry-access-contract" in out
