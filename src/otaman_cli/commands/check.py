@@ -376,7 +376,27 @@ def cmd_check(args: list[str]) -> int:
                 headline += f", {len(stale)} stale"
             UI.blocked(headline)
 
+            # A blocked entry has two KINDS and this surface only ever rendered one.
+            # `awaiting-dependency` — an agent waiting on another AGENT's code — was
+            # printed as "waiting for human approval", which is the opposite of true:
+            # it tells the human they owe an approval while the task is waiting on a
+            # sibling repo, and it hides WHO. Measured on this file with three live
+            # dependency waits (core-agent ×2, bridge-agent), all three mislabelled.
+            # The kind is already core's single-home property, inferred for legacy
+            # entries that predate the field — this surface simply never asked.
             for entry in live:
+                if entry.kind == mod.KIND_DEPENDENCY:
+                    waiting_on = entry.get("blocked by")
+                    who = f"waiting on {waiting_on}" if waiting_on else "waiting on a dependency"
+                    UI.bullet(f"{entry.display_title} — {who}")
+                    if not waiting_on:
+                        # Never invented: an entry with no `Blocked by` names nobody,
+                        # and saying so is what gets the field filled in.
+                        UI.muted("  no `Blocked by` recorded — nobody is named as the blocker")
+                    if entry.change:
+                        UI.muted(f"Change: {entry.change}")
+                    continue
+
                 stem = entry.proposal
                 has_approval = any(
                     m["type"] == "spec-change-approved" and stem and stem in m.get("subject", "")
