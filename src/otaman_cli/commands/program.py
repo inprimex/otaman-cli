@@ -24,7 +24,7 @@ from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.ui import UI
 
 _TRANSITIONS = ("limit", "suspend", "resume", "archive", "unarchive")
-_ACTIONS = ("status", "enforce", *_TRANSITIONS)
+_ACTIONS = ("list", "show", "status", "enforce", *_TRANSITIONS)
 # action → the target lifecycle state it records.
 _TARGET_STATE = {
     "limit": "limited",
@@ -154,6 +154,121 @@ def _enforce_lifecycle(program: str) -> None:
         UI.muted("  runner: deregistered the program")
     if not closed and not payload.get("deregistered"):
         UI.muted("  runner: no session action for this state")
+
+
+def _cmd_list(as_json: bool) -> int:
+    """`otaman program list [--json]` — every program on this machine, with state (1.2).
+
+    Enumeration is core's read primitive; this renders it. Each row says whether a
+    program can actually be READ there, because core's enumeration tests the path
+    SHAPE: on this machine `orgs/<org>/programs/` also holds two stray directories
+    from a botched copy, and listing them as programs without comment would send a
+    human (or the picker) at a directory holding `LICENSE` and nothing else.
+    """
+    from otaman_cli import program_context
+
+    try:
+        rows = program_context.rows()
+    except RuntimeError as exc:
+        return _bail(str(exc), 2)
+
+    if as_json:
+        import json
+
+        print(
+            json.dumps(
+                {
+                    "workspace": str(program_context.workspace_root()),
+                    "programs": [
+                        {
+                            "name": r.name,
+                            "org": r.org,
+                            "path": str(r.path),
+                            "state": r.state,
+                            "readable": r.readable,
+                        }
+                        for r in rows
+                    ],
+                },
+                indent=2,
+            )
+        )
+        return 0
+
+    UI.header("Programs")
+    if not rows:
+        # init-advice-only-at-zero: this IS the zero case, so the advice belongs here.
+        UI.muted(f"No programs under {program_context.workspace_root()}/orgs/")
+        UI.action("`otaman init` creates one.")
+        return 0
+    for row in rows:
+        mark = "  [archived]" if row.state == "archived" else ""
+        UI.bullet(f"{row.name}  ({row.org}){mark}")
+        UI.kv("  state", row.state)
+        UI.kv("  path", str(row.path))
+        if row.note:
+            UI.warn(f"  {row.note}")
+    unreadable = [r for r in rows if not r.readable]
+    if unreadable:
+        UI.muted(
+            f"{len(unreadable)} of {len(rows)} candidate(s) hold no program metadata — "
+            "they match the directory layout and nothing else."
+        )
+    return 0
+
+
+def _cmd_show(name: str | None, as_json: bool) -> int:
+    """`otaman program show [<name>] [--json]` — the program in context, resolved (1.2).
+
+    No name resolves by core's precedence (cwd walk, then the picker on a TTY), so
+    `otaman program show` inside any program's tree answers for that program. A name
+    that does not exist is refused naming the ones that do — an explicit miss is an
+    error, never a fall-through to "some other program".
+    """
+    from otaman_cli import program_context
+
+    try:
+        program = program_context.resolve(explicit=name)
+    except RuntimeError as exc:
+        return _bail(str(exc), 2)
+    except Exception as exc:  # noqa: BLE001 - core's ProgramContextError
+        if as_json:
+            import json
+
+            print(json.dumps({"error": str(exc)}, indent=2))
+            return 2
+        parts = program_context.refusal(exc)
+        UI.error(parts.error)
+        if parts.candidates:
+            UI.muted("Available programs:")
+            for candidate in parts.candidates:
+                UI.muted(f"  - {candidate}")
+        if parts.advice:
+            UI.action(parts.advice)
+        return 2
+
+    if as_json:
+        import json
+
+        print(
+            json.dumps(
+                {
+                    "name": program.name,
+                    "org": program.org,
+                    "path": str(program.path),
+                    "state": program.state,
+                    "archived": program.archived,
+                },
+                indent=2,
+            )
+        )
+        return 0
+
+    UI.header(f"Program: {program.name}")
+    UI.kv("org", program.org)
+    UI.kv("state", program.state + ("  [archived]" if program.archived else ""))
+    UI.kv("path", str(program.path))
+    return 0
 
 
 def _cmd_status(org_root: Path, program: str, *, as_json: bool) -> int:
@@ -479,6 +594,8 @@ def cmd_program(args: list[str]) -> int:
     """
     if not args or args[0] in ("-h", "--help"):
         UI.muted("Usage: otaman program <action> [program] [--reason R] [--dry-run] [--json]")
+        UI.muted("       otaman program list [--json]            — every program, with state")
+        UI.muted("       otaman program show [<name>] [--json]   — the program in context")
         UI.muted(f"Actions: {', '.join(_ACTIONS)}")
         return 0 if args else 1
     action = args[0]
@@ -508,6 +625,10 @@ def cmd_program(args: list[str]) -> int:
         else:
             return _bail(f"Unexpected argument: {a}")
 
+    if action == "list":
+        return _cmd_list(as_json)
+    if action == "show":
+        return _cmd_show(program, as_json)
     if action == "status":
         ctx = _resolve_context()
         if ctx is None:
@@ -531,7 +652,7 @@ register(
     CommandSpec(
         name="program",
         handler=cmd_program,
-        help="Program lifecycle: status | limit | suspend | resume | archive | unarchive",
+        help=("Programs: list | show | status | limit | suspend | resume | archive | unarchive"),
     )
 )
 
