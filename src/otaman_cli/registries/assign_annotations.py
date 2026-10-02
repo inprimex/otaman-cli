@@ -20,7 +20,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from otaman_cli.registries.loader import resolve_registry_path, yaml_load
+from otaman_cli.registries import access
+from otaman_cli.registries.loader import resolve_registry_path
 
 # Matches @solution:SOL-N-slug — solution id must follow the Appendix B.3 regex.
 _SOLUTION_ANNOTATION_RE = re.compile(r"@solution:(SOL-\d+-[a-z0-9-]+)")
@@ -86,10 +87,18 @@ def load_solution_ids_from_yaml(solutions_yaml_path: Path) -> set[str]:
     Returns an empty set when the file is missing — callers can decide
     whether that's an error.
     """
-    raw = yaml_load(solutions_yaml_path)
-    if not isinstance(raw, dict):
+    core = access.contract()
+    if core is None:
+        # No contract in this bundle → the scan cannot validate, which it already
+        # treats as "skip validation" (an unlocatable solutions.yaml does the same).
+        # A read around the contract is not the fallback: an unvalidated annotation is
+        # reported as unvalidated, where a second reader would be a second access home.
         return set()
-    sols = raw.get("solutions") or []
+    # `open_register`, not `load_register`: a missing file is an empty set here (the
+    # documented contract of this function), and `load_register` raises on it.
+    register = access.open_register(core, solutions_yaml_path, records_key="solutions")
+    data = register.data if isinstance(register.data, dict) else {}
+    sols = data.get("solutions") or []
     return {s["id"] for s in sols if isinstance(s, dict) and "id" in s}
 
 

@@ -32,7 +32,13 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "  - name: biz\n    path: ../biz\n    owner: cpo-agent\n"
         "program:\n  registries:\n    strategy_repo: biz\n"
         "role-assignments:\n"
-        "  cpo: human\n  ceo: human\n  cto: human\n",
+        "  cpo: human\n  ceo: human\n  cto: human\n"
+        # The three authority verbs (accept-cost / choose / reject-cost) record an
+        # approval naming a resolved roster human as of rac 1.2, and core refuses the
+        # write without one. The roster is what the verb attests to; `_run` sets
+        # OTAMAN_HUMAN so it resolves.
+        "human-roster:\n"
+        "  - name: roman\n    roles: [cto, cofounder, approver]\n",
         encoding="utf-8",
     )
     biz = parent / "biz"
@@ -40,8 +46,12 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return meta
 
 
-def _run(meta: Path, *cli_args: str) -> subprocess.CompletedProcess:
+def _run(meta: Path, *cli_args: str, human: str | None = "roman") -> subprocess.CompletedProcess:
     env = {**os.environ, "OTAMAN_AGENT": "human"}
+    if human is None:
+        env.pop("OTAMAN_HUMAN", None)
+    else:
+        env["OTAMAN_HUMAN"] = human
     for _var in ("OTAMAN_ROOT", "MAESTRO_ROOT"):
         env.pop(_var, None)
     return subprocess.run(
@@ -830,7 +840,12 @@ def test_choose_sets_chosen_solution_without_cost(project: Path) -> None:
     assert o["chosen-solution"] == "SOL-2-a"
     assert o.get("cost-accepted") in (None, False)  # choose does NOT accept cost
     assert o["status"] == "Backlog"  # status unchanged (that's accept-cost's job)
-    assert o["transitions"][-1]["action"] == "choose"
+    # The choose entry, not the last entry: as of rac 1.2 a bookkeeping `update-field`
+    # row carrying `updated` follows it (the contract records the field/old/new triple
+    # only for a single-field transition, and the schema requires `updated`).
+    chooses = [t for t in o["transitions"] if t["action"] == "choose"]
+    assert len(chooses) == 1
+    assert chooses[-1]["new"] == "SOL-2-a"
 
 
 def test_choose_rejects_solution_of_another_outcome(project: Path) -> None:

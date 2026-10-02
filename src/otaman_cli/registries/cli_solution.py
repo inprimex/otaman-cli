@@ -17,12 +17,8 @@ from typing import Any
 
 from otaman_cli.bus_paths import _resolve_bus_paths
 from otaman_cli.identity import find_project_root, not_in_project_message
-from otaman_cli.registries import bus_messages
-from otaman_cli.registries.loader import (
-    resolve_registry_path,
-    yaml_dump,
-    yaml_load,
-)
+from otaman_cli.registries import access, bus_messages
+from otaman_cli.registries.loader import resolve_registry_path
 from otaman_cli.registries.platform_ext import load_program_extensions
 from otaman_cli.registries.roles import (
     hat_advisory,
@@ -30,7 +26,7 @@ from otaman_cli.registries.roles import (
     resolve_roles,
 )
 from otaman_cli.registries.solutions import SolutionRegistry
-from otaman_cli.registries.transitions import append_transition, make_transition
+from otaman_cli.registries.transitions import make_transition
 from otaman_cli.ui import UI
 
 
@@ -39,37 +35,84 @@ def _bail(msg: str, code: int = 1) -> int:
     return code
 
 
-def _load(root: Path) -> tuple[Path, Any] | None:
+def _contract():
+    """core's registry access contract, or None — see `access.contract`."""
+    return access.contract()
+
+
+def _no_contract() -> int:
+    return _bail(access.NO_CONTRACT, code=2)
+
+
+def _load(root: Path) -> tuple[Path, Any] | int:
+    """``(path, Register)`` — the register as CORE loads it (rac 1.2).
+
+    The ruamel round-trip behind `load_register` is what keeps the CTO's comments and
+    key order in solutions.yaml across a write; the old `yaml_load`/`yaml_dump` pair was
+    this file's share of the second access home the contract removes.
+    """
+    core = _contract()
+    if core is None:
+        # The exit CODE, not None: a contract-less bundle is a refusal (2), and the
+        # read path must not report it as the generic error (1) the unresolvable
+        # registry home below is.
+        return _no_contract()
     path = resolve_registry_path(root, "solutions")
     if path is None:
-        _bail(
+        return _bail(
             "Cannot locate solutions.yaml — the registry home is not configured.\n"
             "  Set program.registries.strategy_repo in platform.yaml (or OTAMAN_STRATEGY_DIR)."
         )
-        return None
-    raw = yaml_load(path)
-    if not isinstance(raw, dict):
-        raw = {}
-    if "solutions" not in raw or raw["solutions"] is None:
-        raw["solutions"] = []
-    return path, raw
+    return path, access.open_register(core, path, records_key="solutions")
 
 
-def _save(path: Path, raw: dict, *, validate: bool = True) -> int:
+def _save(path: Path, register: Any, *, validate: bool = True) -> int:
+    """Write through the contract, after the same pydantic gate as before.
+
+    The Appendix-B check stays on this side deliberately: `save_register` is the
+    serializer, and losing validation at the one place every write passes through would
+    make the chokepoint the place that stopped checking (rac 1.3 moves it into core).
+    """
+    core = _contract()
+    if core is None:
+        return _no_contract()
     if validate:
         try:
-            SolutionRegistry.model_validate(raw)
+            SolutionRegistry.model_validate(register.data)
         except Exception as exc:
             return _bail(f"Validation failed; refusing to write solutions.yaml:\n{exc}", code=2)
-    yaml_dump(raw, path)
+    core.save_register(register, path)
     return 0
 
 
-def _find(raw: dict, sol_id: str) -> dict | None:
-    for s in raw.get("solutions", []):
-        if s.get("id") == sol_id:
-            return s
-    return None
+def _find(register: Any, sol_id: str) -> dict | None:
+    core = _contract()
+    if core is None:
+        return None
+    return core.get(register, sol_id)
+
+
+def _records(register: Any) -> list[dict]:
+    """The solution records — for the read-only passes (triage, sibling listing)."""
+    data = getattr(register, "data", register)
+    return list(data.get("solutions") or [])
+
+
+def _outcome_record(root: Path, outcome_id: str) -> dict | None:
+    """The parent outcome, read THROUGH the contract (no verb opens a register itself).
+
+    Two cross-register invariants need it: triage scores against the parent's impact,
+    and promote-to-complete refuses unless the parent chose THIS solution. The contract
+    takes one register at a time, so the invariant stays in the surface; the read does
+    not.
+    """
+    core = _contract()
+    if core is None:
+        return None
+    path = resolve_registry_path(root, "outcomes")
+    if path is None or not path.is_file():
+        return None
+    return core.get(core.load_register(path, records_key="outcomes"), outcome_id)
 
 
 def _ctx(root: Path):
@@ -106,11 +149,11 @@ def cmd_add(args: dict[str, Any]) -> int:
         return _bail("Missing required flag(s): " + ", ".join(f"--{k}" for k in missing))
 
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    path, raw = loaded
+    if isinstance(loaded, int):
+        return loaded
+    path, register = loaded
 
-    if _find(raw, args["id"]):
+    if _find(register, args["id"]):
         return _bail(f"Solution already exists: {args['id']}")
 
     # Derive effort-days from t-shirt size if provided
@@ -143,8 +186,14 @@ def cmd_add(args: dict[str, Any]) -> int:
             make_transition(actor=actor, action="create", to="Considering", note=args.get("note")),
         ],
     }
-    raw["solutions"].append(new_entry)
-    rc = _save(path, raw)
+    core = _contract()
+    if core is None:
+        return _no_contract()
+    try:
+        core.create_record(register, new_entry)
+    except Exception as exc:  # noqa: BLE001 - blank/duplicate id is the contract's refusal
+        return _bail(f"Cannot add solution {args['id']}: {exc}", code=2)
+    rc = _save(path, register)
     if rc != 0:
         return rc
 
@@ -159,21 +208,14 @@ def cmd_add(args: dict[str, Any]) -> int:
     if not triage_cfg.enabled:
         return 0
 
-    outcome_path = resolve_registry_path(root, "outcomes")
-    if outcome_path is None or not outcome_path.is_file():
-        return 0
-    outcomes_raw = yaml_load(outcome_path) or {}
-    parent = next(
-        (o for o in outcomes_raw.get("outcomes", []) if o.get("id") == args["outcome"]),
-        None,
-    )
+    parent = _outcome_record(root, args["outcome"])
     if parent is None or parent.get("impact") is None:
         return 0  # G.3: skip when impact is unset
 
     from otaman_cli.registries import triage as _triage
 
     weights = dict(triage_cfg.impact_weights)
-    ranked = _triage.rank_solutions(parent, raw["solutions"], weights)
+    ranked = _triage.rank_solutions(parent, _records(register), weights)
     if not ranked:
         return 0  # G.3: all-discarded or all missing effort
     chosen = ranked[0]
@@ -205,10 +247,10 @@ def cmd_list(args: dict[str, Any]) -> int:
     if not root:
         return _bail(not_in_project_message())
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    _, raw = loaded
-    solutions = raw.get("solutions", [])
+    if isinstance(loaded, int):
+        return loaded
+    _, register = loaded
+    solutions = _records(register)
     outcome_filter = args.get("outcome")
     status_filter = args.get("status")
     release_filter = args.get("release")
@@ -248,10 +290,10 @@ def cmd_show(args: dict[str, Any]) -> int:
     if not root:
         return _bail(not_in_project_message())
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    _, raw = loaded
-    s = _find(raw, args["id"])
+    if isinstance(loaded, int):
+        return loaded
+    _, register = loaded
+    s = _find(register, args["id"])
     if not s:
         return _bail(f"Solution not found: {args['id']}")
 
@@ -296,10 +338,10 @@ def cmd_history(args: dict[str, Any]) -> int:
     if not root:
         return _bail(not_in_project_message())
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    _, raw = loaded
-    s = _find(raw, args["id"])
+    if isinstance(loaded, int):
+        return loaded
+    _, register = loaded
+    s = _find(register, args["id"])
     if not s:
         return _bail(f"Solution not found: {args['id']}")
     transitions = s.get("transitions") or []
@@ -336,25 +378,32 @@ def cmd_propose(args: dict[str, Any]) -> int:
     hat_advisory("solution.propose", ("cto",), root)
 
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    path, raw = loaded
-    s = _find(raw, args["id"])
+    if isinstance(loaded, int):
+        return loaded
+    path, register = loaded
+    s = _find(register, args["id"])
     if not s:
         return _bail(f"Solution not found: {args['id']}")
 
-    append_transition(
-        s,
-        make_transition(actor=actor, action="propose", note=args.get("reason")),
+    core = _contract()
+    if core is None:
+        return _no_contract()
+    core.apply_transition(
+        register,
+        args["id"],
+        action="propose",
+        by=actor,
+        at=bus_messages.utc_now_iso(),
+        fields={"updated": bus_messages.utc_now_iso()[:10]},
+        note=args.get("reason"),
     )
-    s["updated"] = bus_messages.utc_now_iso()[:10]
-    rc = _save(path, raw)
+    rc = _save(path, register)
     if rc != 0:
         return rc
 
     # Gather all solutions for the same outcome to include in the estimates-ready msg
     sibling_solutions = [
-        x for x in raw.get("solutions", []) if x.get("outcome-id") == s.get("outcome-id")
+        x for x in _records(register) if x.get("outcome-id") == s.get("outcome-id")
     ]
     msg = bus_messages.build_outcome_estimates_ready(
         outcome_id=s.get("outcome-id"),
@@ -376,21 +425,17 @@ def cmd_promote_to_complete(args: dict[str, Any]) -> int:
     hat_advisory("solution.promote-to-complete", ("cto",), root)
 
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    path, raw = loaded
-    s = _find(raw, args["id"])
+    if isinstance(loaded, int):
+        return loaded
+    path, register = loaded
+    s = _find(register, args["id"])
     if not s:
         return _bail(f"Solution not found: {args['id']}")
 
     # Validation per B.7 rule 9: parent outcome's chosen-solution must equal this id
     outcome_path = resolve_registry_path(root, "outcomes")
     if outcome_path and outcome_path.is_file():
-        oraw = yaml_load(outcome_path) or {}
-        parent = next(
-            (o for o in oraw.get("outcomes", []) if o.get("id") == s.get("outcome-id")),
-            None,
-        )
+        parent = _outcome_record(root, s.get("outcome-id"))
         if parent is None:
             return _bail(f"Parent outcome not found: {s.get('outcome-id')}")
         if parent.get("chosen-solution") != s["id"]:
@@ -401,19 +446,20 @@ def cmd_promote_to_complete(args: dict[str, Any]) -> int:
             )
 
     from_status = s.get("status", "In-Progress")
-    s["status"] = "Complete"
-    s["updated"] = bus_messages.utc_now_iso()[:10]
-    append_transition(
-        s,
-        make_transition(
-            actor=actor,
-            action="promote-to-complete",
-            from_=from_status,
-            to="Complete",
-            note=args.get("reason"),
-        ),
+    core = _contract()
+    if core is None:
+        return _no_contract()
+    core.apply_transition(
+        register,
+        s["id"],
+        action="promote-to-complete",
+        by=actor,
+        at=bus_messages.utc_now_iso(),
+        to_status="Complete",
+        fields={"updated": bus_messages.utc_now_iso()[:10]},
+        note=args.get("reason"),
     )
-    rc = _save(path, raw)
+    rc = _save(path, register)
     if rc != 0:
         return rc
 
@@ -439,10 +485,10 @@ def cmd_discard(args: dict[str, Any]) -> int:
     hat_advisory("solution.discard", ("cto",), root)
 
     loaded = _load(root)
-    if loaded is None:
-        return 1
-    path, raw = loaded
-    s = _find(raw, args["id"])
+    if isinstance(loaded, int):
+        return loaded
+    path, register = loaded
+    s = _find(register, args["id"])
     if not s:
         return _bail(f"Solution not found: {args['id']}")
     if s.get("status") == "Discarded":
@@ -450,19 +496,20 @@ def cmd_discard(args: dict[str, Any]) -> int:
         return 0
 
     from_status = s.get("status", "Considering")
-    s["status"] = "Discarded"
-    s["updated"] = bus_messages.utc_now_iso()[:10]
-    append_transition(
-        s,
-        make_transition(
-            actor=actor,
-            action="discard",
-            from_=from_status,
-            to="Discarded",
-            note=args.get("reason"),
-        ),
+    core = _contract()
+    if core is None:
+        return _no_contract()
+    core.apply_transition(
+        register,
+        s["id"],
+        action="discard",
+        by=actor,
+        at=bus_messages.utc_now_iso(),
+        to_status="Discarded",
+        fields={"updated": bus_messages.utc_now_iso()[:10]},
+        note=args.get("reason"),
     )
-    rc = _save(path, raw)
+    rc = _save(path, register)
     if rc != 0:
         return rc
 
