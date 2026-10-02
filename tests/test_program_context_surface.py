@@ -196,10 +196,13 @@ def test_the_refusal_marks_a_candidate_that_is_not_a_program(tmp_path):
 
     root = _workspace(tmp_path, programs={"real": True, "debris": False})
     parts = pc.refusal(_Err("no program in context", enumerate_programs(root)))
-    debris = next(c for c in parts.candidates if c.startswith("debris"))
     real = next(c for c in parts.candidates if c.startswith("real"))
-    assert pc.NOT_A_PROGRAM in debris
     assert pc.NOT_A_PROGRAM not in real
+    # Only when core hands one up — it filters them out as of its program-marker
+    # predicate, and the mark exists for the enumerations that do not.
+    debris = next((c for c in parts.candidates if c.startswith("debris")), None)
+    if debris is not None:
+        assert pc.NOT_A_PROGRAM in debris
 
 
 def test_refusal_lines_flattens_the_same_facts(tmp_path):
@@ -215,19 +218,29 @@ def test_refusal_lines_flattens_the_same_facts(tmp_path):
 
 
 def test_rows_annotate_which_candidates_are_actually_programs(tmp_path, monkeypatch):
-    """The live measurement: 3 candidates, 1 program. Core's enumeration tests the
-    path shape; a listing that called all three programs would send the human (or the
-    picker) at a directory holding `LICENSE` and nothing else."""
+    """The live measurement: 3 candidates, 1 program — core's enumeration tested the
+    path SHAPE, so a listing that called all three programs would send the human (or the
+    picker) at a directory holding `LICENSE` and nothing else.
+
+    Asserted so it holds on EITHER side of core's predicate (asked for in
+    20261002T141002, in core's tree as `_has_program_marker` while this was written).
+    Pinning "three rows" would pin the defect: the day core filters, this test fails on
+    the fix I requested — which is the mistake #255 corrected for the `--all` ruling,
+    made twice in one day. What this surface OWNS is the annotation being RIGHT for
+    whatever core returns.
+    """
     monkeypatch.setenv(
         "OTAMAN_WORKSPACE",
         str(_workspace(tmp_path, programs={"real": True, "debris-a": False, "debris-b": False})),
     )
     rows = {r.name: r for r in pc.rows()}
-    assert set(rows) == {"real", "debris-a", "debris-b"}
+    assert "real" in rows, "a real program must be listed under any predicate"
     assert rows["real"].readable is True
     assert rows["real"].note == ""
-    assert rows["debris-a"].readable is False
-    assert pc.NOT_A_PROGRAM in rows["debris-a"].note
+    for name, row in rows.items():
+        expected = name == "real"
+        assert row.readable is expected, f"{name}: annotation disagrees with the tree"
+        assert (row.note == "") is expected
 
 
 def test_rows_are_empty_on_a_machine_with_no_orgs_tree(tmp_path, monkeypatch):
@@ -268,13 +281,17 @@ def _wire(monkeypatch, workspace: Path, cwd: Path):
 
 
 def test_program_list_renders_state_and_marks_non_programs(tmp_path, monkeypatch, capsys):
+    """The footer and the mark appear IF core hands up a non-program, and the real
+    program always renders — true under either predicate."""
     root = _workspace(tmp_path, programs={"real": True, "debris": False})
     P = _wire(monkeypatch, root, tmp_path)
     assert P.cmd_program(["list"]) == 0
     out = capsys.readouterr().out
-    assert "real" in out and "debris" in out
-    assert pc.NOT_A_PROGRAM in out
-    assert "1 of 2 candidate(s) hold no program metadata" in out
+    assert "real" in out
+    assert "active" in out
+    listed_debris = "debris" in out
+    assert (pc.NOT_A_PROGRAM in out) is listed_debris
+    assert ("hold no program metadata" in out) is listed_debris
 
 
 def test_program_list_json_carries_the_readable_flag(tmp_path, monkeypatch, capsys):
@@ -286,7 +303,8 @@ def test_program_list_json_carries_the_readable_flag(tmp_path, monkeypatch, caps
     payload = json.loads(capsys.readouterr().out)
     by_name = {p["name"]: p for p in payload["programs"]}
     assert by_name["real"]["readable"] is True
-    assert by_name["debris"]["readable"] is False
+    for name, entry in by_name.items():
+        assert entry["readable"] is (name == "real")
     assert payload["workspace"] == str(root)
 
 
@@ -428,21 +446,16 @@ def test_a_nested_layout_resolves_to_the_NEAREST_program(tmp_path):
     """
     from otaman_cli.commands.connection import _infer_org_from_path
 
-    inner = (
-        tmp_path
-        / "orgs"
-        / "outer"
-        / "programs"
-        / "p1"
-        / "checkout"
-        / "orgs"
-        / "inner"
-        / "programs"
-        / "p2"
-        / "p2-meta"
-    )
-    inner.mkdir(parents=True)
-    assert _infer_org_from_path(inner) == "inner"
+    outer_program = tmp_path / "orgs" / "outer" / "programs" / "p1"
+    inner_program = outer_program / "checkout" / "orgs" / "inner" / "programs" / "p2"
+    # BOTH get a meta dir with a platform.yaml: a program dir holding nothing is not a
+    # program under core's marker predicate, and a fixture that is not a program cannot
+    # test which program wins.
+    for program in (outer_program, inner_program):
+        meta = program / f"{program.name}-meta"
+        meta.mkdir(parents=True)
+        (meta / "platform.yaml").write_text("project: demo\n", encoding="utf-8")
+    assert _infer_org_from_path(inner_program / "p2-meta") == "inner"
 
 
 def test_an_org_level_path_still_resolves_by_the_wider_scan(tmp_path):
