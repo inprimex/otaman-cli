@@ -408,10 +408,18 @@ def _label_of(route: Any) -> str:
 
 
 def _rel(root: Path, path: Path) -> str:
+    """The written file as a program-relative POSIX path.
+
+    `as_posix`, not `str`: on Windows the latter renders `.agents\agents.yaml`, which
+    is right for the OS and wrong for this string's two jobs — it is printed next to
+    `REGISTRY_REL` (a forward-slash literal, as the docs and the spec write it) and it
+    is what a reader copies into a message or a config. One spelling everywhere, which
+    is also what let the Windows leg of CI catch this.
+    """
     try:
-        return str(path.relative_to(root))
+        return path.relative_to(root).as_posix()
     except ValueError:  # pragma: no cover - both paths are built from root
-        return str(path)
+        return path.as_posix()
 
 
 __all__ = [

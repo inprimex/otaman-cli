@@ -427,6 +427,16 @@ def _with_agent(tmp_path, *, name: str = "cli-agent", extra: str = "") -> Path:
     return root
 
 
+def test_the_written_path_is_posix_on_every_platform(tmp_path):
+    """The Windows leg of CI caught this: `str(relative_to(...))` renders
+    `.agents\\agents.yaml`, which is right for the OS and wrong for a string printed
+    beside `REGISTRY_REL` and copied into messages and config."""
+    root = _with_agent(tmp_path)
+    result = llm_routes.declare(root, "cli-agent", "ollama")
+    assert "\\" not in result.where
+    assert result.where == llm_routes.REGISTRY_REL
+
+
 def test_declare_writes_the_route_into_the_file_that_declares_the_agent(tmp_path):
     root = _with_agent(tmp_path)
     result = llm_routes.declare(root, "cli-agent", "ollama", model="llama3.1", local=True)
