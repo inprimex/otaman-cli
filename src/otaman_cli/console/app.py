@@ -844,21 +844,62 @@ class InboxScreen(_DecisionActions, Screen):
         #: None until the first snapshot lands — distinct from "loaded, and
         #: empty", which is what tells the mount path whether to show Loading…
         self._cache = None
+        #: The review policy for this program, read once per visit (cmt 1.2).
+        self._policy_view = None
+        #: Group keys the human has explicitly opened or closed, so a repaint does
+        #: not undo them. The loader polls and every poll repaints: without this, a
+        #: `task-complete` pile you just opened slams shut a second later. Mandatory
+        #: groups are not in here — they are always open.
+        self._group_open: dict[tuple[str, str], bool] = {}
+        #: True while `_paint` is building the tree, so the expand/collapse messages
+        #: it causes are not mistaken for the human's own toggles.
+        self._painting = False
 
     def compose(self) -> ComposeResult:
         yield _header()
         yield _identity_badge_widget(self.program.root)
         yield _mode_banner(
             f"Messages to you · {self.program.name}",
-            "enter open · a approve · A approve-auto · x reject · d defer · "
-            "r refresh · esc back · q quit",
+            "enter open/toggle · → expand · ← collapse · a approve · A approve-auto · "
+            "x reject · d defer · r refresh · esc back · q quit",
         )
-        yield ListView(id="inbox-list")
+        tree = MessagesTree("messages", id="inbox-tree")
+        # The groups ARE the top level: a "messages" root above them is a row that
+        # costs a keystroke and says nothing the header does not.
+        tree.show_root = False
+        # Textual expands a node when it is SELECTED unless this is off, and it does
+        # that BEFORE posting NodeSelected — so Enter on a collapsed group arrived at
+        # the handler already expanded, the handler dutifully collapsed it, and Enter
+        # did nothing at all. The artifact lens turns it off for the same reason
+        # (Enter there means "open"); here Enter means "toggle", and the toggle has
+        # to be the screen's alone or the two cancel out.
+        tree.auto_expand = False
+        yield tree
         yield Footer()
 
     def action_refresh(self) -> None:
         invalidate_read_caches()
+        # cmt 1.2 — `r` re-reads the review policy too, which is what makes "a
+        # policy edit reorders live" true. Dropping it here rather than reloading
+        # now keeps platform.yaml off the render path: the next paint loads it once.
+        self._policy_view = None
         self._load(show_loading=not self._cache)
+
+    def _policy(self):
+        """The active review policy, read ONCE per visit (cmt 1.2).
+
+        `load_policy` reads platform.yaml, and crs D1 keeps file reads off the
+        render path — so this is primed from `on_mount` and from the refresh WORKER
+        (off the UI thread), dropped by `r`, and only ever a dict read by the time
+        `_paint` asks. It stays lazy rather than eager so a `_paint` called directly
+        — as five test modules do — still shows the program's real policy instead of
+        silently falling back to the shipped default.
+        """
+        from otaman_cli.console.messages_tree import load_policy
+
+        if self._policy_view is None:
+            self._policy_view = load_policy(self.program.root)
+        return self._policy_view
 
     def _rows(self):
         """The queue as the store holds it — a dict read, never a bus scan."""
@@ -884,6 +925,10 @@ class InboxScreen(_DecisionActions, Screen):
                 self._loader = Loader(self.program, self._store, source=self._injected_event_source)
                 self._own_loader = True
         self._optimistic = OptimisticWrites(self._store)
+        # Prime the policy here, where a one-off platform.yaml read is already the
+        # norm (the identity badge does one in `compose`), so the first paint is a
+        # pure dict read.
+        self._policy()
         # Repaint whenever a new store version lands, whoever produced it: the
         # Loader's poll, an external write, or this screen's own refresh. The
         # subscriber takes the SNAPSHOT, so a missed version costs nothing.
@@ -936,12 +981,13 @@ class InboxScreen(_DecisionActions, Screen):
         paints when the new version lands.
         """
         if show_loading and self._cache is None:
-            lv = self.query_one("#inbox-list", ListView)
-            lv.clear()
-            lv.append(ListItem(Label("Loading messages…")))
+            tree = self.query_one("#inbox-tree", Tree)
+            tree.clear()
+            tree.root.add_leaf("Loading messages…")
         self.run_worker(self._load_worker, thread=True, exclusive=True, group="inbox")
 
     def _load_worker(self) -> None:
+        self._policy()  # re-read after `r` — on this thread, never the UI one
         self._loader.refresh()  # dispatches; the subscription repaints
 
     def _apply(self, rows=None) -> None:
@@ -949,31 +995,178 @@ class InboxScreen(_DecisionActions, Screen):
         self._cache = rows
         self._paint(rows)
 
+    #: The keys line, under the counts and the active policy.
+    _KEYS = (
+        "enter open/toggle · → expand · ← collapse · a approve · A approve-auto · "
+        "x reject · d defer · r refresh · esc back · q quit"
+    )
+
     def _paint(self, rows) -> None:
-        lv = self.query_one("#inbox-list", ListView)
-        lv.clear()
-        if rows:
-            decisions = sum(1 for r in rows if r.is_decision)
-            questions = sum(1 for r in rows if getattr(r, "needs_answer", False))
-            for r in rows:
-                lv.append(_ProposalItem(r))
-            # The count says what needs ACTING on, not just what arrived — a
-            # single list still has to distinguish those.
-            self.query_one("#mode-banner", Static).update(
-                f"Messages to you · {self.program.name} — "
-                f"{decisions} awaiting your decision"
-                + (f", {questions} awaiting your answer" if questions else "")
-                + f", {len(rows) - decisions - questions} to read\n"
-                "enter open · a approve · A approve-auto · x reject · d defer · "
-                "r refresh · esc back · q quit"
+        """Paint the policy-ordered, type-grouped tree (cmt 1.2).
+
+        Roman's console had ~1000 pending with the four items needing him buried in
+        task-complete noise, because the list was ordered by arrival. Now the review
+        policy decides: mandatory type groups first and expanded, opt-in collapsed,
+        the auto-triage pile one count at the bottom.
+
+        Measured: the grouping is 1.65ms for his 1035 rows and the whole paint 44ms
+        (return-from-message 42ms) against crs's 500ms budget — so nothing is cached
+        where it could go stale. The groups are rebuilt and re-classified from the
+        snapshot every time, which is what keeps a newly-arrived mandatory message
+        out of a collapsed group.
+        """
+        from rich.text import Text
+
+        from otaman_cli.console.messages_tree import group_messages, summary_line
+
+        tree = self.query_one("#inbox-tree", Tree)
+        # Remembered BEFORE the clear, restored after: see `_restore_cursor`.
+        keep = getattr(self._highlighted_proposal(), "stem", None)
+        tree.clear()
+        banner = self.query_one("#mode-banner", Static)
+        policy = self._policy()
+        if not rows:
+            tree.root.add_leaf(Text("Nothing addressed to you."))
+            banner.update(
+                f"Messages to you · {self.program.name} — nothing pending\n"
+                f"{policy.source_line}\n{self._KEYS}"
             )
-        else:
-            lv.append(ListItem(Label("Nothing addressed to you.")))
+            return
+        groups = group_messages(rows, policy.policy)
+        self._painting = True
+        try:
+            for group in groups:
+                # A mandatory group is open on EVERY paint whatever the human last
+                # did to it — the delta's "nothing mandatory can hide", enforced by
+                # re-derivation rather than by refusing a keystroke. Every other
+                # group honours an explicit toggle and otherwise takes the policy's
+                # default.
+                #
+                # Every label goes in as `Text`, never a str: a Tree label is Rich
+                # MARKUP and these labels are made of square brackets — `[SCR]`,
+                # `[normal]`, `[a/A/x/d]`, `[mandatory]`. As markup those parse as
+                # style tags and render as NOTHING; the flat list said
+                # `Label(..., markup=False)` for the same reason. Caught by a group
+                # header that printed `spec-change-request (1)` with its class
+                # silently eaten.
+                node = tree.root.add(
+                    Text(group.label), data=group, expand=self._group_expanded(group)
+                )
+                for row in group.rows:
+                    node.add_leaf(Text(queue_row_label(row)), data=row)
+        finally:
+            self._painting = False
+        self._restore_cursor(keep)
+        banner.update(
+            f"Messages to you · {self.program.name} — {summary_line(groups)}\n"
+            f"{policy.source_line}\n{self._KEYS}"
+        )
+
+    @staticmethod
+    def _group_key(group) -> tuple[str, str]:
+        """Identity of a group ACROSS repaints: its class and its type.
+
+        Not the label — that carries the count, so every arriving message would
+        make the group a different one and lose the human's expansion.
+        """
+        return (group.review_class, group.msg_type)
+
+    def _group_expanded(self, group) -> bool:
+        from otaman_core.review_policy import MANDATORY
+
+        if group.review_class == MANDATORY:
+            return True
+        return self._group_open.get(self._group_key(group), not group.collapsed)
+
+    def _remember_toggle(self, node, is_open: bool) -> None:
+        """Record a human expand/collapse so the next paint keeps it (cmt 1.2).
+
+        Driven off Textual's own expanded/collapsed messages rather than off the
+        Enter handler, so `space`, a mouse click and `→`/`←` are all remembered —
+        four ways in, one place that records.
+        """
+        from otaman_cli.console.messages_tree import MessageGroup
+
+        if self._painting:
+            return
+        group = getattr(node, "data", None)
+        if isinstance(group, MessageGroup):
+            self._group_open[self._group_key(group)] = is_open
+
+    def on_tree_node_expanded(self, event: Tree.NodeExpanded) -> None:
+        self._remember_toggle(event.node, True)
+
+    def on_tree_node_collapsed(self, event: Tree.NodeCollapsed) -> None:
+        self._remember_toggle(event.node, False)
+
+    def _restore_cursor(self, stem) -> None:
+        """Keep the cursor on the row it was on; else start on the first row.
+
+        A Tree has NO cursor until something sets one (`cursor_line` is -1), so
+        without this the action keys would do nothing until the human pressed an
+        arrow — the flat list highlighted its first item. And the cursor has to
+        SURVIVE a repaint: the loader polls, every poll repaints, and a cursor that
+        snapped back to the top each time would make the list unusable while
+        messages arrive.
+        """
+        tree = self.query_one("#inbox-tree", Tree)
+        if stem is not None:
+            for line, tree_line in enumerate(tree._tree_lines):  # noqa: SLF001
+                row = self._row_of(tree_line.node)
+                if row is not None and getattr(row, "stem", None) == stem:
+                    tree.cursor_line = line
+                    return
+        if self.focus_row(0) is None:
+            # Nothing visible to land on (every group collapsed): the first header.
+            tree.cursor_line = 0
+
+    @staticmethod
+    def _row_of(node):
+        """The message a tree node carries, or None if it is a group header.
+
+        Tested by what it is NOT: a group is the only node type this screen
+        creates, so everything else carrying data is a row. An `isinstance(...,
+        Proposal)` test here would reject the lightweight row doubles five test
+        modules build — and, more to the point, would make the screen care about a
+        class instead of a contract, which the flat list never did.
+        """
+        from otaman_cli.console.messages_tree import MessageGroup
+
+        data = getattr(node, "data", None)
+        return None if isinstance(data, MessageGroup) else data
 
     def _highlighted_proposal(self):
-        lv = self.query_one("#inbox-list", ListView)
-        item = lv.highlighted_child
-        return getattr(item, "proposal", None)
+        """The message under the cursor, or None on a group header."""
+        return self._row_of(getattr(self.query_one("#inbox-tree", Tree), "cursor_node", None))
+
+    def focus_row(self, index: int = 0):
+        """Put the cursor on the *index*-th VISIBLE message row; return it (cmt 1.2).
+
+        The flat list let a caller say `index = 0`; a tree has to skip group headers
+        and collapsed rows to mean the same thing. Used by the action tests and by
+        anything that wants "the top item" without knowing the grouping.
+        """
+        tree = self.query_one("#inbox-tree", Tree)
+        seen = 0
+        for line, tree_line in enumerate(tree._tree_lines):  # noqa: SLF001 - Textual's index
+            row = self._row_of(tree_line.node)
+            if row is None:
+                continue
+            if seen == index:
+                tree.cursor_line = line
+                return row
+            seen += 1
+        return None
+
+    def visible_rows(self) -> list:
+        """Every message row the tree is currently showing, in paint order.
+
+        A collapsed group's rows are deliberately absent: this answers "what can the
+        human see", which is the question the triage change is about.
+        """
+        tree = self.query_one("#inbox-tree", Tree)
+        rows = [self._row_of(line.node) for line in tree._tree_lines]  # noqa: SLF001
+        return [row for row in rows if row is not None]
 
     def _decision_target(self):
         row = self._highlighted_proposal()
@@ -999,9 +1192,20 @@ class InboxScreen(_DecisionActions, Screen):
             label=getattr(target, "subject", "") or target.stem,
         )
 
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        row = getattr(event.item, "proposal", None)
+    def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
+        """Enter: a group toggles, a message opens (cmt 1.2).
+
+        Toggle is NOT refused on a mandatory group. The invariant the delta states
+        is about what renders — and the next paint re-expands it from the policy, so
+        a hand-collapsed must-see group cannot stay hidden. Refusing the keystroke
+        instead would have to be enforced on `space` and the mouse too, in a widget
+        shared with the artifact lens.
+        """
+        row = self._row_of(event.node)
         if row is None:
+            # A group header (or a placeholder leaf): Enter toggles it.
+            if getattr(event.node, "data", None) is not None:
+                event.node.collapse() if event.node.is_expanded else event.node.expand()
             return
         # A decision opens the decide view; a plain message opens the read view.
         if row.is_decision:
@@ -1079,6 +1283,17 @@ class ArtifactTree(Tree):
         node = self.cursor_node
         if node is not None and node.is_expanded:
             node.collapse()
+
+
+class MessagesTree(ArtifactTree):
+    """The Messages tree (cmt 1.2) — the artifact tree's arrow contract, reused.
+
+    Subclassed rather than re-bound: `→ expands / ← collapses` was advertised on
+    every lens strip for weeks while bound to nothing, and the fix for that was ONE
+    widget that actually implements it. A second copy here is how that divergence
+    starts again. Nothing is added — the grouping lives in
+    `otaman_cli.console.messages_tree`, and Enter is the screen's.
+    """
 
 
 class TreeScreen(Screen):

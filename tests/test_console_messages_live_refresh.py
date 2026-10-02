@@ -98,9 +98,14 @@ def _add(program, n: int, *, msg_type: str = "spec-change-request") -> None:
 
 
 def _rows(screen) -> int:
-    from textual.widgets import ListView
+    """Rows the tree HOLDS, collapsed groups included (cmt 1.2).
 
-    return len(screen.query_one("#inbox-list", ListView).children)
+    Not `visible_rows()`: these tests ask whether a refresh picked a new message
+    up, and an auto-triage message lands in a collapsed group — invisible, and
+    still very much picked up.
+    """
+    tree = screen.query_one("#inbox-tree")
+    return sum(len(group.children) for group in tree.root.children)
 
 
 async def _open(app, pilot, program, source):

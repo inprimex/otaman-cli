@@ -112,7 +112,6 @@ def test_home_m_opens_inbox(program):
 @_textual
 def test_inbox_enter_opens_read_view(program):
     _msg(program, "20260909T100001-a", to="human", frm="deploy-agent", subject="Read me")
-    from textual.widgets import ListView
 
     from otaman_cli.console.app import InboxMessageScreen, InboxScreen, OtamanConsole
 
@@ -124,10 +123,16 @@ def test_inbox_enter_opens_read_view(program):
             await pilot.pause()
             await app.workers.wait_for_complete()  # the list loads OFF the UI
             await pilot.pause()  # thread now (#177)
-            lv = app.screen.query_one("#inbox-list", ListView)
-            assert len(lv.children) == 1
-            lv.focus()
-            lv.index = 0  # highlight the row so Enter selects it
+            # cmt 1.2 — an `info` message is auto-triage: it starts as a collapsed
+            # count at the bottom. Enter on the header opens the group, Enter on the
+            # row opens the message; both halves of that contract are driven here.
+            tree = app.screen.query_one("#inbox-tree")
+            tree.focus()
+            assert app.screen.visible_rows() == []  # collapsed: the count only
+            await pilot.press("enter")  # cursor starts on the group header
+            await pilot.pause()
+            assert len(app.screen.visible_rows()) == 1
+            app.screen.focus_row(0)  # cursor on the row so Enter selects it
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()

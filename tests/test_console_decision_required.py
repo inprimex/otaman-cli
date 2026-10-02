@@ -230,10 +230,39 @@ def test_the_awaiting_filter_reads_a_projection_not_the_bus():
 
 def test_the_header_counts_questions_separately_from_decisions():
     """ "3 awaiting your decision" that silently included questions would
-    under-describe what the human is looking at."""
-    import inspect
+    under-describe what the human is looking at.
 
-    from otaman_cli.console.app import InboxScreen
+    cmt 1.2 moved the header's counting into `messages_tree.summary_line` (the
+    banner now counts per review class), so this asserts the behaviour where it
+    lives instead of grepping `_paint` — both kinds still have to be named, and now
+    the assertion would survive the next move.
+    """
+    from dataclasses import dataclass
 
-    src = inspect.getsource(InboxScreen._paint)
-    assert "awaiting your answer" in src
+    from otaman_core.review_policy import default_policy
+
+    from otaman_cli.console.messages_tree import group_messages, summary_line
+
+    @dataclass(frozen=True)
+    class Row:
+        stem: str
+        msg_type: str
+        priority: str = "normal"
+        timestamp: str = "2026-10-01T00:00:00Z"
+
+        @property
+        def is_decision(self) -> bool:
+            return self.msg_type == "spec-change-request"
+
+        @property
+        def needs_answer(self) -> bool:
+            return self.msg_type == DECISION_REQUIRED
+
+    rows = [
+        Row("s1", "spec-change-request"),
+        Row("s2", "spec-change-request"),
+        Row("q1", DECISION_REQUIRED),
+    ]
+    line = summary_line(group_messages(rows, default_policy()))
+    assert "2 awaiting your decision" in line
+    assert "1 awaiting your answer" in line

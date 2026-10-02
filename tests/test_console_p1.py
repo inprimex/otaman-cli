@@ -156,7 +156,6 @@ def test_from_human_flag_survives_the_merge(program):
 
 @_textual
 def test_messages_screen_lists_both_kinds(program):
-    from textual.widgets import ListView
 
     from otaman_cli.console.app import InboxScreen, OtamanConsole
 
@@ -171,8 +170,19 @@ def test_messages_screen_lists_both_kinds(program):
             await pilot.pause()
             await app.workers.wait_for_complete()  # the list loads OFF the UI
             await pilot.pause()  # thread now (#177)
-            lv = app.screen.query_one("#inbox-list", ListView)
-            assert len(lv.children) == 2
+            # cmt 1.2 — both kinds are still carried, now as two TYPE GROUPS: the
+            # SCR is mandatory (rendered expanded), `info` is auto-triage (one
+            # collapsed count at the bottom). "Lists both kinds" is a statement
+            # about the groups now; the rows are what expanding shows.
+            tree = app.screen.query_one("#inbox-tree")
+            labels = [str(g.label) for g in tree.root.children]
+            assert any("spec-change-request (1)" in x and "mandatory" in x for x in labels)
+            assert any("info (1)" in x and "auto-triage" in x for x in labels)
+            assert len(app.screen.visible_rows()) == 1  # the decision, uncollapsed
+            for group in tree.root.children:
+                group.expand()
+            await pilot.pause()
+            assert len(app.screen.visible_rows()) == 2
             await app.action_quit()
 
     asyncio.run(go())
@@ -212,7 +222,6 @@ def test_decision_keys_are_bound_on_the_messages_screen(program):
 @_textual
 def test_a_plain_row_refuses_the_decision_keys_by_name(program):
     """The dead-end rule from P0: the key says why it does not apply."""
-    from textual.widgets import ListView
 
     from otaman_cli.console.app import InboxScreen, OtamanConsole
 
@@ -227,7 +236,7 @@ def test_a_plain_row_refuses_the_decision_keys_by_name(program):
             await pilot.pause()
             await app.workers.wait_for_complete()  # the list loads OFF the UI
             await pilot.pause()  # thread now (#177)
-            app.screen.query_one("#inbox-list", ListView).index = 0
+            app.screen.focus_row(0)
             await pilot.pause()
             type(app).notify = lambda self, msg, **kw: notes.append(str(msg))
             app.screen.action_approve()
