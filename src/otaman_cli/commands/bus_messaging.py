@@ -57,8 +57,32 @@ MESSAGE_TYPES: frozenset[str] = frozenset(
         # `to: all` notification (`info` stays targeted; warn+allow retired).
         # Registered in otaman-core VALID_TYPES + _BROADCAST_TYPES.
         "announce",
+        # delivery-authorization-envelope 1.1 — the anti-silent-blocking type.
+        # It was MISSING here, and `cmd_send` hard-rejects an unregistered type, so
+        # `otaman send human --type decision-required` — the emit the orchestration
+        # rules make a DUTY — exited 2. Measured on the live bus: ZERO
+        # decision-required messages exist across active/ and every archive month,
+        # while the console has carried a render path for them since dae 1.2 and the
+        # rule's own incidents cost ~11h of fleet delivery (2026-09-25) and a 62-hour
+        # frozen verification gate (2026-09-26). The duty named a message the tooling
+        # could not produce.
+        #
+        # Non-privileged by core's ruling: it ASKS for a decision, it does not assert
+        # one (core/validate_message.py VALID_TYPES + PRIVILEGED_TYPES, committed
+        # main cc2f93b). Its three required fields are enforced below and by core.
+        "decision-required",
     }
 )
+
+#: The frontmatter keys a `decision-required` must carry, and what each answers.
+#: core enforces their PRESENCE (`_DECISION_REQUIRED_FIELDS`); the flags exist here
+#: so an agent can actually write them, and the refusal below names all three at once
+#: rather than letting core reject the send one field at a time.
+DECISION_REQUIRED_FLAGS: dict[str, str] = {
+    "decision": "the decision needed, in one line",
+    "blocks": "the task/change it blocks",
+    "unblock-condition": "what would let you continue",
+}
 
 _PRIVILEGED_TYPE_HINTS: dict[str, str] = {
     "spec-change-approved": "Use `otaman approve approve <stem>` instead.",
@@ -112,6 +136,14 @@ def cmd_send(args: list[str]) -> int:
         "--depends-on", dest="depends_on", action="append", default=None, metavar="STEP-OR-ID"
     )
     parser.add_argument("--stop-at", dest="stop_at", default=None)
+    # delivery-authorization-envelope 1.1 — the decision-required triple. core
+    # REQUIRES all three on that type, so without flags every such send failed
+    # validation even once the type was registered.
+    parser.add_argument("--decision", dest="decision", default=None)
+    parser.add_argument("--blocks", dest="blocks", default=None)
+    parser.add_argument(
+        "--unblock-condition", dest="unblock_condition", default=None, metavar="TEXT"
+    )
     try:
         ns = parser.parse_args(args)
     except SystemExit:
@@ -224,6 +256,35 @@ def cmd_send(args: list[str]) -> int:
             for e in seq_errors:
                 UI.muted(f"  - {e}")
             return 2
+
+    # delivery-authorization-envelope 1.1 — the decision-required triple, refused
+    # HERE and named in full. core rejects a send missing any of them, but its error
+    # arrives per-field after the write is attempted; an agent emitting under the
+    # never-block-silently duty should be told the whole shape at once, because the
+    # alternative to a clean refusal is the silent freeze the type exists to replace.
+    decision_fields = {
+        "decision": ns.decision,
+        "blocks": ns.blocks,
+        "unblock-condition": ns.unblock_condition,
+    }
+    decision_supplied = any(v not in (None, "") for v in decision_fields.values())
+    if ns.msg_type == "decision-required":
+        missing = [k for k, v in decision_fields.items() if not (v or "").strip()]
+        if missing:
+            UI.error("decision-required must carry " + ", ".join(f"--{k}" for k in missing) + ".")
+            for key, what in DECISION_REQUIRED_FLAGS.items():
+                UI.muted(f"  --{key:18s} {what}")
+            UI.muted(
+                "  A bare 'I am blocked' with no decision, no blocked work and no "
+                "unblock condition is the silent freeze this type replaces."
+            )
+            return 2
+    elif decision_supplied:
+        UI.error(
+            "--decision/--blocks/--unblock-condition are a decision-required "
+            f"contract — not valid with --type {ns.msg_type!r}."
+        )
+        return 2
 
     root = find_project_root()
     if not root:
@@ -393,6 +454,18 @@ def cmd_send(args: list[str]) -> int:
     from otaman_cli.sequencing import render_frontmatter_lines
 
     seq_lines = render_frontmatter_lines(seq_fields) if seq_supplied else ""
+    # Quoted: a decision line routinely contains a colon ("merge or delegate: #74"),
+    # which unquoted YAML reads as a mapping and the validator then sees as a missing
+    # field. The console reads `blocks` for its row annotation (dae 1.2).
+    decision_lines = (
+        "".join(
+            f'{key}: "{str(value).replace(chr(34), chr(39))}"\n'
+            for key, value in decision_fields.items()
+            if (value or "").strip()
+        )
+        if ns.msg_type == "decision-required"
+        else ""
+    )
     cc_line = f"cc: [{', '.join(effective_cc)}]\n" if effective_cc else ""
     content = (
         f"---\n"
@@ -402,6 +475,7 @@ def cmd_send(args: list[str]) -> int:
         f"{cc_line}"
         f"{uri_lines}"
         f"{seq_lines}"
+        f"{decision_lines}"
         f"priority: {ns.priority}\n"
         f"type: {ns.msg_type}\n"
         f"timestamp: {ts_iso}\n"
