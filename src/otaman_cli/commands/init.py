@@ -1159,6 +1159,84 @@ def _scaffold_launcher_after_init(platform_yaml: Path, *, yes: bool) -> None:
     UI.ok(f".gitignore                 {result.gitignore.relative_to(output_dir.parent)}")
 
 
+#: Flags `otaman init` accepts. An unknown flag is refused rather than skipped: the
+#: skip is what let `--help` through as "no arguments at all" and run a full init.
+_INIT_FLAGS = frozenset({"--update", "--shell", "--yes", "-y", "--dry-run", "--skip-doctor"})
+
+
+def _help_requested(args: list[str]) -> bool:
+    """True if `-h`/`--help` appears anywhere — help wins over everything.
+
+    Anywhere, not just first: `otaman init . --help` is a request for help too, and the
+    whole point is that no argument shape reaches a side effect while help was asked for.
+    """
+    return any(a in ("-h", "--help") for a in args)
+
+
+def _print_init_usage() -> None:
+    UI.muted("Usage: otaman init [<config>] [--dry-run] [--skip-doctor]")
+    UI.muted("       otaman init --update [--dry-run]   — write agent: fields to repo markers")
+    UI.muted("       otaman init --shell                — install the otaman-agent shell function")
+    UI.muted("       otaman init companion-repos [--program S] [--repos K,K] [--dry-run] [--force]")
+    UI.muted("")
+    UI.muted("With no <config> and no platform.yaml here, init is INTERACTIVE: it offers")
+    UI.muted("to scan sibling repos or start the wizard. Both write files — run it")
+    UI.muted("deliberately, from the program root, not from inside a repo.")
+
+
+def _unsupported_flags(args: list[str]) -> list[str]:
+    """Flags this verb does not accept, in order, deduped."""
+    out: list[str] = []
+    for a in args:
+        if a.startswith("-") and a not in _INIT_FLAGS and a not in out:
+            out.append(a)
+    return out
+
+
+def _refuse_inside_a_repo_of_a_program(args: list[str]) -> int | None:
+    """Refuse a bare `init` in a REPO of a program (deploy-agent's third ask).
+
+    An `.otaman` marker naming a DIFFERENT directory is the repo saying "my program
+    lives over there". The destructive run read that as nothing and overwrote it. So a
+    bare `otaman init` here refuses and says where to run it instead.
+
+    Scoped deliberately: only the BARE form, which is the one that routes into scan or
+    the wizard. `--update` is the verb you are meant to run from anywhere, an explicit
+    `<config>` path says what you meant, and `--shell` touches no project at all.
+    """
+    if args:
+        return None  # an explicit config path or a sub-action — the caller said what
+    cwd = Path.cwd()
+    marker = cwd / ".otaman"
+    if not marker.is_file():
+        return None
+    try:
+        target = next(
+            (
+                line.strip()
+                for line in marker.read_text(encoding="utf-8").splitlines()
+                if line.strip() and not line.strip().startswith("#") and ":" not in line
+            ),
+            "",
+        )
+    except OSError:
+        return None
+    if not target or target in (".", "./"):
+        return None  # already a program root by its own marker
+    resolved = (cwd / target).resolve()
+    UI.error("This directory is a REPO of a program, not a program root.")
+    UI.muted(f"  its `.otaman` marker names: {target}")
+    if resolved.is_dir():
+        UI.muted(f"  which resolves to:        {resolved}")
+    UI.muted("")
+    UI.muted("A bare `otaman init` here would scaffold this repo as a program and")
+    UI.muted("repoint that marker — the split-brain-bus state (deploy-agent,")
+    UI.muted("20261002T133408). Run it from the program root instead, or:")
+    UI.action(f"  cd {target} && otaman init")
+    UI.muted("  otaman init --update        — what you want if you came for the markers")
+    return 2
+
+
 def cmd_init(args: list[str]) -> int:
     """Initialize an otaman project. Creates platform.yaml if none exists.
 
@@ -1174,12 +1252,45 @@ def cmd_init(args: list[str]) -> int:
     With --shell: installs the otaman-agent shell function into ~/.bashrc or
     ~/.zshrc after explicit consent.
     """
+    # HELP BEFORE ANY SIDE EFFECT, and an unknown flag REFUSED (deploy-agent
+    # 20261002T133408, urgent).
+    #
+    # `otaman init --help` did not print help. The flag loop below used to end with
+    # `elif args[i].startswith("-"): i += 1  # skip unknown flags`, so `--help` was
+    # DISCARDED — leaving the bare-`otaman init` shape, which routes through the
+    # pre-flight: no platform.yaml, sibling git repos found (a repo inside a program dir
+    # has ~18), prompt "Scan and generate platform.yaml from them? [Y/n]" where EMPTY
+    # INPUT IS YES, and `cmd_scan` runs. On deploy-agent's tree that repointed `.otaman`
+    # from `../otaman-meta` to `.` — the split-brain-bus state — and a cleanup
+    # afterwards left check-ownership.sh refusing every Bash and Write call, needing a
+    # human outside the session to recover. Reproduced here: it created a `<repo>-otaman/`
+    # meta dir with `git init` plus a `.gitignore` before scan bailed.
+    #
+    # `otaman propose` got this guard after the 2026-08-31 footgun post-mortem; `init`
+    # never did, and it is the far more destructive verb. Both halves matter: help must
+    # print, and an unknown flag must not silently become "no flags at all".
+    if _help_requested(args):
+        _print_init_usage()
+        return 0
+
     # `otaman init companion-repos` — sub-action with its own flags
     # (--program / --repos / --dry-run / --force), dispatched before the
     # generic flag parsing below (previously a main()-level pre-dispatch
     # special-case ahead of the shared flag loop).
     if args and args[0] == "companion-repos":
         return cmd_init_companion_repos(args[1:])
+
+    refusal = _unsupported_flags(args)
+    if refusal:
+        UI.error(f"Unknown flag(s) for `otaman init`: {', '.join(refusal)}")
+        UI.muted("`otaman init` takes no flags it does not recognise — an unrecognised")
+        UI.muted("one used to be discarded, which turned `--help` into a full init.")
+        _print_init_usage()
+        return 2
+
+    guard = _refuse_inside_a_repo_of_a_program(args)
+    if guard is not None:
+        return guard
 
     update = False
     dry_run = False
@@ -1205,7 +1316,10 @@ def cmd_init(args: list[str]) -> int:
             skip_doctor = True
             i += 1
         elif args[i].startswith("-"):
-            i += 1  # skip unknown flags
+            # Unreachable now — `_unsupported_flags` refuses above. Kept as a loop arm
+            # so a flag added to `_INIT_FLAGS` without a branch here cannot fall into
+            # `positional` and be read as a config path.
+            i += 1
         else:
             positional.append(args[i])
             i += 1
