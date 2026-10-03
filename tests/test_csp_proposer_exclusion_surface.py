@@ -267,10 +267,108 @@ def test_the_exclusion_itself_is_not_implemented_here():
         elif isinstance(node, ast.arg):
             logic.add(node.arg)
 
-    assert not {name for name in logic if "proposer" in name.lower()}, (
-        "this surface names a proposer in its logic — selection is core's"
+    # REFINED 2026-10-03, and narrowly. The rule is "cli does not RE-DERIVE the
+    # exclusion"; the original encoding was "the word proposer appears in no
+    # identifier", a proxy that also forbids DELEGATING — passing `proposer=` INTO
+    # core's SelectionContext so core applies its own invariant. The coverage probe
+    # (`_self_owned_uncovered`, plugin's csp finding 20261003T032605) must do exactly
+    # that: it asks what the configured chain selects for a self-owned proposal, and
+    # the question is meaningless without naming the proposer.
+    #
+    # So `proposer` is allowed ONLY as a keyword argument to a SelectionContext call.
+    # Anywhere else — a local binding, a comparison, a comprehension filter — is
+    # re-derivation and still fails. The sabotage the original guard existed to catch
+    # (cli removing the proposer from a candidate set itself) trips this one too; that
+    # is verified in `test_a_locally_derived_exclusion_still_fails_the_guard`.
+    # BOUND names are the tell, and this is where the first refinement was too loose:
+    # subtracting every SelectionContext keyword from the whole module's identifiers
+    # let a local `proposer = ...` through, because the probe legitimately passes
+    # `proposer=` elsewhere. Verified by sabotage — cli filtering the proposer out of
+    # core's result was caught only by behavioural tests, not by this guard, which is
+    # the one whose job it is.
+    #
+    # So: a proposer may be PASSED (a keyword at a SelectionContext call) and never
+    # BOUND (assigned, or taken as a parameter). Deriving an exclusion requires a
+    # binding; delegating one does not.
+    bound = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                for sub in ast.walk(target):
+                    if isinstance(sub, ast.Name):
+                        bound.add(sub.id)
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)) and isinstance(node.target, ast.Name):
+            bound.add(node.target.id)
+        elif isinstance(node, ast.comprehension):
+            for sub in ast.walk(node.target):
+                if isinstance(sub, ast.Name):
+                    bound.add(sub.id)
+        elif isinstance(node, ast.For):
+            for sub in ast.walk(node.target):
+                if isinstance(sub, ast.Name):
+                    bound.add(sub.id)
+    offenders = {name for name in bound if "proposer" in name.lower()}
+    assert not offenders, (
+        f"this surface BINDS a proposer ({sorted(offenders)}) — deriving the exclusion "
+        "needs a binding, delegating it does not; pass proposer= into SelectionContext"
+    )
+    assert {n for n in logic if "proposer" in n.lower()}, (
+        "the coverage probe no longer names a proposer at all — it cannot be asking "
+        "what a self-owned proposal selects"
     )
     assert "select_critics" in logic, "selection is still delegated to core"
+
+
+def _is_selection_context(node) -> bool:
+    """Whether *node* is a `SelectionContext(...)` call, however it is referenced."""
+    import ast as _ast
+
+    func = node.func
+    if isinstance(func, _ast.Name):
+        return func.id.endswith("SelectionContext")
+    if isinstance(func, _ast.Attribute):
+        return func.attr == "SelectionContext"
+    return False
+
+
+def test_a_locally_derived_exclusion_still_fails_the_guard():
+    """The refinement above did not loosen the rule it refines.
+
+    Re-derivation looks like a local `proposer` binding and a filter over candidates.
+    Compiled here rather than described, so the guard is tested against the shape it
+    exists to reject rather than against my claim about it.
+    """
+    import ast
+
+    reimplementation = ast.parse(
+        "def pick(core, config, hook, ctx, proposer):\n"
+        "    result = core.select_critics(config, hook, ctx)\n"
+        "    return tuple(c for c in result.critics if c != proposer)\n"
+    )
+    logic = set()
+    for node in ast.walk(reimplementation):
+        if isinstance(node, ast.Name):
+            logic.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            logic.add(node.attr)
+        elif isinstance(node, ast.keyword) and node.arg:
+            logic.add(node.arg)
+        elif isinstance(node, ast.arg):
+            logic.add(node.arg)
+    bound = {n.arg for n in ast.walk(reimplementation) if isinstance(n, ast.arg)}
+    for node in ast.walk(reimplementation):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                for sub in ast.walk(target):
+                    if isinstance(sub, ast.Name):
+                        bound.add(sub.id)
+
+    assert {n for n in bound if "proposer" in n.lower()}, (
+        "the refined guard would accept a locally derived exclusion — it must not"
+    )
+    assert logic, "sanity: the sample parsed"
 
 
 def test_the_label_is_true_by_construction_not_by_cores_state():
@@ -309,12 +407,33 @@ def test_the_label_is_true_by_construction_not_by_cores_state():
     ]
 
     assert contexts, "this surface no longer builds a SelectionContext — re-read the note"
-    for call in contexts:
-        passed = {kw.arg for kw in call.keywords}
-        assert "proposer" not in passed, (
-            "the surface now names a proposer, so what it shows is POST-exclusion for "
-            "that agent — PRE_EXCLUSION_NOTE is then a false label, not a cautious one"
-        )
+
+    # Scoped to the context that produces the RENDERED set. `_view` builds that one
+    # and must stay proposer-free, or PRE_EXCLUSION_NOTE becomes a false label rather
+    # than a cautious one. `_self_owned_uncovered` builds a different context, with a
+    # proposer, for a different question (does a self-owned proposal get a critic) —
+    # and its answer is reported separately, never as `view.critics`.
+    rendering_funcs = {"_view", "load"}
+    probe_funcs = {"_self_owned_uncovered"}
+    seen_probe_context = False
+    for func in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
+        for call in [n for n in ast.walk(func) if isinstance(n, ast.Call)]:
+            if not _is_selection_context(call):
+                continue
+            passed = {kw.arg for kw in call.keywords}
+            if func.name in rendering_funcs:
+                assert "proposer" not in passed, (
+                    f"{func.name} now names a proposer, so what it renders is "
+                    "POST-exclusion for that agent — PRE_EXCLUSION_NOTE is then a "
+                    "false label, not a cautious one"
+                )
+            if func.name in probe_funcs:
+                seen_probe_context = True
+                assert "proposer" in passed, (
+                    f"{func.name} asks whether a SELF-OWNED proposal selects anyone; "
+                    "without a proposer it asks nothing and would report false coverage"
+                )
+    assert seen_probe_context, "the coverage probe no longer builds a context — re-read it"
 
 
 # ---------------------------------------------------------------------------

@@ -1205,6 +1205,7 @@ def _cmd_critics(rest: list[str]) -> int:
                             # its own proposals.
                             "critics_are_pre_exclusion": True,
                             "single_candidate": h.single_candidate or None,
+                            "self_owned_uncovered": list(h.self_owned_uncovered),
                             "evaluated": h.evaluated,
                             "note": h.note,
                         }
@@ -1240,6 +1241,17 @@ def _cmd_critics(rest: list[str]) -> int:
                 f"        selects: {', '.join(h.critics) or '(nobody)'}"
                 f"   [{critic_policy.PRE_EXCLUSION_NOTE}]"
             )
+            if h.self_owned_uncovered:
+                UI.warn(
+                    "   self-owned proposals by "
+                    + ", ".join(h.self_owned_uncovered)
+                    + " select NO critic under this chain"
+                )
+                UI.muted(
+                    f"     {h.primary} empties under proposer-exclusion and fallback "
+                    f"{h.fallback!r} selects nobody — pick a fallback that selects over "
+                    "candidates, or say self-owned proposals are out of scope"
+                )
             lone = h.single_candidate
             if lone:
                 # Pre-dispatch, not a runtime surprise: this agent's own proposals
