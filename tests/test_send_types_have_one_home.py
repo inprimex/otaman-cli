@@ -1,71 +1,119 @@
-"""Every type core declares valid is CLASSIFIED here — none may be silently absent.
+"""`otaman send`'s type list has ONE home, and it is core's.
 
-`otaman send` keeps its own narrower allow-list (`MESSAGE_TYPES`): core's `VALID_TYPES`
-is the authority on what is a legal message, but most of those are emitted by machinery,
-not typed by a person. That curation is legitimate and it is a SECOND PRODUCER of a fact
-core owns, which is the shape that drifts — "agrees with core right up to the release
-where it doesn't".
-
-It already did. `decision-required` was valid in core and absent from cli's list, and
-`cmd_send` hard-rejects an unregistered type, so the emit that every agent's operating
-rules make a DUTY before blocking exited 2:
+cli used to keep its own narrower allow-list, and it drifted: `decision-required` was
+valid in core, absent from cli's copy, and `cmd_send` hard-rejects an unregistered type,
+so the emit every agent's operating rules make a DUTY before blocking exited 2:
 
     [!] Unknown message type 'decision-required'.
 
-plugin-agent hit it for real on 2026-10-03 (20261003T074941) while blocked and following
-the rule verbatim, and fell back to `question`. The duty named a message the tooling
-could not produce — and an agent who hits a refusal may simply not emit, which is the
-silent halt the rule exists to prevent. The cost of that class is already measured:
-~11h of fleet delivery on 2026-09-25 and a 62-hour frozen verification gate on 09-26.
+Three agents hit it while following the rule — spec-agent at 05:36, plugin-agent at
+07:49 *while blocked*, and the measurement behind cli #278 — and each silently downgraded
+to `type: question`. That is the invisible halt the duty exists to prevent, and the class
+is already priced at ~11h of fleet delivery (2026-09-25) and a 62-hour frozen gate
+(09-26).
 
-So the omission is what gets guarded, not the list. A new non-privileged type in core
-must be classified as hand-sendable or machine-emitted, and until someone does, this
-test fails.
+#278 guarded the omission locally. spec-agent then ruled (20261003T083552) that the split
+belongs to core, which shipped it as `MACHINE_EMITTED_TYPES` + a derived
+`HAND_SENDABLE_TYPES` (core #124), with the ask that cli delete its interim list in the
+SAME change that imports — an interim copy that still passes its own guard looks finished,
+and is the next drift seed.
+
+So these tests no longer assert a partition cli maintains. They assert cli maintains
+NOTHING: that the import is live, that the one type whose absence broke a duty survives
+the derivation, and that the fallback for an older core fails toward sendable.
 """
 
 from __future__ import annotations
 
-from otaman_core.validate_message import PRIVILEGED_TYPES, VALID_TYPES
+import inspect
+import re
 
-from otaman_cli.commands.bus_messaging import MACHINE_EMITTED_TYPES, MESSAGE_TYPES
+from otaman_core.validate_message import (
+    HAND_SENDABLE_TYPES,
+    MACHINE_EMITTED_TYPES,
+    PRIVILEGED_TYPES,
+    VALID_TYPES,
+)
+
+import otaman_cli.commands.bus_messaging as bus_messaging
+from otaman_cli.commands.bus_messaging import MESSAGE_TYPES
 
 
-def test_every_core_type_is_classified():
-    """The identity that makes a silent omission impossible."""
-    classified = set(MESSAGE_TYPES) | set(MACHINE_EMITTED_TYPES) | set(PRIVILEGED_TYPES)
-    unclassified = set(VALID_TYPES) - classified
+def test_the_list_is_cores_not_a_copy():
+    """Identity, not equality-by-value: a copy that happens to agree today is exactly
+    what drifted before."""
+    assert MESSAGE_TYPES is HAND_SENDABLE_TYPES
 
-    assert not unclassified, (
-        "core declares these types and cli classifies none of them — add each to "
-        "MESSAGE_TYPES (a person sends it) or MACHINE_EMITTED_TYPES (a verb/daemon "
-        f"sends it): {sorted(unclassified)}"
+
+def test_cli_declares_no_type_list_of_its_own():
+    """spec-agent's ask: the interim #278 list must not outlive what replaced it.
+
+    Checked against the SOURCE, because a second list assigned under any other name is
+    the same defect wearing a different label.
+    """
+    src = inspect.getsource(bus_messaging)
+    head = src[: src.index("def ")] if "def " in src else src
+    literal_sets = re.findall(r"^(\w+)\s*:?\s*[\w\[\], |]*=\s*frozenset\(\s*$", head, re.M)
+
+    assert not literal_sets, (
+        f"a literal type set is back in bus_messaging — import core's instead: {literal_sets}"
     )
+    assert "MACHINE_EMITTED_TYPES: frozenset" not in src, "the interim #278 copy survived"
 
 
-def test_cli_invents_no_type_of_its_own():
-    """The other direction: a type cli offers that core rejects is a send that fails
-    at the write, after the operator has composed the whole message."""
-    invented = (set(MESSAGE_TYPES) | set(MACHINE_EMITTED_TYPES)) - set(VALID_TYPES)
-
-    assert not invented, f"not valid in core: {sorted(invented)}"
-
-
-def test_the_three_classifications_are_disjoint():
-    """A type in two buckets means the classification carries no information — and a
-    privileged type in `MESSAGE_TYPES` would be offered by the general send path, which
-    is the authority hole `PRIVILEGED_TYPES` exists to close."""
-    assert not set(MESSAGE_TYPES) & set(MACHINE_EMITTED_TYPES)
-    assert not set(MESSAGE_TYPES) & set(PRIVILEGED_TYPES), (
-        "a privileged type must never be hand-sendable"
-    )
-    assert not set(MACHINE_EMITTED_TYPES) & set(PRIVILEGED_TYPES)
-
-
-def test_decision_required_is_hand_sendable():
-    """The regression that paid for this file: it is the one type an agent MUST be able
-    to send by hand, because the duty is to emit it before blocking."""
+def test_decision_required_survives_the_derivation():
+    """The regression that paid for all of this."""
     assert "decision-required" in MESSAGE_TYPES
     assert "decision-required" not in PRIVILEGED_TYPES, (
-        "it ASKS for a decision rather than asserting one — privileging it would put "
-        "the anti-silent-block emit behind the TTY gate that only `otaman approve` has"
+        "privileging it would put the anti-silent-block emit behind the TTY gate that "
+        "only `otaman approve` has"
+    )
+    assert "decision-required" not in MACHINE_EMITTED_TYPES, "an agent sends this by hand"
+
+
+def test_the_derivation_excludes_exactly_the_two_restricted_classes():
+    """Pins what cli relies on core's constant MEANING, so a core change that redefines
+    it is caught here rather than by an operator who cannot send a message."""
+    assert set(MESSAGE_TYPES) == set(VALID_TYPES) - set(PRIVILEGED_TYPES) - set(
+        MACHINE_EMITTED_TYPES
+    )
+    assert not set(MESSAGE_TYPES) & set(PRIVILEGED_TYPES)
+    assert not set(MESSAGE_TYPES) & set(MACHINE_EMITTED_TYPES)
+
+
+def test_an_older_core_falls_back_toward_SENDABLE_not_refused():
+    """The fallback is the half that keeps the original defect from recurring anywhere.
+
+    On a core predating #124 there is no `HAND_SENDABLE_TYPES` to import. cli must not
+    carry a second copy of the split, and it must not fail toward refusing: a type cli
+    cannot classify has to be OFFERED, because a forgotten hand-sendable type is an
+    invisible halt while a forgotten machine type is one odd message machinery ignores.
+    """
+    src = inspect.getsource(bus_messaging)
+    fallback = src[src.index("except ImportError") : src.index("#: The frontmatter keys")]
+
+    assert "VALID_TYPES" in fallback and "PRIVILEGED_TYPES" in fallback
+    assert "MACHINE_EMITTED" not in fallback, (
+        "the fallback must not re-derive the machine split — that is the second copy"
+    )
+    # and the shape it produces offers more than it refuses
+    derived = frozenset(VALID_TYPES) - PRIVILEGED_TYPES
+    assert "decision-required" in derived
+    assert set(MESSAGE_TYPES) <= derived, "the live list must be a subset of the fallback"
+
+
+def test_the_outcome_registrys_narrow_write_guard_is_not_widened():
+    """`registries/bus_messages.VALID_MESSAGE_TYPES` is a different thing with a
+    confusingly similar name: the 7 types that module's own `build_*` functions produce,
+    guarding `write_bus_message`. It must stay narrow — importing core's list there would
+    let the outcome registry write any type — but every entry must be real in core.
+    """
+    from otaman_cli.registries.bus_messages import VALID_MESSAGE_TYPES
+
+    assert set(VALID_MESSAGE_TYPES) <= set(VALID_TYPES), (
+        f"invents a type core rejects: {sorted(set(VALID_MESSAGE_TYPES) - set(VALID_TYPES))}"
+    )
+    assert set(VALID_MESSAGE_TYPES) < set(MESSAGE_TYPES) | set(MACHINE_EMITTED_TYPES), (
+        "still a strict subset — if this ever equals the hand-sendable list, someone "
+        "'fixed' a deliberate write-guard into a general one"
     )
