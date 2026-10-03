@@ -75,7 +75,7 @@ def cmd_check(args: list[str]) -> int:
         UI.error(not_in_project_message())
         return 1
 
-    # Determine agent: explicit arg → CWD→repo→owner → .agents/current-agent
+    # Determine agent: explicit arg → OTAMAN_AGENT/CWD→repo→owner → .otaman agent:
     agent = resolve_agent_identity(root, explicit=positional[0] if positional else None)
     if not agent:
         UI.error("No agent specified and identity could not be resolved.")

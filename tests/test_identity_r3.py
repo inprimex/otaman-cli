@@ -9,6 +9,13 @@ test_identity_priority_chain.py / test_resolve_agent_identity.py (which
 cover the general priority-chain behavior these fixes sit inside).
 """
 
+# team-mode D3/B1 CUTOVER (Roman ruling 2026-09-11, 20260911T113813; spec-agent
+# 20261003T130553): `.agents/current-agent` is RETIRED, resolver included — "NO
+# dual-read window". The tests that asserted the deprecated fallback RESOLVED from it
+# are deleted here rather than adjusted, because adjusting them to keep passing is how
+# a retired feature comes back. What replaces them asserts the marker is NOT consulted:
+# tests/test_b1_current_agent_retired.py.
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -117,37 +124,8 @@ class TestOwnerPathsDelegation:
 
 
 # -------------------------------------------------------- .agents/current-agent roster validation
-class TestCurrentAgentRosterValidation:
-    def test_declared_value_accepted(self, project: Path, monkeypatch, capsys):
-        monkeypatch.delenv("OTAMAN_AGENT", raising=False)
-        (project / ".agents" / "current-agent").write_text("root-agent\n")
-        result = resolve_agent_identity(project, project)
-        assert result == "root-agent"
-        assert "DEPRECATED" in capsys.readouterr().err
-
-    def test_undeclared_value_rejected_and_falls_through(self, project: Path, monkeypatch, capsys):
-        monkeypatch.delenv("OTAMAN_AGENT", raising=False)
-        (project / ".agents" / "current-agent").write_text("totally-unknown-agent\n")
-        result = resolve_agent_identity(project, project)
-        assert result is None
-        err = capsys.readouterr().err
-        assert "WARNING" in err
-        assert "totally-unknown-agent" in err
-        assert "DEPRECATED" not in err  # rejected before the trust/return path
-
-    def test_empty_roster_is_permissive(self, tmp_path: Path, monkeypatch, capsys):
-        """No agents:/repos: declared at all -- nothing to validate against,
-        so the deprecated fallback still works (same permissive-by-default
-        posture the rest of the chain already has)."""
-        root = tmp_path / "bare"
-        (root / ".agents").mkdir(parents=True)
-        monkeypatch.delenv("OTAMAN_AGENT", raising=False)
-        (root / ".agents" / "current-agent").write_text("anything-goes\n")
-        result = resolve_agent_identity(root, tmp_path)
-        assert result == "anything-goes"
 
 
-# ---------------------------------------------------------------- declared_agents_from_platform
 class TestDeclaredAgentsFromPlatform:
     def test_agents_list_and_repo_owners_both_included(self):
         platform = {
