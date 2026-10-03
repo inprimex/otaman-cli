@@ -1,13 +1,21 @@
 """Tests for cli.maestro.resolve_agent_identity().
 
 Covers the 2026-04-29 fix: per-repo identity from CWD→platform.yaml→owner
-takes priority over the project-global .agents/current-agent file.
+is the authority; the project-global .agents/current-agent file is RETIRED.
 
 Before the fix, every tab read the same global identity (set last by
 `maestro set-agent`), so /maestro:check from GreenBin.Deploy showed
 mobile-agent's messages and the bus-status-hook's "[maestro] N pending"
 line was wrong in 7/8 tabs.
 """
+
+# team-mode D3/B1 CUTOVER (Roman ruling 2026-09-11, 20260911T113813; spec-agent
+# 20261003T130553): `.agents/current-agent` is RETIRED, resolver included — "NO
+# dual-read window". Several tests here used the fallback's VALUE as their observable.
+# Each subject survives (cwd outside any repo, absent/malformed platform.yaml, a repo
+# with no owner, an orphan worktree) so they are rewritten to assert `None` rather than
+# deleted — and each still WRITES the marker, so it now proves the file is ignored.
+# See tests/test_b1_current_agent_retired.py.
 
 from __future__ import annotations
 
@@ -120,21 +128,31 @@ def test_different_repos_resolve_to_different_owners(project: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Priority 3: .agents/current-agent fallback
+# (RETIRED) .agents/current-agent — kept in fixtures to prove it is ignored
 
 
-def test_cwd_outside_any_repo_falls_back_to_current_agent(project: Path) -> None:
-    """CWD == maestro folder (not in any repo) → use current-agent fallback."""
+def test_cwd_outside_any_repo_resolves_to_nothing(project: Path) -> None:
+    """CWD == otaman folder (not in any repo) → nothing resolves.
+
+    The marker is written and must be IGNORED: it used to be the answer here.
+    """
     (project / ".agents" / "current-agent").write_text("global-fallback\n")
-    assert resolve_agent_identity(project, project) == "global-fallback"
+    assert resolve_agent_identity(project, project) is None, (
+        "the retired .agents/current-agent answered"
+    )
 
 
-def test_no_platform_yaml_falls_back_to_current_agent(tmp_path: Path) -> None:
-    """Project root with no platform.yaml — fallback path still works."""
+def test_no_platform_yaml_resolves_to_nothing(tmp_path: Path) -> None:
+    """No platform.yaml — nothing resolves, and nothing crashes.
+
+    The marker is written and must be IGNORED.
+    """
     root = tmp_path / "bare"
     (root / ".agents").mkdir(parents=True)
     (root / ".agents" / "current-agent").write_text("only-fallback\n")
-    assert resolve_agent_identity(root, tmp_path) == "only-fallback"
+    assert resolve_agent_identity(root, tmp_path) is None, (
+        "the retired .agents/current-agent answered"
+    )
 
 
 def test_returns_none_when_nothing_resolves(project: Path) -> None:
@@ -148,24 +166,24 @@ def test_returns_none_when_nothing_resolves(project: Path) -> None:
 
 
 def test_malformed_platform_yaml_does_not_crash(project: Path, monkeypatch) -> None:
-    """Bad YAML should fall back to current-agent, not raise.
+    """Bad YAML must not raise. (It used to be observed via the retired marker.)
 
     We monkeypatch the .otaman walk to return None so this test exercises
-    the platform.yaml → current-agent fallback path specifically.
     """
     import otaman_cli.identity as _id_mod
 
     monkeypatch.setattr(_id_mod, "_read_otaman_agent_field", lambda cwd: None)
     (project / "platform.yaml").write_text("not: valid: yaml: ::: [", encoding="utf-8")
     (project / ".agents" / "current-agent").write_text("rescue-agent\n")
-    assert resolve_agent_identity(project, project.parent / "auth-service") == "rescue-agent"
+    assert resolve_agent_identity(project, project.parent / "auth-service") is None, (
+        "the retired .agents/current-agent answered"
+    )
 
 
 def test_repo_missing_owner_field_skipped(project: Path, monkeypatch) -> None:
-    """A repo entry without `owner` shouldn't match — fall through to next or fallback.
+    """A repo entry without `owner` shouldn't match — fall through to next, or nothing.
 
     We monkeypatch the .otaman walk to return None so this test exercises
-    the platform.yaml → current-agent fallback path specifically.
     """
     import otaman_cli.identity as _id_mod
 
@@ -188,8 +206,11 @@ repos:
     )
     (project / ".agents" / "current-agent").write_text("default-fallback\n")
     backend_cwd = project.parent / "auth-service"
-    # auth-service has no owner → falls through to current-agent
-    assert resolve_agent_identity(project, backend_cwd) == "default-fallback"
+    # auth-service has no owner → nothing matches it. The marker is written and must
+    # be IGNORED; it used to supply the answer on this very line.
+    assert resolve_agent_identity(project, backend_cwd) is None, (
+        "the retired .agents/current-agent answered"
+    )
     # web-app still resolves correctly (via platform.yaml, walk is mocked out)
     web_cwd = project.parent / "web-app"
     assert resolve_agent_identity(project, web_cwd) == "frontend-agent"
@@ -280,14 +301,19 @@ def test_worktrees_of_different_repos_resolve_to_different_owners(project: Path)
     assert resolve_agent_identity(project, web_wt) == "frontend-agent"
 
 
-def test_cwd_in_orphan_worktree_falls_back_to_current_agent(project: Path) -> None:
-    """Worktree of a repo NOT in platform.yaml → falls through to current-agent."""
+def test_cwd_in_orphan_worktree_resolves_to_nothing(project: Path) -> None:
+    """Worktree of a repo NOT in platform.yaml → nothing resolves.
+
+    The marker is written and must be IGNORED.
+    """
     (project / ".agents" / "current-agent").write_text("orphan-agent\n")
     unmanaged = project.parent / "unmanaged-repo"
     unmanaged.mkdir()
     (unmanaged / ".git").mkdir()
     worktree = _make_worktree(unmanaged, "feature-z", project.parent)
-    assert resolve_agent_identity(project, worktree) == "orphan-agent"
+    assert resolve_agent_identity(project, worktree) is None, (
+        "the retired .agents/current-agent answered"
+    )
 
 
 def test_direct_cwd_match_still_preferred_over_worktree_logic(project: Path) -> None:
