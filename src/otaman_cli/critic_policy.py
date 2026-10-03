@@ -38,19 +38,19 @@ from typing import Any
 CONFIG_NAME = "verification-gates.yaml"
 
 #: Policies whose inputs this surface can derive from the program itself.
-#: Policies this surface can resolve from what a repo checkout holds. ONLY
-#: `stakeholder-affected`: its inputs are the affected repos and their owners, both in
-#: platform.yaml.
+#: Policies this surface can resolve from what a repo checkout holds.
 #:
-#: `role-based` was listed here and should not have been. Its inputs are `agent_roles`
-#: and `target_role`, which live in the GATE's context — `parse_verification_gates`
-#: carries only `clearances` and `hooks`, so there is no roles table in the config at
-#: all. The effect was a false report, measured 2026-10-03: a `role-based` hook
-#: rendered `critics=()` with "role-based selected nobody" and `evaluated=True`, which
-#: asserts the hook selects no one when the truth is that this surface cannot know.
-#: That is the exact NOT-CHECKED/no-critics conflation this module's docstring says it
-#: exists to prevent, so it now takes the not-evaluated path and says so.
-_LOCALLY_EVALUABLE = ("stakeholder-affected",)
+#: `role-based` is back as of core #122 (csp 1.4): it resolves from the config's own
+#: top-level `roles:` table, so a checkout can answer it. It was removed from this
+#: tuple earlier today because the opposite was true — its inputs lived only in the
+#: live gate's context, and evaluating it anyway produced "role-based selected nobody"
+#: with `evaluated=True`, asserting an emptiness this surface could not know (#275).
+#:
+#: What remains unknowable from a checkout is `target_role`, which is still a context
+#: field. core reports that as `could_not_evaluate=('target_role',)` rather than as an
+#: empty selection, and this surface renders it as COULD NOT KNOW with the input
+#: named — which is task 1.5.
+_LOCALLY_EVALUABLE = ("stakeholder-affected", "role-based")
 
 #: Said wherever an evaluated critic set is shown. The set is proposal-independent and
 #: the invariant is proposal-dependent, so a reader who takes one for the other
@@ -113,6 +113,11 @@ class HookView:
     #: it — so the FALLBACK alone decides whether it is reviewed at all. Measured, not
     #: inferred from policy names, so a policy added later is covered too.
     self_owned_uncovered: tuple[str, ...] = ()
+    #: Input names core could not get, when selection could not be evaluated at all
+    #: (core #122's `SelectionResult.could_not_evaluate`). NON-EMPTY means "could not
+    #: know"; empty alongside no critics means "evaluated, selected nobody". The two
+    #: are opposite facts and this surface must never render them the same way.
+    could_not_know: tuple[str, ...] = ()
 
     @property
     def single_candidate(self) -> str:
@@ -128,10 +133,15 @@ class HookView:
 
 @dataclass
 class Roster:
-    """Who is cleared for which sensitivity classes."""
+    """Who is cleared for which sensitivity classes, and who holds which role."""
 
     rows: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
     classes: tuple[str, ...] = ()
+    #: `(agent, roles)` from the config's top-level `roles:` table (core #122). Shown
+    #: here because `role-based` now selects from it, so "who is a reviewer" is part of
+    #: the same question as "who is cleared" — and a hook that resolves to nobody is
+    #: read very differently once you can see that the table is empty.
+    roles: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
 
 
 @dataclass
@@ -261,7 +271,18 @@ def _view(
         view.note = f"selection could not run: {exc}"
         return view
     view.critics = tuple(result.critics)
-    view.evaluated = True
+    view.could_not_know = tuple(getattr(result, "could_not_evaluate", ()) or ())
+    # COULD NOT KNOW is not an evaluation: `evaluated` gates every "this is the set"
+    # rendering downstream, and a surface that marked an unanswerable hook evaluated
+    # would publish an empty set as a result (the #275 defect, one layer up).
+    view.evaluated = not view.could_not_know
+    if view.could_not_know:
+        view.note = (
+            "could not know — "
+            + ", ".join(view.could_not_know)
+            + " not available from a checkout (a live gate supplies it)"
+        )
+        return view
     if getattr(result, "dropped_uncleared", ()):
         # Named, never silently absent from the list. This is the clearance gate
         # removing a critic the policy DID pick.
@@ -330,6 +351,10 @@ def _self_owned_uncovered(
             result = core.select_critics(config, hook, context)
         except Exception:  # noqa: BLE001 - an unconfigured hook is reported elsewhere
             return ()
+        if getattr(result, "could_not_evaluate", ()):
+            # Unknowable for this owner, so unknowable for the question. Reporting it
+            # as uncovered would be the same false claim one level up.
+            return ()
         if not tuple(result.critics):
             uncovered.append(owner)
     return tuple(dict.fromkeys(uncovered))
@@ -338,7 +363,10 @@ def _self_owned_uncovered(
 def _roster(config: Any) -> Roster:
     rows = sorted((agent, tuple(classes)) for agent, classes in (config.clearances or {}).items())
     classes = sorted({c for _, cs in rows for c in cs})
-    return Roster(rows=rows, classes=tuple(classes))
+    roles = sorted(
+        (agent, tuple(names)) for agent, names in (getattr(config, "roles", None) or {}).items()
+    )
+    return Roster(rows=rows, classes=tuple(classes), roles=roles)
 
 
 __all__ = ["CONFIG_NAME", "HookView", "Roster", "Surface", "config_path", "load"]

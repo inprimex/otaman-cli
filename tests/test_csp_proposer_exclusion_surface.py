@@ -47,12 +47,15 @@ _GATES_WITH_FALLBACK = """hooks:
   scr-critique:
     primary: stakeholder-affected
     fallback: role-based
+roles:
+  reviewer-agent: [reviewer]
 """
 
-_GATES_NO_FALLBACK = """hooks:
-  scr-critique:
-    primary: stakeholder-affected
-"""
+#: A chain with no fallback, as an engine bundle rather than YAML: core #122 refuses to
+#: parse it (no `role-based` arm can select for a self-owned proposal), so the only way
+#: to reach cli's grading of the case is the pre-#122 shape built from core's dataclasses
+#: — and the grading must stay correct, because cli does not get to assume core's version.
+_NO_FALLBACK_HOOKS = {"scr-critique": ("stakeholder-affected", None)}
 
 
 def _program(tmp_path, platform, gates):
@@ -143,7 +146,10 @@ def test_an_unevaluated_hook_claims_no_lone_candidate(tmp_path):
     the one with teeth.
     """
     root = _program(
-        tmp_path, _PLATFORM_ONE_OWNER, "hooks:\n  outcome-review:\n    primary: consumer-chain\n"
+        tmp_path,
+        _PLATFORM_ONE_OWNER,
+        "hooks:\n  outcome-review:\n    primary: consumer-chain\n    fallback: role-based\n"
+        "roles:\n  reviewer-agent: [reviewer]\n",
     )
 
     hook = _hook(critic_policy.load(root), "outcome-review")
@@ -184,12 +190,15 @@ def test_the_command_warns_and_names_the_fallback(tmp_path, monkeypatch, capsys)
     assert "fallback role-based decides those" in out
 
 
-def test_the_command_says_when_there_is_no_fallback(tmp_path, monkeypatch, capsys):
+def test_the_command_says_when_there_is_no_fallback(
+    tmp_path, monkeypatch, capsys, older_gates_core
+):
     """The worse case, and the one worth the louder wording: exclusion empties the set
     and nothing is declared to catch it."""
     from otaman_cli.commands import policy as policy_cmd
 
-    root = _program(tmp_path, _PLATFORM_ONE_OWNER, _GATES_NO_FALLBACK)
+    root = _program(tmp_path, _PLATFORM_ONE_OWNER, _GATES_WITH_FALLBACK)
+    older_gates_core(hooks=_NO_FALLBACK_HOOKS)
     monkeypatch.setattr(policy_cmd, "find_project_root", lambda: root)
 
     policy_cmd.cmd_policy(["critics"])
@@ -202,7 +211,7 @@ def test_the_command_says_when_there_is_no_fallback(tmp_path, monkeypatch, capsy
 # The doctor check.
 
 
-def test_doctor_warns_on_a_lone_candidate_and_grades_by_fallback(tmp_path):
+def test_doctor_warns_on_a_lone_candidate_and_grades_by_fallback(tmp_path, older_gates_core):
     """Higher severity without a fallback: with one, the proposals are decided by a
     declared policy; without one, they are decided by nothing."""
     from otaman_cli.doctor import check_critic_policy
@@ -211,7 +220,10 @@ def test_doctor_warns_on_a_lone_candidate_and_grades_by_fallback(tmp_path):
         _program(tmp_path / "a", _PLATFORM_ONE_OWNER, _GATES_WITH_FALLBACK)
     )
     (tmp_path / "b").mkdir()
-    without = check_critic_policy(_program(tmp_path / "b", _PLATFORM_ONE_OWNER, _GATES_NO_FALLBACK))
+    older_gates_core(hooks=_NO_FALLBACK_HOOKS)
+    without = check_critic_policy(
+        _program(tmp_path / "b", _PLATFORM_ONE_OWNER, _GATES_WITH_FALLBACK)
+    )
 
     assert with_fb["status"] == "warn"
     assert any("only cli-agent qualifies" in i["message"] for i in with_fb["issues"])

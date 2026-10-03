@@ -34,7 +34,22 @@ hooks:
     sensitivity-overrides: {cofounder-only: sensitivity-scoped}
   outcome-review:
     primary: consumer-chain
+    fallback: role-based
+roles:
+  cofounder-agent: [reviewer]
 """
+
+
+def _ROLE_BASED_ARM(config: str) -> str:
+    """Add the `role-based` arm and roles table core #122 requires of every hook.
+
+    core refuses a pairing that cannot select an independent critic for a self-owned
+    proposal (D4), so a bare `primary:` no longer parses. The arm is appended rather
+    than replacing the primary, because what each of these fixtures is about is the
+    PRIMARY's behaviour — the fallback only runs when the primary empties, and none of
+    these cases gets that far.
+    """
+    return config + "    fallback: role-based\nroles:\n  cofounder-agent: [reviewer]\n"
 
 
 @pytest.fixture
@@ -100,7 +115,7 @@ def test_a_policy_needing_live_inputs_is_not_invented(program):
 def test_stakeholder_affected_with_no_owners_says_so(tmp_path):
     (tmp_path / "platform.yaml").write_text("project: d\nrepos: []\n", encoding="utf-8")
     (tmp_path / "verification-gates.yaml").write_text(
-        "hooks:\n  h:\n    primary: stakeholder-affected\n", encoding="utf-8"
+        _ROLE_BASED_ARM("hooks:\n  h:\n    primary: stakeholder-affected\n"), encoding="utf-8"
     )
     hook = _hook(critic_policy.load(tmp_path), "h")
     assert hook.evaluated is False and "no repo owners" in hook.note
@@ -187,7 +202,7 @@ def test_doctor_warns_when_no_clearances_are_declared(tmp_path):
 
     (tmp_path / "platform.yaml").write_text(_PLATFORM, encoding="utf-8")
     (tmp_path / "verification-gates.yaml").write_text(
-        "hooks:\n  h:\n    primary: stakeholder-affected\n", encoding="utf-8"
+        _ROLE_BASED_ARM("hooks:\n  h:\n    primary: stakeholder-affected\n"), encoding="utf-8"
     )
     result = check_critic_policy(tmp_path)
     assert result["status"] == "warn"
@@ -217,12 +232,36 @@ def test_doctor_is_quiet_when_nothing_is_declared(tmp_path):
 # the clearance gate, previewed
 
 
-def test_a_sensitivity_preview_applies_the_override(program):
+def test_a_sensitivity_preview_applies_the_override(tmp_path):
     """`--sensitivity` answers "what does this hook do if the content is
-    cofounder-only?", which is what the clearance roster is for."""
-    hook = _hook(critic_policy.load(program, sensitivity="cofounder-only"), "scr-critique")
+    cofounder-only?", which is what the clearance roster is for.
+
+    The override is proven by a SELECTION, not by an empty one: this roster gives the
+    cleared agent a repo, so `sensitivity-scoped` picks them and the primary demonstrably
+    did not run. The older form asserted `critics == ()` against the shared fixture,
+    where nobody holds the class — an empty set that the primary, the override, or a
+    fallback could each have produced, so it never pinned the override at all. core #122
+    then made it worse by requiring a `role-based` fallback: the empty override result
+    falls through to a fallback a checkout cannot evaluate, and the chain's honest answer
+    became "could not know".
+    """
+    (tmp_path / "platform.yaml").write_text(
+        "project: d\nrepos:\n  - {name: a, owner: core-agent}\n"
+        "  - {name: b, owner: cofounder-agent}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "verification-gates.yaml").write_text(
+        "clearances:\n  cofounder-agent: [cofounder-only]\n"
+        "hooks:\n  h:\n    primary: stakeholder-affected\n"
+        "    sensitivity-overrides: {cofounder-only: sensitivity-scoped}\n"
+        "    fallback: role-based\nroles:\n  cofounder-agent: [reviewer]\n",
+        encoding="utf-8",
+    )
+
+    hook = _hook(critic_policy.load(tmp_path, sensitivity="cofounder-only"), "h")
+
     assert hook.evaluated is True
-    assert hook.critics == ()  # neither repo owner holds cofounder-only
+    assert hook.critics == ("cofounder-agent",), "the override's policy chose, not the primary"
     assert "cofounder-only" in hook.note
 
 
@@ -245,7 +284,7 @@ def test_a_dropped_critic_is_named(tmp_path):
     )
     (tmp_path / "verification-gates.yaml").write_text(
         "clearances:\n  cofounder-agent: [cofounder-only]\n"
-        "hooks:\n  h:\n    primary: stakeholder-affected\n",
+        + _ROLE_BASED_ARM("hooks:\n  h:\n    primary: stakeholder-affected\n"),
         encoding="utf-8",
     )
     hook = _hook(critic_policy.load(tmp_path, sensitivity="cofounder-only"), "h")

@@ -116,3 +116,58 @@ def _isolated_tenant_home(tmp_path, monkeypatch):
     monkeypatch.setattr(_chat, "chat_state_path", _chat_state_path)
     monkeypatch.setattr(_chat, "chat_audit_path", _chat_audit_path)
     return home
+
+
+@pytest.fixture
+def older_gates_core(monkeypatch):
+    """Install a gates engine that ACCEPTS a pairing core now refuses at parse.
+
+    core #122 (csp 1.4) refuses, at parse time, any hook without a ``role-based`` arm
+    and a ``roles:`` table — which is the stronger fix for the self-owned non-coverage
+    plugin found in csp 1.2, because the config can no longer be written. cli's probe
+    for that same gap stays in the tree: cli must not assume core's version, and an
+    older core still parses those files happily.
+
+    That leaves the probe untestable through a config file, and a probe with no reachable
+    input is a guard that proves nothing. So the bundle is built DIRECTLY from core's own
+    frozen dataclasses — the exact shape an older parse produced — and handed back from a
+    stubbed parse. Everything else still resolves to the real engine, so the selection
+    being probed is core's, never a reimplementation.
+
+    Usage::
+
+        older_gates_core(hooks={"spec-proposal": ("stakeholder-affected", "sensitivity-scoped")})
+    """
+    from otaman_cli import critic_policy
+
+    real = critic_policy._core()
+
+    def _install(*, hooks, roles=None, clearances=None, select=None):
+        bundle = real.VerificationGatesConfig(
+            clearances={a: tuple(c) for a, c in (clearances or {}).items()},
+            hooks={
+                name: real.HookPolicy(hook=name, primary=primary, fallback=fallback)
+                for name, (primary, fallback) in hooks.items()
+            },
+            roles={a: tuple(r) for a, r in (roles or {}).items()},
+        )
+
+        class _OlderCore:
+            def __init__(self):
+                self.parsed = bundle
+
+            def parse_verification_gates(self, _data):
+                return bundle
+
+            def select_critics(self, config, hook, ctx):
+                if select is not None:
+                    return select(real, config, hook, ctx)
+                return real.select_critics(config, hook, ctx)
+
+            def __getattr__(self, name):
+                return getattr(real, name)
+
+        monkeypatch.setattr(critic_policy, "_core", lambda: _OlderCore())
+        return bundle
+
+    return _install
