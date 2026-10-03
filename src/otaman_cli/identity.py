@@ -9,9 +9,11 @@ R3 cross-check added 2026-07-08):
 2. ``.otaman`` ``agent:`` field found by walking up from CWD  (per-repo)
 3. CWD → platform.yaml (+ ``owner-paths``) → owner, via the same resolver
    ``otaman whoami --for-path`` uses
-4. ``.agents/current-agent`` file  (deprecated project-global fallback,
-   validated against platform.yaml's declared agents)
-5. ``None`` / ERROR — no identity; caller must prompt user
+4. ``None`` / ERROR — no identity; caller must prompt user
+
+``.agents/current-agent`` is RETIRED and no step reads it — team-mode D3/B1
+cutover, "NO dual-read window" (Roman ruling 2026-09-11). ``otaman doctor``
+fails if one reappears.
 
 The CWD ancestry walk (step 2) starts at the current working directory and
 walks up parent directories.  A ``.otaman`` file WITHOUT an ``agent:`` field
@@ -198,20 +200,6 @@ def _resolve_cwd_owner(root: Path, cwd: Path) -> str | None:
     return None
 
 
-def _declared_agents(root: Path) -> set[str]:
-    """platform.yaml's declared-agents roster (R3), for validating
-    ``.agents/current-agent`` instead of trusting it blindly. Reuses
-    ``owner_paths.declared_agents_from_platform`` — one roster, not a
-    second independently-maintained copy.
-    """
-    from otaman_cli.owner_paths import declared_agents_from_platform, load_platform_yaml
-
-    platform = load_platform_yaml(root)
-    if platform is None:
-        return set()
-    return declared_agents_from_platform(platform)
-
-
 def resolve_agent_identity(
     root: Path | None,
     cwd: Path | None = None,
@@ -227,9 +215,10 @@ def resolve_agent_identity(
        wins (see module docstring)
     3. .otaman ``agent:`` field found by CWD ancestry walk
     4. CWD → platform.yaml (+ owner-paths) → owner
-    5. .agents/current-agent (deprecated; validated against declared
-       agents; emits warning)
-    6. None (caller decides whether to error)
+    5. None (caller decides whether to error)
+
+    `.agents/current-agent` is RETIRED — no step reads it (team-mode D3/B1
+    cutover, Roman ruling 2026-09-11). `otaman doctor` errors if one reappears.
     """
     # 1. Explicit argument always wins
     if explicit:
@@ -303,37 +292,22 @@ def resolve_agent_identity(
     if dotoman_agent:
         return dotoman_agent
 
-    # 5. .agents/current-agent — deprecated fallback, validated (R3) against
-    #    platform.yaml's declared agents before being trusted.
-    if root is None:
-        return None
-    agent_file = root / ".agents" / "current-agent"
-    if agent_file.is_file():
-        try:
-            text = agent_file.read_text(encoding="utf-8").strip()
-        except OSError:
-            text = ""
-        # Skip deprecation-marker lines written during the transition
-        lines = [ln for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("#")]
-        if lines:
-            name = lines[0].strip()
-            if name:
-                declared = _declared_agents(root)
-                if declared and name not in declared:
-                    print(
-                        f"[otaman] WARNING: .agents/current-agent contains {name!r}, "
-                        f"which is not a declared agent in platform.yaml — ignoring.",
-                        file=sys.stderr,
-                    )
-                else:
-                    print(
-                        f"[otaman] DEPRECATED: identity resolved from "
-                        f".agents/current-agent ('{name}'). "
-                        "Run 'otaman init --update' to migrate to per-repo .otaman agent: fields, "
-                        "or set OTAMAN_AGENT in your launch config.",
-                        file=sys.stderr,
-                    )
-                    return name
+    # 5. (RETIRED) .agents/current-agent is gone, resolver included.
+    #    team-mode D3/B1 as AMENDED (Roman ruling 2026-09-11, 20260911T113813):
+    #    "CUTOVER — NO dual-read window". A resolver step that consumes the marker
+    #    when steps 1-4 come up empty IS a dual-read window, and the resolver is the
+    #    component that turns one stale shared file into a wrong identity — which is
+    #    the last-writer-wins class B1 removed. The deprecation warning that used to
+    #    live here annotated the bug; it did not remove it.
+    #
+    #    Measured when this was deleted (cli #281): the live marker read
+    #    `fswatch-agent`, written 2026-10-01, and plugin's post-commit hook had
+    #    attributed every repo's commits in the fleet to them for two days
+    #    (20261003T121802). fswatch-agent had committed nothing.
+    #
+    #    `otaman doctor` now ERRORs when the file reappears — the other half of the
+    #    same cutover clause, which had never shipped. Ruling: spec-agent
+    #    20261003T130553.
 
     # 6. Nothing found
     return None

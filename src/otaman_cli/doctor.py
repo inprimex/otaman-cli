@@ -1331,6 +1331,66 @@ def check_git_host(project_root: Path) -> dict[str, Any]:
     return result
 
 
+def check_retired_identity_marker(project_root: Path) -> dict[str, Any]:
+    """`.agents/current-agent` must not exist — team-mode D3/B1 cutover.
+
+    The ruling as amended (Roman 2026-09-11, 20260911T113813) says: "CUTOVER — NO
+    dual-read window: the release shipping B1 carries an explicit migration step that
+    removes the marker, doctor ERRORs if one reappears". The resolver step was deleted
+    in cli #281; THIS is the other half of the same clause, which had never shipped.
+
+    `fail`, not `warn`: one shared file across N sessions is last-writer-wins, and the
+    consequence is not cosmetic. Measured 2026-10-03 — the live marker read
+    `fswatch-agent` (written 10-01) and plugin's post-commit hook attributed every
+    repo's commits in the fleet to them for two days (20261003T121802); fswatch-agent
+    had committed nothing. A reappearing marker means something is still WRITING it,
+    so the fix names the writer rather than just the file.
+    """
+    result: dict[str, Any] = {
+        "check": "retired_identity_marker",
+        "status": "ok",
+        "details": {},
+    }
+    marker = project_root / ".agents" / "current-agent"
+    if not marker.is_file():
+        result["details"]["marker"] = "absent (retired — correct)"
+        return result
+
+    try:
+        contained = next(
+            (
+                ln.strip()
+                for ln in marker.read_text(encoding="utf-8").splitlines()
+                if ln.strip() and not ln.strip().startswith("#")
+            ),
+            "",
+        )
+    except OSError as exc:  # unreadable is still PRESENT, which is the finding
+        contained = f"<unreadable: {exc}>"
+
+    result["status"] = "fail"
+    result["details"]["marker"] = f"PRESENT (retired): {marker}"
+    result["details"]["contains"] = contained or "<empty>"
+    result["issues"] = [
+        {
+            "severity": "high",
+            "message": (
+                f".agents/current-agent exists and is RETIRED — it names "
+                f"{contained or '<empty>'!r}. One shared file across N sessions is "
+                "last-writer-wins: whatever wrote it last claims every repo's identity "
+                "for anything still reading it."
+            ),
+            "fix": (
+                "Delete it, then find the writer — a hook or runbook step still "
+                "producing it is the actual defect. Identity resolves from the repo's "
+                ".otaman agent: field or platform.yaml ownership; a path's owner is "
+                "`otaman whoami --for-path <repo>`."
+            ),
+        }
+    ]
+    return result
+
+
 def check_critic_policy(project_root: Path) -> dict[str, Any]:
     """Verification-gate critic selection: effective policy per hook (csp 1.3).
 
@@ -2336,6 +2396,7 @@ def run_doctor(project_root: Path) -> dict[str, Any]:
         check_plugin_doctor(project_root),
         check_knowledge_health(project_root),
         check_security_gates(project_root),
+        check_retired_identity_marker(project_root),
         check_critic_policy(project_root),
         check_llm_routing(project_root),
         check_human_roster(config),

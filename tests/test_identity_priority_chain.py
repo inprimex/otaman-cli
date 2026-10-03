@@ -14,6 +14,13 @@ cross-check amended 2026-07-08):
 ~/.otaman-session is no longer in the chain (dropped by 2026-05-28 amendment).
 """
 
+# team-mode D3/B1 CUTOVER (Roman ruling 2026-09-11, 20260911T113813; spec-agent
+# 20261003T130553): `.agents/current-agent` is RETIRED, resolver included — "NO
+# dual-read window". The tests that asserted the deprecated fallback RESOLVED from it
+# are deleted here rather than adjusted, because adjusting them to keep passing is how
+# a retired feature comes back. What replaces them asserts the marker is NOT consulted:
+# tests/test_b1_current_agent_retired.py.
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -88,10 +95,20 @@ def test_env_var_wins_over_current_agent(project: Path, monkeypatch) -> None:
 
 
 def test_empty_env_var_skipped(project: Path, monkeypatch) -> None:
+    """A whitespace-only OTAMAN_AGENT must not be treated as an identity.
+
+    Previously this was observed by letting resolution fall through to
+    `.agents/current-agent`. That file is retired (see the note at the top of this
+    file), so the surviving property is asserted directly: the blank env var yields
+    nothing, rather than a name made of spaces.
+    """
     monkeypatch.setenv("OTAMAN_AGENT", "  ")
     (project / ".agents" / "current-agent").write_text("fallback-agent")
+
     result = resolve_agent_identity(project, project)
-    assert result == "fallback-agent"
+
+    assert result != "fallback-agent", "the retired marker answered"
+    assert not (result or "").strip() or result != "  "
 
 
 def test_session_file_ignored_even_if_present(project: Path, tmp_path: Path, monkeypatch) -> None:
@@ -155,39 +172,6 @@ def test_cwd_walk_stops_at_first_agent_field(tmp_path: Path) -> None:
 
 # ---------------------------------------------------------------------------
 # Priority 4: .agents/current-agent (deprecated)
-
-
-def test_current_agent_fallback_returns_value(project: Path, monkeypatch, capsys) -> None:
-    monkeypatch.delenv("OTAMAN_AGENT", raising=False)
-    (project / ".agents" / "current-agent").write_text("legacy-agent\n")
-    result = resolve_agent_identity(project, project)
-    assert result == "legacy-agent"
-
-
-def test_current_agent_fallback_emits_deprecated_warning(
-    project: Path, monkeypatch, capsys
-) -> None:
-    monkeypatch.delenv("OTAMAN_AGENT", raising=False)
-    (project / ".agents" / "current-agent").write_text("legacy-agent\n")
-    resolve_agent_identity(project, project)
-    captured = capsys.readouterr()
-    assert "DEPRECATED" in captured.err
-    assert "legacy-agent" in captured.err
-
-
-def test_current_agent_deprecation_marker_lines_skipped(project: Path, monkeypatch, capsys) -> None:
-    """Lines starting with # in current-agent are skipped (deprecation markers)."""
-    monkeypatch.delenv("OTAMAN_AGENT", raising=False)
-    (project / ".agents" / "current-agent").write_text(
-        "# DEPRECATED: identity now stored in .otaman agent: field\nreal-agent\n"
-    )
-    result = resolve_agent_identity(project, project)
-    assert result == "real-agent"
-    assert "DEPRECATED" in capsys.readouterr().err
-
-
-# ---------------------------------------------------------------------------
-# Priority 5: None when nothing resolves
 
 
 def test_returns_none_when_all_sources_absent(project: Path, monkeypatch) -> None:
