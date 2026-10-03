@@ -25,7 +25,7 @@ import re
 import sys
 from pathlib import Path
 
-from otaman_cli.commands import CommandSpec, register
+from otaman_cli.commands import CommandSpec, register, wants_help
 from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.platform_config import _normalize_ce_platform_yaml_for_validation
 from otaman_cli.scripts import run_script
@@ -1165,12 +1165,14 @@ _INIT_FLAGS = frozenset({"--update", "--shell", "--yes", "-y", "--dry-run", "--s
 
 
 def _help_requested(args: list[str]) -> bool:
-    """True if `-h`/`--help` appears anywhere — help wins over everything.
+    """True if help was asked for anywhere — delegates to the one home.
 
-    Anywhere, not just first: `otaman init . --help` is a request for help too, and the
-    whole point is that no argument shape reaches a side effect while help was asked for.
+    Kept as a thin alias rather than deleted: this module calls it in several places and
+    the name documents WHY the check is there. The predicate itself lives in
+    `commands.wants_help`, because a per-command copy is how `cleanup` and `scan` came
+    to lack one at all.
     """
-    return any(a in ("-h", "--help") for a in args)
+    return wants_help(args)
 
 
 def _print_init_usage() -> None:

@@ -75,6 +75,33 @@ from otaman_cli.commands import approve as _approve  # noqa: E402,F401
 from otaman_cli.commands import blocked as _blocked  # noqa: E402,F401
 from otaman_cli.commands import bus_messaging as _bus_messaging  # noqa: E402,F401
 from otaman_cli.commands import check as _check  # noqa: E402,F401
+
+#: Help flags, in one place. A command that parses its own argv must consult
+#: :func:`wants_help` BEFORE any side effect.
+HELP_FLAGS: frozenset[str] = frozenset({"-h", "--help", "help"})
+
+
+def wants_help(args: list[str]) -> bool:
+    """True if help was asked for ANYWHERE in *args* — help wins over everything.
+
+    Anywhere, not just first: `otaman cleanup --days 30 --help` is a request for help
+    too, and the whole point is that no argument shape reaches a side effect while help
+    was asked for.
+
+    The single home for a defect class that was being fixed per-command. Hand-rolled
+    argv loops ignore an unrecognised flag and fall through to the work, so `--help`
+    read as "no options" and the command RAN. Measured 2026-10-03 on the live bus:
+    `otaman cleanup --help` archived 12 messages (recoverable — #249's archive is a
+    move — but entirely unasked for), and `otaman scan --help` wrote too. The same
+    shape in `otaman init` cost a fleet-wide advisory on 2026-10-02: it executed a
+    scan and could repoint a `.otaman` marker.
+
+    `help` is included alongside the dashed forms because `otaman <cmd> help` is what
+    people type when the dashes do not work.
+    """
+    return any(a in HELP_FLAGS for a in args)
+
+
 from otaman_cli.commands import cleanup as _cleanup  # noqa: E402,F401
 from otaman_cli.commands import cli_group as _cli_group  # noqa: E402,F401
 from otaman_cli.commands import (  # noqa: E402
