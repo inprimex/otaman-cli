@@ -92,6 +92,11 @@ class HookView:
     hook: str
     primary: str
     fallback: str | None = None
+    #: The role `role-based` selects by, declared per hook (core #123, csp 1.6). Shown on
+    #: the chain because `role-based` alone does not say WHICH role, and the roles table
+    #: is rendered directly below it — a reader would otherwise have to guess which row
+    #: this hook means. `None` for a chain with no role-based arm.
+    target_role: str | None = None
     overrides: dict[str, str] = field(default_factory=dict)
     #: Critics this surface could actually resolve, when the policy's inputs are
     #: derivable locally. Empty with a stated reason otherwise.
@@ -246,6 +251,7 @@ def _view(
         hook=hook,
         primary=policy.primary,
         fallback=policy.fallback,
+        target_role=getattr(policy, "target_role", None),
         overrides=dict(policy.sensitivity_overrides or {}),
     )
     effective = (policy.sensitivity_overrides or {}).get(sensitivity or "", policy.primary)

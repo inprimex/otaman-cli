@@ -37,7 +37,8 @@ from otaman_cli import critic_policy
 
 #: Valid under core #122: a role-based arm plus the roles table it resolves from.
 _VALID = (
-    "hooks:\n  spec-proposal:\n    primary: stakeholder-affected\n    fallback: role-based\n"
+    "hooks:\n  spec-proposal:\n    primary: stakeholder-affected\n"
+    "    fallback: role-based\n    target-role: reviewer\n"
     "roles:\n  b-agent: [reviewer]\n"
 )
 
@@ -107,38 +108,88 @@ def test_no_fallback_at_all_is_also_uncovered(tmp_path, older_gates_core):
     assert "a-agent" in hook.self_owned_uncovered
 
 
-def test_a_role_based_fallback_yields_NO_FINDING_because_cli_cannot_know(tmp_path):
-    """The honest answer, and it corrected a pre-existing false report.
+def test_the_SOLE_ROLE_HOLDER_being_the_proposer_is_still_uncovered(tmp_path):
+    """The probe's reachable input, restored by csp 1.6 — and the case core's parse
+    cannot see.
 
-    plugin measured `fallback: role-based` SELECTING a critic — with `agent_roles` and
-    `target_role` supplied, which a live gate has and a repo checkout does not. core #122
-    moved the roles table into the config, so the table resolves locally; `target_role`
-    still does not, so the chain's answer remains unknowable here — and an unknowable
-    chain must not be reported as uncovered.
+    The inversion is the point. This test used to assert NO finding, on the ground that
+    cli could not know: `role-based` read `target_role` from the caller, so a checkout
+    had no answer. core #123 moved that into the hook config, so the chain resolves
+    here — and the answer turns out to be a real gap.
+
+    With `roles: {b-agent: [reviewer]}`, b-agent's own proposal selects nobody:
+    `stakeholder-affected` picks b-agent (their repo), D4 excludes the proposer, and
+    `role-based` picks the one reviewer — b-agent again — excluded for the same reason.
+    a-agent's proposal is fine, because b-agent reviews it.
+
+    core's parse-time refusal cannot catch this: the config shape is complete and
+    correct, and whether it covers anyone depends on the ROSTER. That is the division of
+    labour — core refuses what is wrong on its face, cli measures what is wrong in this
+    program — and it is why the probe stayed in the tree when #122 briefly made it
+    unreachable.
     """
     hook = _hook(_program(tmp_path))
 
-    assert hook.self_owned_uncovered == (), (
-        f"cli claimed knowledge it does not have: {hook.self_owned_uncovered}"
+    assert hook.self_owned_uncovered == ("b-agent",), (
+        "the sole holder of the target role is the proposer, so nothing reviews them"
     )
 
 
-def test_a_role_based_hook_is_reported_as_unknowable_not_as_empty(tmp_path):
-    """The pre-existing false report, pinned so it cannot come back.
-
-    cli once listed `role-based` as locally evaluable, so a `role-based` hook rendered
-    `critics=()` / "role-based selected nobody" / `evaluated=True` — asserting the hook
-    selects nobody when the truth was that cli could not know. core #122 reports the
-    missing input by name, which is what the surface now renders.
-    """
+def test_an_independent_role_holder_covers_every_self_owned_proposal(tmp_path):
+    """The other side, so the finding above is not just "any role-based config warns"."""
     root = _program(
         tmp_path,
-        "hooks:\n  spec-proposal:\n    primary: role-based\nroles:\n  b-agent: [reviewer]\n",
+        "hooks:\n  spec-proposal:\n    primary: stakeholder-affected\n"
+        "    fallback: role-based\n    target-role: reviewer\n"
+        "roles:\n  reviewer-agent: [reviewer]\n",
     )
 
     hook = _hook(root)
 
-    assert hook.evaluated is False, "cli cannot evaluate role-based from a checkout"
+    assert hook.self_owned_uncovered == ()
+    assert hook.evaluated is True, "the chain resolves from config alone now (csp 1.6)"
+
+
+def test_a_complete_config_NAMES_THE_CRITIC_instead_of_could_not_know(tmp_path):
+    """The csp 1.6 payoff on this surface, pinned.
+
+    Before #123 a `role-based` hook could only ever render "could not know —
+    target_role is not available from a checkout", however correct the config was. The
+    pre-dispatch question is now answerable, which is the whole reason the key moved
+    into the config (cli 20261003T064521).
+    """
+    root = _program(
+        tmp_path,
+        "hooks:\n  spec-proposal:\n    primary: role-based\n    target-role: reviewer\n"
+        "roles:\n  reviewer-agent: [reviewer]\n",
+    )
+
+    hook = _hook(root)
+
+    assert hook.evaluated is True
+    assert hook.critics == ("reviewer-agent",)
+    assert hook.could_not_know == ()
+
+
+def test_a_role_based_hook_with_no_target_role_is_unknowable_not_empty(tmp_path, older_gates_core):
+    """The pre-existing false report, pinned so it cannot come back.
+
+    cli once listed `role-based` as locally evaluable, so a `role-based` hook rendered
+    `critics=()` / "role-based selected nobody" / `evaluated=True` — asserting the hook
+    selects nobody when the truth was that cli could not know.
+
+    core #123 made that unreachable from a config file: such a hook is refused at parse,
+    and one with a target role resolves. The rendering stays for an older core, so it is
+    pinned against a bundle with no target role — the shape a pre-#123 parse produced.
+    """
+    root = _program(tmp_path)
+    older_gates_core(
+        hooks={"spec-proposal": ("role-based", None)}, roles={"b-agent": ("reviewer",)}
+    )
+
+    hook = _hook(root)
+
+    assert hook.evaluated is False, "cli cannot evaluate role-based without a target role"
     assert hook.critics == ()
     assert hook.could_not_know == ("target_role",)
     assert "could not know" in hook.note, hook.note

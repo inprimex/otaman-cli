@@ -47,6 +47,7 @@ _GATES_WITH_FALLBACK = """hooks:
   scr-critique:
     primary: stakeholder-affected
     fallback: role-based
+    target-role: reviewer
 roles:
   reviewer-agent: [reviewer]
 """
@@ -148,7 +149,8 @@ def test_an_unevaluated_hook_claims_no_lone_candidate(tmp_path):
     root = _program(
         tmp_path,
         _PLATFORM_ONE_OWNER,
-        "hooks:\n  outcome-review:\n    primary: consumer-chain\n    fallback: role-based\n"
+        "hooks:\n  outcome-review:\n    primary: consumer-chain\n"
+        "    fallback: role-based\n    target-role: reviewer\n"
         "roles:\n  reviewer-agent: [reviewer]\n",
     )
 
