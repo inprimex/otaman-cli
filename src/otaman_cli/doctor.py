@@ -1363,6 +1363,9 @@ def check_critic_policy(project_root: Path) -> dict[str, Any]:
     # The rendered sets are proposal-independent; the invariant is proposal-dependent.
     result["details"]["critics_are"] = critic_policy.PRE_EXCLUSION_NOTE
     result["details"]["cleared_agents"] = len(surface.roster.rows)
+    # csp 1.5 — role-based selects from this table, so its size is part of reading a
+    # hook's result: "selected nobody" means something different when it is empty.
+    result["details"]["role_holders"] = len(surface.roster.roles)
     issues: list[dict[str, Any]] = []
 
     # The `critics_are` note above asserts CANON. Whether this bundle keeps it is a
@@ -1428,6 +1431,26 @@ def check_critic_policy(project_root: Path) -> dict[str, Any]:
                     "severity": "medium",
                     "message": f"{hook.hook}: {hook.primary} selects nobody",
                     "fix": "declare a fallback, or check the inputs the policy reads",
+                }
+            )
+        if hook.could_not_know:
+            # csp 1.5. core #122 distinguishes "could not evaluate" (missing declared
+            # input, names it) from "evaluated and selected nobody". Rendering them the
+            # same way is the defect this task exists to remove: one is a gap in what
+            # this surface can see, the other is a gap in the config.
+            result["status"] = "warn"
+            issues.append(
+                {
+                    "severity": "low",
+                    "message": (
+                        f"{hook.hook}: could not know who this hook selects — "
+                        + ", ".join(hook.could_not_know)
+                        + " is not available from a checkout"
+                    ),
+                    "fix": (
+                        "a live gate supplies it; nothing to change in config "
+                        "unless the hook is meant to resolve offline"
+                    ),
                 }
             )
         if hook.self_owned_uncovered:

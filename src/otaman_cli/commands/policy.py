@@ -1206,12 +1206,14 @@ def _cmd_critics(rest: list[str]) -> int:
                             "critics_are_pre_exclusion": True,
                             "single_candidate": h.single_candidate or None,
                             "self_owned_uncovered": list(h.self_owned_uncovered),
+                            "could_not_know": list(h.could_not_know),
                             "evaluated": h.evaluated,
                             "note": h.note,
                         }
                         for h in hooks
                     ],
                     "clearances": {a: list(c) for a, c in surface.roster.rows},
+                    "roles": {a: list(r) for a, r in surface.roster.roles},
                 },
                 indent=2,
             )
@@ -1236,6 +1238,16 @@ def _cmd_critics(rest: list[str]) -> int:
         UI.kv(f"  {h.hook}", chain)
         for sensitivity, policy in sorted(h.overrides.items()):
             UI.muted(f"        {sensitivity} → {policy}")
+        if h.could_not_know:
+            # OUTSIDE the `evaluated` block, deliberately: an unknowable hook is by
+            # definition not evaluated, so a could-not-know line nested in there is
+            # dead code — which is how the first version of this shipped in my working
+            # tree and why the test for it failed.
+            UI.muted(
+                "        could not know who this selects — "
+                + ", ".join(h.could_not_know)
+                + " is not available from a checkout (a live gate supplies it)"
+            )
         if h.evaluated:
             UI.muted(
                 f"        selects: {', '.join(h.critics) or '(nobody)'}"
@@ -1279,6 +1291,19 @@ def _cmd_critics(rest: list[str]) -> int:
         UI.muted("  No clearances declared — sensitivity-scoped selection drops everyone.")
     for agent, classes in surface.roster.rows:
         UI.kv(f"  {agent}", ", ".join(classes))
+
+    # csp 1.5 — the roles table, beside the clearances, because `role-based` selects
+    # from it: "selected nobody" reads differently once you can see the table is
+    # empty. Said rather than left blank for the same reason the clearance line is.
+    print()
+    UI.header("Roles")
+    if not surface.roster.roles:
+        UI.muted(
+            "  No roles declared — role-based selection has nobody to choose from; "
+            f"add a top-level `roles:` to {critic_policy.CONFIG_NAME}."
+        )
+    for agent, names in surface.roster.roles:
+        UI.kv(f"  {agent}", ", ".join(names))
     return 0
 
 
