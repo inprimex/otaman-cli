@@ -9,7 +9,7 @@ sharers were still unmigrated).
 
 from __future__ import annotations
 
-from otaman_cli.commands import CommandSpec, register
+from otaman_cli.commands import CommandSpec, register, wants_help
 from otaman_cli.identity import find_project_root, not_in_project_message
 from otaman_cli.scripts import run_script
 from otaman_cli.ui import UI
@@ -66,8 +66,25 @@ def _examined_remainder(report: dict) -> int:
     return max(0, active - skipped - held)
 
 
+def _print_cleanup_usage() -> None:
+    UI.muted("Usage: otaman cleanup [--days N] [--delete-days N] [--dry-run] [--purge]")
+    UI.muted("       --days N         archive acked messages older than N days (default 30)")
+    UI.muted("       --delete-days N  age at which an archived month becomes purgeable")
+    UI.muted("       --dry-run        report what would move; write nothing")
+    UI.muted("       --purge          DELETE purgeable archived months. Irreversible.")
+    UI.muted("")
+    UI.muted("Archiving is a MOVE and recoverable; only --purge destroys. Messages")
+    UI.muted("awaiting an ack are never archived, whatever their age.")
+
+
 def cmd_cleanup(args: list[str]) -> int:
     """Archive old bus messages and clean up."""
+    if wants_help(args):
+        # BEFORE the parse loop, which ignores an unrecognised flag and falls through
+        # to the archive. `otaman cleanup --help` archived 12 live messages on
+        # 2026-10-03 because of exactly that.
+        _print_cleanup_usage()
+        return 0
     dry_run = False
     purge = False
     positional: list[str] = []

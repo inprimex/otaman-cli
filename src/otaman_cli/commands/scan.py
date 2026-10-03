@@ -14,7 +14,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from otaman_cli.commands import CommandSpec, register
+from otaman_cli.commands import CommandSpec, register, wants_help
 from otaman_cli.scripts import run_script
 from otaman_cli.ui import UI, C
 
@@ -47,6 +47,11 @@ def _find_existing_otaman_project(scan_root: Path) -> Path | None:
 
 def cmd_scan(args: list[str]) -> int:
     """Scan repos and generate draft platform.yaml in a dedicated otaman folder."""
+    if wants_help(args):
+        UI.muted("Usage: otaman scan [<dir>] [--update] [--dry-run] [--project NAME]")
+        UI.muted("       --update     refresh an existing platform.yaml in place")
+        UI.muted("       --dry-run    report what would be written; write nothing")
+        return 0
     update = False
     maestro_dir: str | None = None
     dry_run = False
