@@ -150,7 +150,8 @@ def cmd_project_assign(
     # Spec 10.5: run `otaman init` in the assigned repo so the per-repo
     # .otaman marker (with `agent: <owner>` field) gets written. Without
     # this step, downstream identity resolution from inside the assigned
-    # repo would fall back to the deprecated current-agent file.
+    # repo would resolve to no identity at all (the current-agent fallback is
+    # RETIRED — team-mode B1 cutover, cli #281).
     import os as _os
 
     from otaman_cli.commands.init import _cmd_init_update

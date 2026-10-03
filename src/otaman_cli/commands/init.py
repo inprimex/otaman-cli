@@ -504,6 +504,49 @@ def _ensure_org_sections(platform_yaml: Path, *, interactive: bool | None = None
     return 0
 
 
+def retire_current_agent_marker(root: Path, *, dry_run: bool = False) -> str | None:
+    """Remove `.agents/current-agent` — the cutover's migration step.
+
+    team-mode D3/B1 as amended (Roman ruling 2026-09-11, 20260911T113813): "the release
+    shipping B1 carries an explicit migration step that removes the marker, doctor ERRORs
+    if one reappears". cli #281 deleted the resolver step and shipped doctor's half; this
+    is the third, which left `otaman doctor` telling an operator to delete a file with no
+    verb that does it.
+
+    Returns a human-readable line describing what was (or would be) removed, or None when
+    there is nothing to do — so the caller can stay quiet on the common case rather than
+    reporting work it did not do.
+
+    Deliberately NOT silent-on-failure: an unremovable marker still resolves nothing (the
+    reader is gone), but it keeps failing doctor, and a migration that reports success
+    while the file remains is the no-silent-success shape this platform forbids.
+    """
+    marker = root / ".agents" / "current-agent"
+    if not marker.is_file():
+        return None
+
+    try:
+        contained = next(
+            (
+                ln.strip()
+                for ln in marker.read_text(encoding="utf-8").splitlines()
+                if ln.strip() and not ln.strip().startswith("#")
+            ),
+            "",
+        )
+    except OSError:
+        contained = ""
+
+    named = f" (named {contained!r})" if contained else ""
+    if dry_run:
+        return f"would remove retired .agents/current-agent{named}"
+    try:
+        marker.unlink()
+    except OSError as exc:
+        return f"FAILED to remove .agents/current-agent{named}: {exc}"
+    return f"removed retired .agents/current-agent{named}"
+
+
 def _cmd_init_update(dry_run: bool = False) -> int:
     """Patch .otaman agent: fields + regenerate launch commands across all repos (--update, D5).
 
@@ -572,6 +615,20 @@ def _cmd_init_update(dry_run: bool = False) -> int:
     from otaman_cli.identity_preflight import surface_preflight_warnings
 
     surface_preflight_warnings(UI.warn)
+
+    # The B1 cutover's migration step. Runs before the per-repo walk because the
+    # markers written below are what REPLACES it: removing it first means a crash
+    # mid-walk cannot leave the retired file as the only identity source on disk.
+    retired = retire_current_agent_marker(root, dry_run=dry_run)
+    if retired:
+        (UI.error if retired.startswith("FAILED") else UI.ok)(f"  {retired}")
+        if not dry_run and not retired.startswith("FAILED"):
+            UI.muted(
+                "    identity now comes from each repo's .otaman agent: field or "
+                "platform.yaml ownership; if it reappears, a hook or runbook step is "
+                "still writing it"
+            )
+
     updated = 0
     skipped = 0
     launch_updated = 0

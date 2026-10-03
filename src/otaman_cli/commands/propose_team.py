@@ -180,7 +180,7 @@ def cmd_propose(args: list[str]) -> int:
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     now_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
 
-    # Get agent: CWD→repo→owner → .agents/current-agent → "human"
+    # Get agent: CWD→repo→owner → "human" (.agents/current-agent is RETIRED)
     agent = resolve_agent_identity(root) or "human"
 
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40]
