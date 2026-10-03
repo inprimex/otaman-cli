@@ -772,3 +772,66 @@ def test_cli_contains_no_second_route_key_producer(tmp_path):
         "a route key is being composed outside core's llm_router — use Route.id "
         "(carried as AgentRoute.key):\n  " + "\n  ".join(offenders)
     )
+
+
+def test_the_opaque_id_survives_the_REAL_path_not_just_the_helper(tmp_path, monkeypatch):
+    """lrb 2.1's opaque-id probe, run through `effective_route` as the clause specifies.
+
+    My first version of this probe called `_agent_route` directly. That proves the
+    helper carries core's id and nothing about the path a user actually takes —
+    `load()` resolves through `_core().effective_route` and could drop or re-derive
+    the id anywhere between. plugin's #114 injects through `effective_route` "so it
+    runs the real call path" (20261003T030520) and the gate clause now names that
+    method; this is cli's equivalent.
+
+    Only reading core's `.id` can produce the opaque string, so a recomputation —
+    which reproduces `Route.id`'s form exactly and therefore passes every
+    form-comparing test — fails here.
+    """
+
+    class _OpaqueRoute:
+        family = "ollama"
+        model = "llama3"
+        local = True
+        id = "core-says-this-is-the-key"
+
+    class _StubCore:
+        """Stands in for otaman_core.llm_router on the path `load()` really uses."""
+
+        @staticmethod
+        def parse_router_config(raw):  # noqa: D102 - signature parity only
+            return real_core.parse_router_config(raw)
+
+        @staticmethod
+        def effective_route(config, agent):  # noqa: D102
+            return _OpaqueRoute() if agent == "a-opaque" else None
+
+        @staticmethod
+        def select_backend(*a, **k):  # noqa: D102
+            return real_core.select_backend(*a, **k)
+
+        @staticmethod
+        def route_leaves_tenant(*a, **k):  # noqa: D102
+            return real_core.route_leaves_tenant(*a, **k)
+
+    from otaman_core import llm_router as real_core
+
+    root = _program(
+        tmp_path,
+        "project: demo\nversion: '1.0'\n"
+        "router:\n  backend: litellm-proxy\n  base_url: http://x\n"
+        "agents:\n  - name: a-opaque\n    role: d\n"
+        "    route: {family: ollama, model: llama3, local: true}\n",
+    )
+    monkeypatch.setattr(llm_routes, "_core", lambda: _StubCore)
+
+    surface = llm_routes.load(root)
+
+    (route,) = surface.routes
+    assert route.key == "core-says-this-is-the-key", (
+        "the real load() path recomputed the key instead of carrying core's Route.id"
+    )
+    assert route.label == "core-says-this-is-the-key (local)"
+    assert "core-says-this-is-the-key" in "\n".join(llm_routes.render_lines(surface)), (
+        "the rendered surface must show core's key, not a local rendering"
+    )
