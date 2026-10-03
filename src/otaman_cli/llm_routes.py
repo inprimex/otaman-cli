@@ -50,6 +50,13 @@ NOT_CHECKED = "not-checked"
 #: made "doctor shows effective routing per agent" show nothing at all.
 REGISTRY_REL = ".agents/agents.yaml"
 
+#: Rendered for a DECLARED route whose canonical key this bundle's core cannot
+#: produce (no `Route.id` — a core predating #121). Not a blank and not a guess: cli
+#: is forbidden to compose a route key (lrb gate 2.1's single-home grep-guard), and
+#: "the route exists but I cannot name it" is a different fact from both "no route"
+#: and any actual id. Carries its own remedy, because the operator can fix it.
+NO_ROUTE_KEY = "(route key unavailable — update otaman-core)"
+
 
 @dataclass
 class AgentRoute:
@@ -67,24 +74,27 @@ class AgentRoute:
 
     @property
     def key(self) -> str:
-        """The presentation-free route key — CORE's `Route.id` when it is available.
+        """core's `Route.id`, or ``""`` when this bundle cannot produce one.
 
-        core owns this string as of #121 (e2a8ef8), after plugin's lrb-1.6 call site
-        needed one and found that every caller would otherwise invent its own. It
-        encodes family, model AND `local`, because the same family/model run
-        tenant-local vs off-tenant is a different route for cost and sensitivity and
-        must not collapse into one telemetry bucket — which is exactly what the flat
-        `family/model` rendering below used to do.
+        cli does NOT compose this string. core owns it (#121), and lrb gate 2.1 now
+        pins that as a grep-guard: "Route.id is the ONLY route-to-string producer — no
+        hand-formatted route key (f-string/join over .family/.model) exists outside
+        core's llm_router.py".
 
-        The fallback is for an older core only. It deliberately reproduces `Route.id`'s
-        form, `@local` included, rather than the old flat one: a key that silently drops
-        the local bit is the collapse the gate measures, so an old bundle gets a
-        correct-shaped key rather than a subtly wrong one.
+        My first version kept a fallback that reproduced `Route.id`'s form for an older
+        core, reasoning that a correct-SHAPED key beat a missing one. That was wrong in
+        the way the guard names: a second producer is a second home, and it agrees with
+        core right up to the release where it does not — which is undetectable, because
+        agreeing is what it was written to do. So the fallback is gone rather than
+        wrapped, and "no key available" is a THIRD STATE, not a fabricated value:
+
+            route declared, core can name it   -> the id
+            route declared, core cannot        -> ""  (and the label SAYS so)
+            no route declared                  -> ""  (and the label says default path)
+
+        The two empty cases are distinguished by `default_path`, never by guessing.
         """
-        if self.route_id:
-            return self.route_id
-        base = self.family if not self.model else f"{self.family}/{self.model}"
-        return f"{base}@local" if self.local else base
+        return self.route_id
 
     @property
     def label(self) -> str:
@@ -94,10 +104,17 @@ class AgentRoute:
         move for presentation reasons; the suffix is display and may. Rendering the key
         here rather than re-deriving `family/model` is what keeps the two from drifting
         — the defect this replaces had cli composing the identifier half itself.
+
+        A declared route whose key core cannot produce renders as NOT NAMEABLE with the
+        remedy, never as a blank or an invented id: the operator learns the bundle is
+        too old, which is a fact they can act on, and the surface makes no claim about
+        which route it is.
         """
         if self.default_path:
             return NO_ROUTE
         where = "local" if self.local else "leaves tenant"
+        if not self.key:
+            return f"{NO_ROUTE_KEY} ({where})"
         return f"{self.key} ({where})"
 
 
@@ -297,7 +314,10 @@ def render_lines(surface: Surface) -> list[str]:
         lines.append("")
         lines.append("these routes leave the tenant while local-only classes are declared:")
         for route in guarded:
-            lines.append(f"  - {route.agent} → {route.family} — guarded calls refuse at dispatch")
+            # `route.key` (core's id), not a locally composed identifier: this line
+            # names WHICH route refuses, and the guarded listing is exactly where a
+            # second rendering would be most tempting and most wrong.
+            lines.append(f"  - {route.agent} → {route.key} — guarded calls refuse at dispatch")
     if not surface.configured:
         lines.append("")
         lines.append("to declare a route: agents[].route: <family>, or")
