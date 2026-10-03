@@ -659,10 +659,19 @@ def test_the_label_is_the_key_plus_cli_s_own_suffix(tmp_path):
     assert local.label.startswith(local.key) and cloud.label.startswith(cloud.key)
 
 
-def test_an_old_core_without_route_id_keeps_the_locality_bit(tmp_path):
-    """The fallback reproduces `Route.id`'s FORM, `@local` included — not the old flat
-    one. A key that silently drops locality is the collapse the gate measures, so an
-    old bundle gets a correct-shaped key rather than a subtly wrong one."""
+def test_an_old_core_gets_NO_KEY_and_the_label_says_why(tmp_path):
+    """cli may not compose a route key — not even a correctly-shaped one.
+
+    My first version kept a fallback that reproduced `Route.id`'s form for a core
+    predating #121, reasoning a correct-shaped key beat a missing one. lrb gate 2.1
+    then pinned the opposite as a grep-guard: "Route.id is the ONLY route-to-string
+    producer ... no hand-formatted route key exists outside core's llm_router.py".
+
+    The guard is right and my reasoning was wrong in a specific way: a second producer
+    agrees with core right up to the release where it does not, and agreeing is what it
+    was written to do — so the divergence is undetectable. "I cannot name this route"
+    is a third state, and it renders with its remedy rather than as a guess.
+    """
 
     class _OldRoute:  # no `id` property — a core that predates #121
         family = "ollama"
@@ -672,8 +681,12 @@ def test_an_old_core_without_route_id_keeps_the_locality_bit(tmp_path):
     got = llm_routes._agent_route("a", _OldRoute())
 
     assert got.route_id == "", "nothing to carry from an old bundle"
-    assert got.key == "ollama/llama3@local"
-    assert got.label == "ollama/llama3@local (local)"
+    assert got.key == "", "cli must not invent a key"
+    assert got.label == f"{llm_routes.NO_ROUTE_KEY} (local)"
+    assert "update otaman-core" in got.label, "the state must carry its remedy"
+    assert got.label != llm_routes.NO_ROUTE, (
+        "a declared-but-unnameable route is NOT the default path"
+    )
 
 
 def test_the_default_path_has_no_key_and_says_so(tmp_path):
@@ -713,4 +726,49 @@ def test_the_key_is_CARRIED_from_core_not_recomputed(tmp_path):
     )
     assert got.label == "core-says-this-is-the-key (local)", (
         "the label must be core's key plus cli's suffix"
+    )
+
+
+def test_cli_contains_no_second_route_key_producer(tmp_path):
+    """lrb gate 2.1's single-home grep-guard, proven HERE rather than at the gate.
+
+    The gate clause (core 20261003T022740): "Route.id is the ONLY route-to-string
+    producer — no hand-formatted route key (f-string/join over .family/.model) exists
+    outside core's llm_router.py". specs runs that over the fleet; this runs it over
+    cli on every commit, so the repo cannot regrow one between gates.
+
+    Prose that NAMES a family in a sentence is not a key, and the two sites that do
+    that carry a comment saying so — which is also what makes them readable as
+    deliberate rather than as leftovers.
+    """
+    import re
+    from pathlib import Path as _Path
+
+    src_root = _Path(__file__).resolve().parent.parent / "src" / "otaman_cli"
+    # A key producer looks like an f-string or join that puts a ROUTE's family/model
+    # together. Scoped to route-ish subjects (`route.`, `r.`, `rt.`) on purpose:
+    # `args.model` in models_report.py is an argparse field, not a Route, and a guard
+    # that flags it would be re-tuned carelessly the first time it cried wolf.
+    # What a KEY producer does, precisely: it puts a route's `family` and `model`
+    # together, or glues a separator from core's id form (`/`, `@local`) onto one of
+    # them. What it is NOT: prose that mentions a family in a sentence — doctor's
+    # "routes to anthropic which leaves the tenant" names a target, and a guard that
+    # flagged it would be loosened the first time it cried wolf.
+    #
+    # `self` is in the subject list deliberately: the likeliest place a producer
+    # regrows is INSIDE `AgentRoute` (that is exactly where mine was), and the first
+    # version of this guard watched only `route.`/`r.` and missed that sabotage.
+    subj = r"(?:route|rt|r|self)"
+    both = re.compile(rf"""\b{subj}\.family\b.*\b{subj}\.model\b""")
+    glued = re.compile(rf"""\{{{subj}\.(?:family|model)\}}\s*(?:/|@)""")
+    offenders = []
+    for path in sorted(src_root.rglob("*.py")):
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if both.search(line) or glued.search(line):
+                offenders.append(f"{path.relative_to(src_root)}:{n}: {line.strip()[:70]}")
+    assert not offenders, (
+        "a route key is being composed outside core's llm_router — use Route.id "
+        "(carried as AgentRoute.key):\n  " + "\n  ".join(offenders)
     )

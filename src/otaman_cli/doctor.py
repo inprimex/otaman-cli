@@ -1496,6 +1496,10 @@ def check_llm_routing(project_root: Path) -> dict[str, Any]:
             {
                 "severity": "medium",
                 "message": (
+                    # `route.family` in PROSE, naming the target — not a route key.
+                    # lrb gate 2.1 forbids a hand-formatted route KEY outside core's
+                    # llm_router; a sentence that says which family a call leaves to is
+                    # not one, and `route.key` is what the per-agent listing renders.
                     f"{route.agent} routes to {route.family} which leaves the tenant, "
                     f"while local-only classes are declared "
                     f"({', '.join(surface.local_only_classes)}) — guarded calls refuse "
