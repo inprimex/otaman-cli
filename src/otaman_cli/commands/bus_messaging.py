@@ -74,6 +74,34 @@ MESSAGE_TYPES: frozenset[str] = frozenset(
     }
 )
 
+#: Types core declares valid that a person/agent does NOT hand-send: machinery emits
+#: them, through a verb or a daemon that owns the payload. Listed, not omitted, because
+#: an OMISSION is indistinguishable from an oversight — which is exactly how
+#: `decision-required` came to be missing above while every agent's operating rules
+#: made emitting it a duty. The guard test over the identity below turns the next such
+#: addition into a failing build instead of a silent gap.
+MACHINE_EMITTED_TYPES: frozenset[str] = frozenset(
+    {
+        # the outcome engine's own lifecycle, written by `otaman accept-cost` /
+        # `reject-cost` / the estimate flow — never typed by hand
+        "outcome-estimate-requested",
+        "outcome-estimates-ready",
+        "outcome-cost-accepted",
+        "outcome-cost-rejected",
+        "outcome-status-changed",
+        "solution-recommendation",
+        "solution-status-changed",
+        # emitted by the agent registry when a registration changes
+        "agent-registry-change",
+        # emitted by the security gate and by fswatch's post-commit hook
+        "security-gate-report",
+        "post-commit-review",
+        # the spec lifecycle's own notices, emitted by the stage machine
+        "spec-approval-pending",
+        "request-human-review",
+    }
+)
+
 #: The frontmatter keys a `decision-required` must carry, and what each answers.
 #: core enforces their PRESENCE (`_DECISION_REQUIRED_FIELDS`); the flags exist here
 #: so an agent can actually write them, and the refusal below names all three at once
