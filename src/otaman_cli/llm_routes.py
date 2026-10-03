@@ -61,13 +61,44 @@ class AgentRoute:
     local: bool = False
     #: True when the agent declares no route at all — the default path.
     default_path: bool = True
+    #: core's canonical route key (`Route.id`, core #121), carried so the display
+    #: label and the telemetry key cannot drift. Empty on a bundle that predates it.
+    route_id: str = ""
+
+    @property
+    def key(self) -> str:
+        """The presentation-free route key — CORE's `Route.id` when it is available.
+
+        core owns this string as of #121 (e2a8ef8), after plugin's lrb-1.6 call site
+        needed one and found that every caller would otherwise invent its own. It
+        encodes family, model AND `local`, because the same family/model run
+        tenant-local vs off-tenant is a different route for cost and sensitivity and
+        must not collapse into one telemetry bucket — which is exactly what the flat
+        `family/model` rendering below used to do.
+
+        The fallback is for an older core only. It deliberately reproduces `Route.id`'s
+        form, `@local` included, rather than the old flat one: a key that silently drops
+        the local bit is the collapse the gate measures, so an old bundle gets a
+        correct-shaped key rather than a subtly wrong one.
+        """
+        if self.route_id:
+            return self.route_id
+        base = self.family if not self.model else f"{self.family}/{self.model}"
+        return f"{base}@local" if self.local else base
 
     @property
     def label(self) -> str:
+        """What a HUMAN reads: core's key plus cli's own where-suffix.
+
+        The split is core's instruction on #121: `id` is the telemetry key and may not
+        move for presentation reasons; the suffix is display and may. Rendering the key
+        here rather than re-deriving `family/model` is what keeps the two from drifting
+        — the defect this replaces had cli composing the identifier half itself.
+        """
         if self.default_path:
             return NO_ROUTE
         where = "local" if self.local else "leaves tenant"
-        return f"{self.family}{'/' + self.model if self.model else ''} ({where})"
+        return f"{self.key} ({where})"
 
 
 @dataclass
@@ -235,15 +266,7 @@ def load(root: Path, *, agent: str = "") -> Surface:
         if route is None:
             surface.routes.append(AgentRoute(agent=name))
             continue
-        surface.routes.append(
-            AgentRoute(
-                agent=name,
-                family=route.family,
-                model=route.model or "",
-                local=bool(route.local),
-                default_path=False,
-            )
-        )
+        surface.routes.append(_agent_route(name, route))
     return surface
 
 
@@ -396,15 +419,26 @@ def declare(
     )
 
 
-def _label_of(route: Any) -> str:
-    """An `AgentRoute` label for a core `Route`, so one vocabulary renders both."""
+def _agent_route(agent: str, route: Any) -> AgentRoute:
+    """An `AgentRoute` for a core `Route`, carrying core's `id` when the bundle has it.
+
+    `getattr(route, "id", "")` rather than an import-time probe: `Route.id` is a
+    property on core's frozen dataclass (#121), so its presence is the bundle's
+    answer and an older core simply yields "" and takes the local fallback.
+    """
     return AgentRoute(
-        agent="",
+        agent=agent,
         family=getattr(route, "family", ""),
         model=getattr(route, "model", "") or "",
         local=bool(getattr(route, "local", False)),
         default_path=False,
-    ).label
+        route_id=str(getattr(route, "id", "") or ""),
+    )
+
+
+def _label_of(route: Any) -> str:
+    """An `AgentRoute` label for a core `Route`, so one vocabulary renders both."""
+    return _agent_route("", route).label
 
 
 def _rel(root: Path, path: Path) -> str:

@@ -94,7 +94,9 @@ def test_every_label_comes_from_cores_resolution(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "effective_route", lambda config, agent: fake)
 
     declared = llm_routes.declare(root, "cli-agent", "ollama", model="llama3")
-    assert declared.after == "something-else/m9 (local)", "the label must be core's, not the raw"
+    assert declared.after == "something-else/m9@local (local)", (
+        "the label must be core's — the identifier half is now Route.id (core #121)"
+    )
     assert llm_routes.load(root).routes[0].family == "something-else"
 
 
@@ -384,7 +386,7 @@ def test_declarations_are_read_from_the_agent_registry(tmp_path):
     surface = llm_routes.load(root)
     assert surface.agents_source == llm_routes.REGISTRY_REL
     assert [r.agent for r in surface.routes] == ["cli-agent", "core-agent"]
-    assert surface.routes[0].label == "llama/llama3 (local)"
+    assert surface.routes[0].label == "llama/llama3@local (local)"
     assert surface.routes[1].default_path is True
 
 
@@ -444,9 +446,11 @@ def test_declare_writes_the_route_into_the_file_that_declares_the_agent(tmp_path
     assert result.changed is True
     assert result.where == ".agents/agents.yaml"
     assert result.before == llm_routes.NO_ROUTE
-    assert result.after == "ollama/llama3.1 (local)"
+    assert result.after == "ollama/llama3.1@local (local)"
     # and the surface now resolves it through core
-    assert llm_routes.load(root, agent="cli-agent").routes[0].label == "ollama/llama3.1 (local)"
+    assert (
+        llm_routes.load(root, agent="cli-agent").routes[0].label == "ollama/llama3.1@local (local)"
+    )
 
 
 def test_declare_preserves_the_humans_comments(tmp_path):
@@ -473,7 +477,7 @@ def test_re_declaring_the_same_route_reports_no_work(tmp_path):
     again = llm_routes.declare(root, "cli-agent", "ollama", model="llama3.1", local=True)
     assert again.changed is False
     assert again.error == ""
-    assert again.after == "ollama/llama3.1 (local)"
+    assert again.after == "ollama/llama3.1@local (local)"
     assert (root / ".agents" / "agents.yaml").read_text(encoding="utf-8") == before
 
 
@@ -481,7 +485,7 @@ def test_declare_replaces_a_prior_route_and_names_both_ends(tmp_path):
     root = _with_agent(tmp_path, extra="    route: anthropic\n")
     result = llm_routes.declare(root, "cli-agent", "ollama", local=True)
     assert result.before == "anthropic (leaves tenant)"
-    assert result.after == "ollama (local)"
+    assert result.after == "ollama@local (local)"
 
 
 def test_declare_refuses_an_agent_the_program_does_not_declare(tmp_path):
@@ -551,7 +555,7 @@ def test_the_command_declares_and_names_the_file(tmp_path, monkeypatch, capsys):
     rc = P.cmd_policy(["routes", "--declare", "cli-agent", "--family", "ollama", "--local"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "ollama (local)" in out
+    assert "ollama@local (local)" in out
     assert ".agents/agents.yaml" in out
     # The opt-in scenario, stated: a route without a router: block stays native.
     assert "native path" in out
@@ -590,3 +594,123 @@ def test_the_json_form_names_where_the_declarations_came_from(tmp_path, monkeypa
     payload = json.loads(capsys.readouterr().out)
     assert payload["agents_source"] == llm_routes.REGISTRY_REL
     assert payload["routes"][0]["family"] == "anthropic"
+
+
+# ---------------------------------------------------------------------------
+# core #121 — the route KEY is core's `Route.id`, the suffix is cli's display
+
+
+def test_the_key_is_cores_route_id_verbatim(tmp_path):
+    """cli must not compose the identifier half any more.
+
+    plugin's lrb-1.6 call site needed a string for `record_critic_cost(route=...)`,
+    found no canonical rendering of a `Route`, and had to invent `family/model` —
+    which would have made every record comparable only within whatever each caller
+    picked. core answered with `Route.id` (#121, e2a8ef8) and told cli to render that
+    key plus its own where-suffix "instead of the two renderings drifting".
+    """
+    from otaman_core.llm_router import Route
+
+    for route in (
+        Route(family="anthropic", model="claude-opus-4"),
+        Route(family="openai"),
+        Route(family="ollama", model="llama3", local=True),
+        Route(family="ollama", local=True),
+    ):
+        got = llm_routes._agent_route("a", route)
+        assert got.key == route.id, f"cli re-derived a key: {got.key} != {route.id}"
+
+
+def test_local_and_cloud_routes_do_not_collapse_to_one_key(tmp_path):
+    """THE property spec 2.1's gate measures: "telemetry distinguishes routes".
+
+    The same family/model run tenant-local vs off-tenant is a different route for
+    cost and sensitivity. The flat `family/model` rendering this replaces collapsed
+    them into one telemetry bucket.
+    """
+    root = _program(
+        tmp_path,
+        "project: demo\nversion: '1.0'\n"
+        "router:\n  backend: litellm-proxy\n  base_url: http://x\n"
+        "agents:\n"
+        "  - name: a-local\n    role: d\n"
+        "    route: {family: ollama, model: llama3, local: true}\n"
+        "  - name: a-cloud\n    role: d\n"
+        "    route: {family: ollama, model: llama3}\n",
+    )
+    surface = llm_routes.load(root)
+    keys = {r.agent: r.key for r in surface.routes}
+
+    assert keys["a-local"] != keys["a-cloud"], f"the locality bit collapsed: {keys}"
+    assert keys["a-local"].endswith("@local")
+    assert not keys["a-cloud"].endswith("@local")
+
+
+def test_the_label_is_the_key_plus_cli_s_own_suffix(tmp_path):
+    """The split core asked for: `id` is the telemetry key and may not move for
+    presentation; the `(local)` / `(leaves tenant)` gloss is cli's and may."""
+    from otaman_core.llm_router import Route
+
+    local = llm_routes._agent_route("a", Route(family="ollama", model="llama3", local=True))
+    cloud = llm_routes._agent_route("a", Route(family="anthropic", model="claude-opus-4"))
+
+    assert local.label == "ollama/llama3@local (local)"
+    assert cloud.label == "anthropic/claude-opus-4 (leaves tenant)"
+    assert local.label.startswith(local.key) and cloud.label.startswith(cloud.key)
+
+
+def test_an_old_core_without_route_id_keeps_the_locality_bit(tmp_path):
+    """The fallback reproduces `Route.id`'s FORM, `@local` included — not the old flat
+    one. A key that silently drops locality is the collapse the gate measures, so an
+    old bundle gets a correct-shaped key rather than a subtly wrong one."""
+
+    class _OldRoute:  # no `id` property — a core that predates #121
+        family = "ollama"
+        model = "llama3"
+        local = True
+
+    got = llm_routes._agent_route("a", _OldRoute())
+
+    assert got.route_id == "", "nothing to carry from an old bundle"
+    assert got.key == "ollama/llama3@local"
+    assert got.label == "ollama/llama3@local (local)"
+
+
+def test_the_default_path_has_no_key_and_says_so(tmp_path):
+    """No route declared is not a route named "default" — the same distinction
+    `CriticCost.route=None` carries on the telemetry side."""
+    route = llm_routes.AgentRoute(agent="a")
+
+    assert route.default_path is True
+    assert route.key == ""
+    assert route.label == llm_routes.NO_ROUTE
+
+
+def test_the_key_is_CARRIED_from_core_not_recomputed(tmp_path):
+    """Provenance, not just shape — and this is the test that actually guards it.
+
+    `test_the_key_is_cores_route_id_verbatim` compares against real `Route`s, and
+    cli's old-bundle fallback reproduces `Route.id`'s form exactly, so that test
+    passes whether cli CONSUMES core's id or recomputes an identical string. It
+    cannot distinguish the two, which is the whole property core asked for ("instead
+    of the two renderings drifting").
+
+    So: a route whose `id` is deliberately NOT what any local derivation would
+    produce. If cli ever goes back to composing the key itself, this fails and the
+    other tests do not.
+    """
+
+    class _RouteWithOpaqueId:
+        family = "ollama"
+        model = "llama3"
+        local = True
+        id = "core-says-this-is-the-key"
+
+    got = llm_routes._agent_route("a", _RouteWithOpaqueId())
+
+    assert got.key == "core-says-this-is-the-key", (
+        "cli recomputed the key instead of carrying core's Route.id"
+    )
+    assert got.label == "core-says-this-is-the-key (local)", (
+        "the label must be core's key plus cli's suffix"
+    )
