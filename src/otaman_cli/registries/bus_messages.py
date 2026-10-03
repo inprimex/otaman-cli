@@ -28,6 +28,13 @@ _YAML = YAML()
 _YAML.indent(mapping=2, sequence=4, offset=2)
 
 
+#: The types THIS MODULE's builders produce — a write-guard on `write_bus_message`, not a
+#: view of what a bus message may be. Deliberately narrow and deliberately NOT core's
+#: `VALID_TYPES`: widening it would let the outcome registry write any type, which is the
+#: opposite of what it is for. (Flagged because it reads like a general list and invites
+#: exactly that "fix" — I started to make it during cli #279 before measuring that all
+#: seven are this module's own `build_*` outputs.) Every entry must still be valid in
+#: core; a guard asserts the subset.
 VALID_MESSAGE_TYPES = frozenset(
     {
         "outcome-estimate-requested",

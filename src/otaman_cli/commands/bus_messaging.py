@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from otaman_core.validate_message import PRIVILEGED_TYPES
+from otaman_core.validate_message import PRIVILEGED_TYPES, VALID_TYPES
 
 from otaman_cli.bus_paths import _resolve_bus_paths
 from otaman_cli.bus_write import BusMessageValidationError, write_message_exclusive
@@ -25,82 +25,29 @@ from otaman_cli.platform_config import _read_platform_specs_path
 from otaman_cli.scripts import run_script
 from otaman_cli.ui import UI, C
 
-# outcome-proposal-routing task 3.1 — message-type registry for `otaman send`
-# validation.  Keep this list lean: deliberately limited to types that have
-# bus-server / CLI / downstream-agent semantics today.  Adding a new type is
-# a spec-level change.
+# The types a person/agent may hand-send. SINGLE HOME: core owns the split and cli
+# imports it (spec-agent ruling 20261003T083552, core #124). cli used to keep its own
+# narrower copy, and it drifted — `decision-required` was valid in core, absent here, and
+# `cmd_send` hard-rejects an unregistered type, so the emit the orchestration rules make a
+# DUTY before blocking exited 2. Three agents hit it following the rule (spec-agent 05:36,
+# plugin 07:49 while blocked, and the measurement in cli #278) and each silently
+# downgraded to `question`, which is the invisible halt the duty exists to prevent.
 #
-# F012 (security GAP finding, 2026-07-04): `spec-change-approved` and
-# `spec-change-rejected` are deliberately ABSENT here even though otaman-core's
-# `validate_message.py` VALID_TYPES includes them — they're PRIVILEGED_TYPES
-# (assert a human decision was made) and must only be producible via
-# `otaman approve`'s TTY-gated confirmation, never the general send path.
-# See the PRIVILEGED_TYPES check in cmd_send below.
-MESSAGE_TYPES: frozenset[str] = frozenset(
-    {
-        "info",
-        "question",
-        "task-assignment",
-        "task-complete",
-        "spec-change",
-        "spec-change-request",
-        "contract-change",
-        "review-request",
-        "proposal",
-        "outcome-proposal",
-        # program-lifecycle-states D4: the audit broadcast for a lifecycle
-        # transition. Not privileged — the transition itself is authority-gated
-        # in `otaman program`; this message only records it. Registered in
-        # otaman-core VALID_TYPES + _BROADCAST_TYPES (PR #31).
-        "lifecycle-change",
-        # bwsv ruling: the non-privileged fleet-broadcast type for a legit
-        # `to: all` notification (`info` stays targeted; warn+allow retired).
-        # Registered in otaman-core VALID_TYPES + _BROADCAST_TYPES.
-        "announce",
-        # delivery-authorization-envelope 1.1 — the anti-silent-blocking type.
-        # It was MISSING here, and `cmd_send` hard-rejects an unregistered type, so
-        # `otaman send human --type decision-required` — the emit the orchestration
-        # rules make a DUTY — exited 2. Measured on the live bus: ZERO
-        # decision-required messages exist across active/ and every archive month,
-        # while the console has carried a render path for them since dae 1.2 and the
-        # rule's own incidents cost ~11h of fleet delivery (2026-09-25) and a 62-hour
-        # frozen verification gate (2026-09-26). The duty named a message the tooling
-        # could not produce.
-        #
-        # Non-privileged by core's ruling: it ASKS for a decision, it does not assert
-        # one (core/validate_message.py VALID_TYPES + PRIVILEGED_TYPES, committed
-        # main cc2f93b). Its three required fields are enforced below and by core.
-        "decision-required",
-    }
-)
-
-#: Types core declares valid that a person/agent does NOT hand-send: machinery emits
-#: them, through a verb or a daemon that owns the payload. Listed, not omitted, because
-#: an OMISSION is indistinguishable from an oversight — which is exactly how
-#: `decision-required` came to be missing above while every agent's operating rules
-#: made emitting it a duty. The guard test over the identity below turns the next such
-#: addition into a failing build instead of a silent gap.
-MACHINE_EMITTED_TYPES: frozenset[str] = frozenset(
-    {
-        # the outcome engine's own lifecycle, written by `otaman accept-cost` /
-        # `reject-cost` / the estimate flow — never typed by hand
-        "outcome-estimate-requested",
-        "outcome-estimates-ready",
-        "outcome-cost-accepted",
-        "outcome-cost-rejected",
-        "outcome-status-changed",
-        "solution-recommendation",
-        "solution-status-changed",
-        # emitted by the agent registry when a registration changes
-        "agent-registry-change",
-        # emitted by the security gate and by fswatch's post-commit hook
-        "security-gate-report",
-        "post-commit-review",
-        # the spec lifecycle's own notices, emitted by the stage machine
-        "spec-approval-pending",
-        "request-human-review",
-    }
-)
+# The derivation core publishes is VALID_TYPES - PRIVILEGED_TYPES - MACHINE_EMITTED_TYPES:
+# privileged types assert a human decision (`otaman approve`'s TTY gate owns those, see
+# the PRIVILEGED_TYPES check in cmd_send), and machine-emitted types are written by a verb
+# or a daemon that owns the payload.
+#
+# The fallback matters as much as the import. On a core predating #124 cli derives the
+# fail-safe SUPERSET rather than carrying a second copy of the classification: an
+# unclassified type is offered rather than refused. That is core's own ruled direction —
+# the failure modes are asymmetric, a forgotten hand-sendable type is an invisible halt
+# while a forgotten machine type is at most one odd message machinery ignores — and it
+# means the original defect cannot recur on ANY core version, old or new.
+try:
+    from otaman_core.validate_message import HAND_SENDABLE_TYPES as MESSAGE_TYPES
+except ImportError:  # pragma: no cover - exercised by test_send_types_have_one_home
+    MESSAGE_TYPES: frozenset[str] = frozenset(VALID_TYPES) - PRIVILEGED_TYPES
 
 #: The frontmatter keys a `decision-required` must carry, and what each answers.
 #: core enforces their PRESENCE (`_DECISION_REQUIRED_FIELDS`); the flags exist here
