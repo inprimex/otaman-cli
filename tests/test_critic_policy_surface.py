@@ -31,10 +31,12 @@ hooks:
   scr-critique:
     primary: stakeholder-affected
     fallback: role-based
+    target-role: reviewer
     sensitivity-overrides: {cofounder-only: sensitivity-scoped}
   outcome-review:
     primary: consumer-chain
     fallback: role-based
+    target-role: reviewer
 roles:
   cofounder-agent: [reviewer]
 """
@@ -49,7 +51,10 @@ def _ROLE_BASED_ARM(config: str) -> str:
     PRIMARY's behaviour — the fallback only runs when the primary empties, and none of
     these cases gets that far.
     """
-    return config + "    fallback: role-based\nroles:\n  cofounder-agent: [reviewer]\n"
+    return config + (
+        "    fallback: role-based\n    target-role: reviewer\n"
+        "roles:\n  cofounder-agent: [reviewer]\n"
+    )
 
 
 @pytest.fixture
@@ -254,7 +259,8 @@ def test_a_sensitivity_preview_applies_the_override(tmp_path):
         "clearances:\n  cofounder-agent: [cofounder-only]\n"
         "hooks:\n  h:\n    primary: stakeholder-affected\n"
         "    sensitivity-overrides: {cofounder-only: sensitivity-scoped}\n"
-        "    fallback: role-based\nroles:\n  cofounder-agent: [reviewer]\n",
+        "    fallback: role-based\n    target-role: reviewer\n"
+        "roles:\n  cofounder-agent: [reviewer]\n",
         encoding="utf-8",
     )
 

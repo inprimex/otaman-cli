@@ -1198,6 +1198,7 @@ def _cmd_critics(rest: list[str]) -> int:
                             "hook": h.hook,
                             "primary": h.primary,
                             "fallback": h.fallback,
+                            "target_role": h.target_role,
                             "sensitivity_overrides": h.overrides,
                             "critics": list(h.critics),
                             # Named in the payload too: a caller reading `critics`
@@ -1235,6 +1236,8 @@ def _cmd_critics(rest: list[str]) -> int:
 
     for h in hooks:
         chain = h.primary + (f" → {h.fallback}" if h.fallback else "")
+        if h.target_role:
+            chain += f"   (by role {h.target_role!r})"
         UI.kv(f"  {h.hook}", chain)
         for sensitivity, policy in sorted(h.overrides.items()):
             UI.muted(f"        {sensitivity} → {policy}")

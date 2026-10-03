@@ -39,19 +39,29 @@ def _program(tmp_path: Path, config: str) -> Path:
     return root
 
 
-ROLE_BASED = "hooks:\n  scr-critique:\n    primary: role-based\nroles:\n  b-agent: [reviewer]\n"
-#: The same config as a dict, for tests that need to hand core a parsed object.
+#: A COMPLETE role-based config under core #123: roles table + the per-hook target role.
+#: `role-based` resolves from this alone, which is what csp 1.6 bought.
+ROLE_BASED = (
+    "hooks:\n  scr-critique:\n    primary: role-based\n    target-role: reviewer\n"
+    "roles:\n  b-agent: [reviewer]\n"
+)
+#: The same config as a dict, for tests that hand core a parsed object.
 ROLE_BASED_PARSED = {
-    "hooks": {"scr-critique": {"primary": "role-based"}},
+    "hooks": {"scr-critique": {"primary": "role-based", "target-role": "reviewer"}},
     "roles": {"b-agent": ["reviewer"]},
 }
+#: The unknowable shape as an ENGINE BUNDLE. core #123 refuses a role-based hook with no
+#: target role at parse, so no config file reaches could-not-know any more — the state is
+#: still reported by an older core, and by any policy core later gives a missing input.
+UNKNOWABLE = {"scr-critique": ("role-based", None)}
 
 
 # ---------------------------------------------------------------------------
 # the distinction
 
 
-def test_an_unknowable_hook_says_COULD_NOT_KNOW_and_names_the_input(tmp_path):
+def test_an_unknowable_hook_says_COULD_NOT_KNOW_and_names_the_input(tmp_path, older_gates_core):
+    older_gates_core(hooks=UNKNOWABLE, roles={"b-agent": ("reviewer",)})
     (hook,) = critic_policy.load(_program(tmp_path, ROLE_BASED)).hooks
 
     assert hook.could_not_know == ("target_role",)
@@ -62,12 +72,14 @@ def test_an_unknowable_hook_says_COULD_NOT_KNOW_and_names_the_input(tmp_path):
     )
 
 
-def test_an_unknowable_hook_is_NOT_marked_evaluated(tmp_path):
+def test_an_unknowable_hook_is_NOT_marked_evaluated(tmp_path, older_gates_core):
     """`evaluated` gates every "this is the set" rendering downstream.
 
     Marking an unanswerable hook evaluated publishes an empty set as a result — the
     same defect one layer up, which is why this is asserted separately from the note.
     """
+    older_gates_core(hooks=UNKNOWABLE, roles={"b-agent": ("reviewer",)})
+
     (hook,) = critic_policy.load(_program(tmp_path, ROLE_BASED)).hooks
 
     assert hook.evaluated is False
@@ -112,13 +124,13 @@ def test_selected_nobody_still_reads_as_selected_nobody(tmp_path, monkeypatch):
 # the probe must not call an unknowable chain uncovered
 
 
-def test_the_self_owned_probe_stays_silent_when_the_chain_is_unknowable(tmp_path):
+def test_the_self_owned_probe_stays_silent_when_the_chain_is_unknowable(tmp_path, older_gates_core):
     """Reporting "no critic for a-agent's own proposal" when the answer is unknown
     would be the same false claim one level up from the one this task fixes."""
-    root = _program(
-        tmp_path,
-        "hooks:\n  scr-critique:\n    primary: stakeholder-affected\n    fallback: role-based\n"
-        "roles:\n  b-agent: [reviewer]\n",
+    root = _program(tmp_path, ROLE_BASED)
+    older_gates_core(
+        hooks={"scr-critique": ("stakeholder-affected", "role-based")},
+        roles={"b-agent": ("reviewer",)},
     )
 
     (hook,) = critic_policy.load(root).hooks
@@ -179,10 +191,11 @@ def test_an_absent_roles_table_is_visible_rather_than_blank(tmp_path, capsys, mo
     assert "role-based selection has nobody to choose from" in text
 
 
-def test_the_policy_surface_renders_could_not_know(tmp_path, capsys, monkeypatch):
+def test_the_policy_surface_renders_could_not_know(tmp_path, capsys, monkeypatch, older_gates_core):
     import otaman_cli.commands.policy as P
 
     root = _program(tmp_path, ROLE_BASED)
+    older_gates_core(hooks=UNKNOWABLE, roles={"b-agent": ("reviewer",)})
     monkeypatch.setattr(P, "find_project_root", lambda: root)
 
     P.cmd_policy(["critics"])
@@ -193,8 +206,10 @@ def test_the_policy_surface_renders_could_not_know(tmp_path, capsys, monkeypatch
     assert "b-agent" in text, "the roles table is rendered too"
 
 
-def test_doctor_reports_could_not_know_separately_from_a_config_finding(tmp_path):
+def test_doctor_reports_could_not_know_separately_from_a_config_finding(tmp_path, older_gates_core):
     from otaman_cli.doctor import check_critic_policy
+
+    older_gates_core(hooks=UNKNOWABLE, roles={"b-agent": ("reviewer",)})
 
     result = check_critic_policy(_program(tmp_path, ROLE_BASED))
 
@@ -219,6 +234,10 @@ def test_doctor_reports_could_not_know_separately_from_a_config_finding(tmp_path
             "pairing",
         ),
         ("hooks:\n  h:\n    primary: role-based\n", "roles table"),
+        (
+            "hooks:\n  h:\n    primary: role-based\nroles:\n  b-agent: [reviewer]\n",
+            "target-role",
+        ),
         ("hooks:\n  h:\n    primary: sensitivity-scoped\nrolez: {}\n", "unknown top-level"),
     ],
 )
@@ -256,3 +275,51 @@ def test_no_test_file_patches_find_project_root_by_bare_assignment():
     assert not offenders, (
         "patch it with monkeypatch.setattr so it is restored at teardown: " + ", ".join(offenders)
     )
+
+
+# ---------------------------------------------------------------------------
+# csp 1.6: the hook's target role is part of the chain's meaning
+
+
+def test_the_chain_names_the_ROLE_role_based_selects_by(tmp_path, capsys, monkeypatch):
+    """`role-based` does not say WHICH role, and the roles table is rendered right below
+    it — so without this the reader has to guess which row the hook means."""
+    import otaman_cli.commands.policy as P
+
+    monkeypatch.setattr(P, "find_project_root", lambda: _program(tmp_path, ROLE_BASED))
+
+    P.cmd_policy(["critics"])
+
+    text = "".join(capsys.readouterr())
+    assert "by role 'reviewer'" in text
+    assert "b-agent: reviewer" in text, "and the row it points at"
+
+
+def test_the_json_carries_the_target_role(tmp_path, capsys, monkeypatch):
+    import json
+
+    import otaman_cli.commands.policy as P
+
+    monkeypatch.setattr(P, "find_project_root", lambda: _program(tmp_path, ROLE_BASED))
+
+    P.cmd_policy(["critics", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    (hook,) = payload["hooks"]
+    assert hook["target_role"] == "reviewer"
+
+
+def test_a_chain_with_no_role_based_arm_carries_no_target_role(tmp_path):
+    """Absent, not invented: the key is meaningless without a role-based arm, and a
+    rendered `(by role None)` would read as a configured value."""
+    root = _program(
+        tmp_path,
+        "hooks:\n  scr-critique:\n    primary: sensitivity-scoped\n"
+        "    fallback: role-based\n    target-role: reviewer\n"
+        "  outcome-review:\n    primary: role-based\n    target-role: auditor\n"
+        "roles:\n  b-agent: [reviewer]\n",
+    )
+
+    by_hook = {h.hook: h.target_role for h in critic_policy.load(root).hooks}
+
+    assert by_hook == {"scr-critique": "reviewer", "outcome-review": "auditor"}
