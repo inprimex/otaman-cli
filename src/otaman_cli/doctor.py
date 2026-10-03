@@ -1430,6 +1430,30 @@ def check_critic_policy(project_root: Path) -> dict[str, Any]:
                     "fix": "declare a fallback, or check the inputs the policy reads",
                 }
             )
+        if hook.self_owned_uncovered:
+            # plugin-agent's csp finding (20261003T032605), reproduced through core's
+            # engine: with `stakeholder-affected` + a fallback that selects over
+            # sensitivity rather than candidates, a proposal affecting only the
+            # proposer's own repo gets NO critic — the commonest proposal shape in the
+            # fleet. The runtime says `no-eligible-critic`, which is honest about the
+            # outcome and silent about the cause being a config pairing. This names the
+            # cause before a proposal hits it.
+            result["status"] = "warn"
+            who = ", ".join(hook.self_owned_uncovered)
+            issues.append(
+                {
+                    "severity": "medium",
+                    "message": (
+                        f"{hook.hook}: a self-owned proposal by {who} selects NO critic "
+                        f"— primary {hook.primary!r} empties under the proposer-exclusion "
+                        f"invariant and fallback {hook.fallback!r} selects nobody either"
+                    ),
+                    "fix": (
+                        "choose a fallback that selects over candidates (e.g. role-based), "
+                        "or state that self-owned proposals are out of scope for this hook"
+                    ),
+                }
+            )
         if "dropped for missing clearance" in (hook.note or ""):
             result["status"] = "warn"
             issues.append(

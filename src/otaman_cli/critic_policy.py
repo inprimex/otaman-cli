@@ -38,7 +38,19 @@ from typing import Any
 CONFIG_NAME = "verification-gates.yaml"
 
 #: Policies whose inputs this surface can derive from the program itself.
-_LOCALLY_EVALUABLE = ("stakeholder-affected", "role-based")
+#: Policies this surface can resolve from what a repo checkout holds. ONLY
+#: `stakeholder-affected`: its inputs are the affected repos and their owners, both in
+#: platform.yaml.
+#:
+#: `role-based` was listed here and should not have been. Its inputs are `agent_roles`
+#: and `target_role`, which live in the GATE's context — `parse_verification_gates`
+#: carries only `clearances` and `hooks`, so there is no roles table in the config at
+#: all. The effect was a false report, measured 2026-10-03: a `role-based` hook
+#: rendered `critics=()` with "role-based selected nobody" and `evaluated=True`, which
+#: asserts the hook selects no one when the truth is that this surface cannot know.
+#: That is the exact NOT-CHECKED/no-critics conflation this module's docstring says it
+#: exists to prevent, so it now takes the not-evaluated path and says so.
+_LOCALLY_EVALUABLE = ("stakeholder-affected",)
 
 #: Said wherever an evaluated critic set is shown. The set is proposal-independent and
 #: the invariant is proposal-dependent, so a reader who takes one for the other
@@ -94,6 +106,13 @@ class HookView:
     critics: tuple[str, ...] = ()
     evaluated: bool = False
     note: str = ""
+    #: Declared repo owners whose OWN proposal this hook's chain selects nobody for
+    #: (plugin-agent's csp finding 20261003T032605, reproduced here through core's
+    #: engine). An agent proposing a change to the repo it owns is the commonest
+    #: proposal shape in the fleet, and under the D4 invariant the primary empties for
+    #: it — so the FALLBACK alone decides whether it is reviewed at all. Measured, not
+    #: inferred from policy names, so a policy added later is covered too.
+    self_owned_uncovered: tuple[str, ...] = ()
 
     @property
     def single_candidate(self) -> str:
@@ -260,7 +279,60 @@ def _view(
         view.note = f"sensitivity {sensitivity!r} replaced the primary with {result.policy}"
     elif getattr(result, "fell_back", False):
         view.note = f"primary selected nobody — fallback {policy.fallback!r} ran"
+    view.self_owned_uncovered = _self_owned_uncovered(core, config, hook, owners, sensitivity)
     return view
+
+
+def _self_owned_uncovered(
+    core: Any,
+    config: Any,
+    hook: str,
+    owners: dict[str, str],
+    sensitivity: str | None,
+) -> tuple[str, ...]:
+    """Owners whose own proposal this hook selects NOBODY for.
+
+    plugin-agent measured (csp 1.2, 20261003T032605) that with
+    `primary: stakeholder-affected` and `fallback: sensitivity-scoped` — the pairing
+    the requirement text reads most naturally — a proposal affecting only the
+    proposer's own repo resolves to no critic: the primary selects the affected
+    repo's owner, the D4 invariant excludes the proposer, and the fallback returns
+    nothing because no sensitivity class is set. Reproduced here through core's
+    committed engine: the same inputs with `fallback: role-based` select a critic.
+    So the fallback choice alone decides whether a whole class of proposal is
+    reviewed, and `parse_verification_gates` accepts either pairing.
+
+    ASKED, not pattern-matched: this runs the real `select_critics` once per declared
+    owner with that owner as the proposer and their repo as the only affected one.
+    A policy added to core later is therefore covered without touching this, and a
+    tenant whose roster makes the pairing survivable is not warned for nothing.
+    """
+    # Every arm of the chain must be locally evaluable, or the coverage question is
+    # OPEN and this returns nothing. A finding produced without the inputs to know
+    # would push a tenant to change a config that may be working — worse than silence,
+    # and the same rule as the not-evaluated note above.
+    policy = config.hooks[hook]
+    arms = [policy.primary, *([policy.fallback] if policy.fallback else [])]
+    arms += list((policy.sensitivity_overrides or {}).values())
+    if any(a not in _LOCALLY_EVALUABLE and a != "sensitivity-scoped" for a in arms):
+        return ()
+
+    uncovered: list[str] = []
+    for repo, owner in sorted(owners.items()):
+        context = core.SelectionContext(
+            affected_repos=(repo,),
+            repo_owners=owners,
+            candidates=tuple(sorted(owners.values())),
+            sensitivity=sensitivity,
+            proposer=owner,
+        )
+        try:
+            result = core.select_critics(config, hook, context)
+        except Exception:  # noqa: BLE001 - an unconfigured hook is reported elsewhere
+            return ()
+        if not tuple(result.critics):
+            uncovered.append(owner)
+    return tuple(dict.fromkeys(uncovered))
 
 
 def _roster(config: Any) -> Roster:
