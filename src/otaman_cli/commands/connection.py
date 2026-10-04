@@ -409,6 +409,7 @@ def _cmd_check(root, rest: list[str]) -> int:
         ConnectionChecker,
         NetworkProber,
         SshProber,
+        load_reports,
         persist_reports,
         render_last_check,
         report_store_path,
@@ -430,6 +431,17 @@ def _cmd_check(root, rest: list[str]) -> int:
         UI.error("Usage: otaman connection check <name> | --all [--fix]")
         return 1
 
+    # The PRIOR statuses, read before the store is overwritten. deploy-agent named the
+    # gap (20261004T144624): "a transition from ok to auth-failed is an EVENT, not a
+    # line in a report" — and the store already held the previous verdict while nothing
+    # read it, so every check silently overwrote the one fact that makes the new one
+    # actionable. Same shape as their fragments-consumed signal: a correct measurement
+    # on a surface with no reader.
+    try:
+        prior = load_reports(report_store_path(), _program_name(root))
+    except OSError:  # an unreadable store is not a failed check — just no comparand
+        prior = {}
+
     checker = ConnectionChecker(
         ssh_prober=SshProber(SshAgentRegistry()),
         network_prober=NetworkProber(_http_probe, _available_keys(root)),
@@ -448,6 +460,7 @@ def _cmd_check(root, rest: list[str]) -> int:
     ok = True
     for r in reports:
         line = f"{r.name}: {r.status}"
+        was = getattr(prior.get(r.name), "status", None)
         if r.status == "ok" or r.healed:
             UI.ok(line + (" (healed)" if r.healed else ""))
         else:
@@ -455,6 +468,19 @@ def _cmd_check(root, rest: list[str]) -> int:
             ok = False
         UI.muted(f"    {r.detail}")
         UI.muted(f"    last-check: {render_last_check(r)}")
+        # Three states, deliberately: a CHANGE since the last check, an unchanged
+        # verdict, and no comparand at all. Saying nothing on the third would make a
+        # first-ever check indistinguishable from a stable one.
+        if was is None:
+            UI.muted("    change: (no previous check to compare)")
+        elif was != r.status:
+            # The event. Loud on a regression, because `ok -> auth-failed` is the
+            # moment an expired credential becomes actionable — and it is the reason
+            # deploy is not writing an expiry date next to this connection.
+            msg = f"    CHANGED since last check: {was} → {r.status}"
+            (UI.ok if r.status == "ok" else UI.warn)(msg)
+        else:
+            UI.muted(f"    change: none (was {was})")
     return 0 if ok else 1
 
 
