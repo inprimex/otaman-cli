@@ -1296,7 +1296,7 @@ def _refuse_inside_a_repo_of_a_program(args: list[str]) -> int | None:
     return 2
 
 
-def _echo_resolved_target(config_path: Path) -> None:
+def _echo_resolved_target(config_path: Path) -> tuple[str | None, list]:
     """Print WHAT init is about to write into, before the first write.
 
     `destructive-command-safety`: a DESTRUCTIVE-CROSS-DIRECTORY command "SHALL print
@@ -1313,10 +1313,15 @@ def _echo_resolved_target(config_path: Path) -> None:
     chain reached from a pipe. The echo cannot prevent either, but it is the line that
     makes the mistake visible at the moment it is still one keystroke from undone.
 
-    Printing only — no prompt, no refusal (the confirmation is sequenced behind
-    deploy's `--yes`, `init-consent-gate` step 2). Never raises: an unreadable
-    platform.yaml still gets the resolved path, and the validator below is what rules
-    on the file.
+    Returns the parsed ``(project, repos)`` so the confirmation gate can restate the
+    identity at the decision point without parsing the file a second time. Never
+    raises: an unreadable platform.yaml still gets the resolved path, and the validator
+    below is what rules on the file.
+
+    The prompt/refusal half arrived with `init-consent-gate` step 2 (see
+    :func:`_confirm_full_init`), once deploy's step 1 had shipped `--yes` in
+    ce-bootstrap — ordered that way so the enforcement could not break the CE
+    bootstrap's non-TTY call the moment it landed.
     """
     root = config_path.parent
     UI.muted(f"Target: {root}")
@@ -1332,7 +1337,7 @@ def _echo_resolved_target(config_path: Path) -> None:
             repos = raw if isinstance(raw, list) else []
     except Exception:  # noqa: BLE001 - the echo must never be the thing that fails
         UI.muted("  (platform.yaml could not be read for the identity check)")
-        return
+        return None, []
     UI.muted(f"  project: {project or '(unnamed)'}   repos: {len(repos)}")
     for entry in repos:
         if not isinstance(entry, dict):
@@ -1346,6 +1351,39 @@ def _echo_resolved_target(config_path: Path) -> None:
         UI.muted(f"    {name}: {resolved}")
     if repos:
         UI.muted("  init writes .agents/, launcher/, policy/ and a .otaman marker into these.")
+    return project, repos
+
+
+def _confirm_full_init(root: Path, project: str | None, repos: list, *, yes: bool) -> bool:
+    """Gate the full `otaman init` on explicit consent — `init-consent-gate` step 2.
+
+    `destructive-command-safety` requires of a DESTRUCTIVE-CROSS-DIRECTORY command:
+    "In an interactive TTY, the command SHALL prompt for `y/N` confirmation after
+    echoing the resolved target and before mutating. In a non-interactive context …
+    the command SHALL require an explicit `--yes` flag and SHALL refuse to proceed
+    (exit non-zero, no mutation) if `--yes` is absent — it SHALL NOT silently assume
+    consent."
+
+    `otaman init` has met the echo half since the 10-02 incidents and never the
+    consent half, which is how `otaman init --help` executed a scan from a pipe and
+    could repoint a `.otaman` marker. Consumes `safety.confirm_destructive_operation`
+    rather than re-deriving the TTY/`--yes` logic: that helper IS the single home for
+    this rule, and `migrate`/`upgrade` already gate through it.
+
+    The identity is RESTATED here rather than relying on the echo above, because
+    between them sits the validator's output — a prompt that makes the operator scroll
+    back to see which program they are authorising is the failure mode the echo exists
+    to prevent.
+    """
+    from otaman_cli.safety import confirm_destructive_operation
+
+    where = f"{project or '(unnamed)'} — {len(repos)} repo(s) — at {root}"
+    return confirm_destructive_operation(
+        "otaman init will write .agents/, launcher/, policy/ and a .otaman marker "
+        "into every declared repo of:",
+        where,
+        yes=yes,
+    )
 
 
 def cmd_init(args: list[str]) -> int:
@@ -1463,7 +1501,7 @@ def cmd_init(args: list[str]) -> int:
         UI.header("Otaman Init")
 
     # The resolved target, BEFORE the first write (destructive-command-safety).
-    _echo_resolved_target(config_path)
+    _project, _repos = _echo_resolved_target(config_path)
     print()
 
     # Validate first.
@@ -1487,6 +1525,13 @@ def cmd_init(args: list[str]) -> int:
         return result.returncode
     UI.ok("Valid")
     print()
+
+    # `init-consent-gate` step 2 — consent immediately before the first mutation.
+    # Skipped under --dry-run: a dry run mutates nothing, so there is nothing to
+    # consent to, and prompting there would train operators to answer y by reflex.
+    if not dry_run and not _confirm_full_init(config_path.parent, _project, _repos, yes=yes):
+        UI.error("Aborted — nothing was written.")
+        return 2
 
     # Generate
     if dry_run:

@@ -92,6 +92,7 @@ def test_the_echo_runs_before_the_first_write(program, monkeypatch, capsys):
 
     def fake_echo(config_path):
         events.append("echo")
+        return None, []  # contract since init-consent-gate step 2: (project, repos)
 
     monkeypatch.setattr(INIT, "run_script", fake_run_script)
     monkeypatch.setattr(INIT, "_echo_resolved_target", fake_echo)
@@ -101,7 +102,10 @@ def test_the_echo_runs_before_the_first_write(program, monkeypatch, capsys):
     monkeypatch.setattr(INIT, "_ensure_openspec_cli", lambda *a, **k: None)
     monkeypatch.setattr(INIT, "_refuse_inside_a_repo_of_a_program", lambda a: None)
 
-    INIT.cmd_init([str(program), "--skip-doctor"])
+    # `--yes` because the consent gate (step 2) now sits between the echo and the
+    # generator, and pytest's stdin is not a TTY — without it the run correctly
+    # refuses and the generator never runs, which is a different test (below).
+    INIT.cmd_init([str(program), "--skip-doctor", "--yes"])
 
     assert "echo" in events, f"the echo never ran: {events}"
     writes = [e for e in events if e.startswith("script:generate")]
