@@ -31,6 +31,12 @@ ALLOWED = {
     "commands/approve.py": [
         ('ack_file.write_text("approved', "ack is idempotent: same content every time"),
         ('ack_file.write_text("rejected', "ack is idempotent: same content every time"),
+        (
+            'ack.write_text(f"{verdict}',
+            "spec-approval-pending resolution: STRONGER than idempotent — the loop "
+            "skips any marker whose ack already exists, so it never overwrites, least "
+            "of all a verdict the human wrote themselves (cli #285)",
+        ),
     ],
     "console/decision.py": [
         ('.human.ack").write_text', "ack is idempotent: same content every time"),
