@@ -514,7 +514,8 @@ def test_stamping_marks_only_the_awaiting_ids_and_counts_them(program):
                     ],
                 )
             ]
-            count = app.screen._stamp_awaiting(roots, {"mine"})
+            # id -> action since the marker names WHICH act clears it (cli #284)
+            count = app.screen._stamp_awaiting(roots, {"mine": "v"})
             assert count == 1
             by_id = {c.id: c for c in roots[0].children}
             assert by_id["mine"].awaiting is True
@@ -545,7 +546,7 @@ def test_the_awaiting_count_is_about_the_program_not_the_active_filter(program):
                 TreeNode(kind="change", id="b", title="", priority="P3", awaiting=False),
             ]
             # Both awaiting; only one survives a P1 filter.
-            assert app.screen._stamp_awaiting(roots, {"a", "b"}) == 2
+            assert app.screen._stamp_awaiting(roots, {"a": "v", "b": "v"}) == 2
             await app.action_quit()
 
     asyncio.run(go())
@@ -588,7 +589,13 @@ def test_awaiting_ids_union_the_two_existing_sources(program, monkeypatch):
             # until the projection is invalidated. That is the same signal `r`
             # sends, and the same one a bus delta sends.
             app.screen._projections.invalidate()
-            assert app.screen._awaiting_ids() == {"ratify-me", "approve-me"}
+            # The mapping pins which ACTION each source contributes, which is the
+            # thing the marker renders — a set could not have caught the defect
+            # that `v` was offered for a ratify-blocked row (cli #284).
+            assert app.screen._awaiting_ids() == {
+                "ratify-me": "otaman ratify",
+                "approve-me": "v",
+            }
             await app.action_quit()
 
     asyncio.run(go())
@@ -622,7 +629,7 @@ def test_a_broken_lifecycle_derivation_does_not_empty_the_other_half(program, mo
                 "list_authored_changes",
                 lambda program: [SimpleNamespace(name="approve-me")],
             )
-            assert app.screen._awaiting_ids() == {"approve-me"}
+            assert app.screen._awaiting_ids() == {"approve-me": "v"}
             await app.action_quit()
 
     asyncio.run(go())
