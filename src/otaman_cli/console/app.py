@@ -10,6 +10,7 @@ is task 1.4.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from textual.app import App, ComposeResult
@@ -1648,7 +1649,7 @@ class TreeScreen(Screen):
         self.app.call_from_thread(self._populate, roots, notice)
         self.app.call_from_thread(self._set_awaiting_count, count)
 
-    def _stamp_awaiting(self, roots: list, awaiting: set[str]) -> int:
+    def _stamp_awaiting(self, roots: list, awaiting: Mapping[str, str]) -> int:
         """Mark every row that is waiting on the human; return how many.
 
         Counted on the UNFILTERED tree deliberately: "3 awaiting you" is a fact
@@ -1662,6 +1663,7 @@ class TreeScreen(Screen):
             for node in nodes:
                 if node.id in awaiting:
                     node.awaiting = True
+                    node.awaiting_action = awaiting.get(node.id, "") or ""
                     seen.add(node.id)
                 walk(node.children or [])
 
@@ -1695,7 +1697,7 @@ class TreeScreen(Screen):
 
         return [prune(r) for r in roots if matches_tree(query, r, awaiting=awaiting)]
 
-    def _awaiting_ids(self) -> set[str]:
+    def _awaiting_ids(self) -> dict[str, str]:
         """The set the marker, the header count and `:a` ALL key on (D3).
 
         Two existing sources, unioned, and neither is new storage:
@@ -1708,8 +1710,15 @@ class TreeScreen(Screen):
 
         Derived rather than registered, so there is no "needs approval" list to
         go stale, and the filter cannot disagree with the action beside it.
+
+        Returns id -> the ACTION that clears it, because the union has two different
+        actions and the marker used to name neither: a complete-unarchived change wore
+        "◀ you" on the value lens and `v` refused it, leaving Roman with a marker he
+        could not act on (spec-agent 20261004T123258). A mapping rather than a second
+        set, so every `id in awaiting` consumer — the filter's `:a`, the header count —
+        keeps working untouched.
         """
-        awaiting: set[str] = set()
+        awaiting: dict[str, str] = {}
         try:
             # The PROJECTION's rows, not a fresh derivation. This ran on every
             # _load — so a lens switch paid 1468ms here on top of rebuilding the
@@ -1719,17 +1728,25 @@ class TreeScreen(Screen):
                 if "human" in actor.lower():
                     name = getattr(row, "name", None)
                     if name:
-                        awaiting.add(str(name))
+                        # `otaman ratify` is a human-only audited verb, so the console
+                        # offers no key for it — which is exactly why the marker has to
+                        # say where to go.
+                        awaiting[str(name)] = "otaman ratify"
         except Exception:  # noqa: BLE001 - an underivable lifecycle is not an error here
             pass
         try:
             from otaman_cli.console import artifacts
 
-            awaiting |= {c.name for c in artifacts.list_authored_changes(self.program)}
+            # `v` is the in-console action for these.
+            awaiting.update({c.name: "v" for c in artifacts.list_authored_changes(self.program)})
             # dae 1.2 — a change blocked on a decision-required IS awaiting the
             # human, and `:a` is the filter that answers "what needs me". From
             # the projection: a lens may not scan the bus on a render path.
-            awaiting |= self._projections.blocked_by_decision()
+            #
+            # Applied LAST so it wins an overlap: an unanswered decision-required is a
+            # PREREQUISITE, and sending the operator to `v` on a change whose decision
+            # is still open would be sending them to the wrong act.
+            awaiting.update({name: "m: answer" for name in self._projections.blocked_by_decision()})
         except Exception:  # noqa: BLE001 - unresolvable specs repo → that half is empty
             pass
         return awaiting
@@ -1826,6 +1843,18 @@ class TreeScreen(Screen):
         if node is None:
             return
         if node.kind != "change" or not self._is_authored(node.id):
+            # The dead-end rule, inverted: this row may legitimately wear "◀ you" for a
+            # DIFFERENT reason, and "nothing to review here" told Roman the marker was
+            # lying when it was the refusal that was incomplete. Name the act that
+            # applies (spec-agent 20261004T123258).
+            hint = getattr(node, "awaiting_action", "") or ""
+            if hint and hint != "v":
+                self.app.notify(
+                    f"{node.id} is awaiting you, but not for spec-approval — "
+                    f"the action here is: {hint}",
+                    timeout=8,
+                )
+                return
             self.app.notify(
                 f"{node.id} is not an authored change awaiting spec-approval — "
                 "nothing to review here.",
