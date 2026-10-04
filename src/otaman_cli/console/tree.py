@@ -60,6 +60,17 @@ class TreeNode:
     #: same sets `v` and `otaman ratify` act on — so the marker, the header
     #: count and `:a` cannot disagree with the action sitting beside them.
     awaiting: bool = False
+    #: WHICH action clears `awaiting` — "v" or "otaman ratify". The set is a UNION of
+    #: two sources with two different actions (see `_awaiting_ids`), and a marker that
+    #: says you-act-here without saying WHICH act is a dead end: Roman hit exactly that
+    #: on the value lens, where a complete-unarchived change wore the marker and `v`
+    #: refused it because it is ratify-blocked, not authored (spec-agent 20261004T123258).
+    awaiting_action: str = ""
+    #: The outcome id this change NAMES that the registry does not have. Rendered on the
+    #: row, because "(outcome id does not resolve — 5)" sent the reader to a repo diff to
+    #: find out which five and what they said; the typo is visible from the console only
+    #: if the offending string is.
+    dangling_outcome: str = ""
     marker: str = ""  # e.g. ★ for the chosen solution
     pm_sync_id: str | None = None  # linked issue/ticket id (S10)
     children: list[TreeNode] = field(default_factory=list)
@@ -134,7 +145,13 @@ class TreeNode:
             # thing a reader scans for, and a row that says it only by being a
             # slightly different shade says it to nobody (the same lesson as
             # the dim-row defect in 1.2).
-            tail.append(("◀ you", "bold yellow" if not self.grayed else GRAY_STYLE))
+            token = "◀ you"
+            if self.awaiting_action:
+                # Names the act, not just the obligation.
+                token += f" ({self.awaiting_action})"
+            tail.append((token, "bold yellow" if not self.grayed else GRAY_STYLE))
+        if self.dangling_outcome:
+            tail.append((f"{self.dangling_outcome} (no such id)", st("red")))
         if self.marker:
             tail.append((self.marker, st("")))
         if self.pm_sync_id:
@@ -584,6 +601,10 @@ def build_artifact_tree(
     dangling_nodes = _sort_changes(
         [n for name, n in change_nodes.items() if name in dangling and _visible(n)]
     )
+    # The offending string onto the row. `dangling` already maps name -> the id that
+    # did not resolve, so this is a stamp, not a second derivation.
+    for n in dangling_nodes:
+        n.dangling_outcome = str(dangling.get(n.id, "") or "")
     roots.sort(key=lambda n: (_priority_rank(n.priority), n.id))
     if orphans:
         # Collapsed like the rest: this group held 59 changes on the live
