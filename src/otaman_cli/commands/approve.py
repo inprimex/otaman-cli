@@ -15,6 +15,7 @@ sniffing is unchanged behavior.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from otaman_cli.bus_paths import _resolve_bus_paths
 from otaman_cli.commands import CommandSpec, register
@@ -322,6 +323,8 @@ Use `/otaman:check` to track updates.
     broadcast_file = write_message_exclusive(broadcast_file, broadcast)
 
     _terminate_blocked_entries(root, "spec-change-approved", broadcast)
+    for stem in _resolve_approval_pending(active_dir, acks_dir, target["stem"], "approved"):
+        UI.ok(f"  resolved spec-approval-pending: {stem}")
 
     UI.header("Proposal Approved")
     UI.ok(f"Approved: {target['subject']}")
@@ -346,6 +349,60 @@ Use `/otaman:check` to track updates.
                 f'--change "{proposal_title}"'
             )
     return 0
+
+
+def _resolve_approval_pending(
+    active_dir: Path, acks_dir: Path, scr_stem: str, verdict: str
+) -> list[str]:
+    """Resolve the `spec-approval-pending` companion that this SCR's proposal enqueued.
+
+    `otaman propose` writes a `spec-approval-pending` item to the human alongside every
+    SCR, and nothing ever cleared it. plugin-agent measured the result (20261004T121731):
+    24 such markers on the live bus, **21 of them with an approval already on the bus**,
+    oldest 2026-09-11 — and every future SCR added one permanently. Unlike the queue's
+    other bulk producer this is a state machine that never completes, and the failure
+    mode is worse than noise: a surface that says something awaits the human when it
+    does not trains people to ignore approval-pending.
+
+    The matching companion — `_terminate_blocked_entries`, right below — already works:
+    plugin's blocked entry cleared itself the moment the approval landed. One half of the
+    pair resolved itself and the other did not. This is the other half.
+
+    WHY THIS IS NOT AN AGENT ACKING AS THE HUMAN. plugin deliberately did not clear the
+    21 they found, and they were right: acking as the human is on the
+    delivery-authorization FLOOR — never pre-authorizable, however obviously correct each
+    one looks. This runs inside `otaman approve`, which is PRIVILEGED and gated on
+    `confirm_human_decision`'s TTY prompt, so the human is present and this is part of
+    the same act that supersedes the marker. It is the approval retracting its own
+    notice, not a sweep of someone else's inbox.
+
+    Matched on the SCR stem in the marker's body — `propose` writes
+    "Awaiting human approval/ratification of SCR `<stem>`" — so the link is the one the
+    producer already records rather than a filename guess. Returns the stems resolved, so
+    the caller can report them: doing this silently would be its own small dishonesty.
+    """
+    resolved: list[str] = []
+    if not active_dir.is_dir():
+        return resolved
+    for f in sorted(active_dir.glob("*spec-approval-pending*.md")):
+        try:
+            content = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if "type: spec-approval-pending" not in content:
+            continue
+        if scr_stem not in content:
+            continue
+        ack = acks_dir / f"{f.stem}.human.ack"
+        if ack.exists():
+            continue
+        try:
+            acks_dir.mkdir(parents=True, exist_ok=True)
+            ack.write_text(f"{verdict}\n", encoding="utf-8")
+        except OSError:  # a marker we could not resolve is not a failed approval
+            continue
+        resolved.append(f.stem)
+    return resolved
 
 
 def _terminate_blocked_entries(root, msg_type: str, body: str) -> None:
@@ -452,6 +509,10 @@ The spec-change-request has been **rejected**.
     reject_file = write_message_exclusive(reject_file, reject_msg)
 
     _terminate_blocked_entries(root, "spec-change-rejected", reject_msg)
+    # A rejection supersedes the notice just as an approval does — arguably more so,
+    # since "approval pending" on a rejected SCR is not merely stale but wrong.
+    for stem in _resolve_approval_pending(active_dir, acks_dir, target["stem"], "rejected"):
+        UI.ok(f"  resolved spec-approval-pending: {stem}")
 
     UI.header("Proposal Rejected")
     UI.error(f"Rejected: {target['subject']}")
