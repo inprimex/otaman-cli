@@ -114,6 +114,13 @@ def cmd_send(args: list[str]) -> int:
     # delivery-authorization-envelope 1.1 — the decision-required triple. core
     # REQUIRES all three on that type, so without flags every such send failed
     # validation even once the type was registered.
+    # ccha 1.2 — link a reply to the message it answers. `response_contract`
+    # ALREADY reads this key (`has_outbound_reply` matches on it) and
+    # `hitl/messages.py` writes it, but the general send path could not — so a
+    # console answer to a decision-required reached the agent UNLINKED and that
+    # existing reader could never match it. A reader with no writer, which is the
+    # inverse of the gap measured in #286.
+    parser.add_argument("--in-reply-to", dest="in_reply_to", default=None, metavar="STEM")
     parser.add_argument("--decision", dest="decision", default=None)
     parser.add_argument("--blocks", dest="blocks", default=None)
     parser.add_argument(
@@ -441,6 +448,12 @@ def cmd_send(args: list[str]) -> int:
         if ns.msg_type == "decision-required"
         else ""
     )
+    # Quoted like the decision lines: a stem is colon-free today, but an unquoted
+    # value that later grows a colon reads as a mapping and the validator then
+    # reports a missing field rather than a malformed one.
+    reply_line = (
+        f'in-reply-to: "{str(ns.in_reply_to).strip()}"\n' if (ns.in_reply_to or "").strip() else ""
+    )
     cc_line = f"cc: [{', '.join(effective_cc)}]\n" if effective_cc else ""
     content = (
         f"---\n"
@@ -450,6 +463,7 @@ def cmd_send(args: list[str]) -> int:
         f"{cc_line}"
         f"{uri_lines}"
         f"{seq_lines}"
+        f"{reply_line}"
         f"{decision_lines}"
         f"priority: {ns.priority}\n"
         f"type: {ns.msg_type}\n"

@@ -148,8 +148,6 @@ def ratify_change(program: Program, name: str, *, by: str, reason: str) -> tuple
     approval, stamps ratified_at, commits+pushes. *by* is the acting human."""
     from otaman_core.spec_lifecycle import (
         SpecLifecycleError,
-        apply_ratification,
-        ratify,
         read_openspec,
     )
 
@@ -164,13 +162,16 @@ def ratify_change(program: Program, name: str, *, by: str, reason: str) -> tuple
     if not d.is_dir():
         return False, f"no change named {name!r}"
     at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # ccha 1.1 — the SAME write the CLI verb runs; see otaman_cli.spec_ratify.
+    from otaman_cli.spec_ratify import ratification_fields
+
+    oy = d / ".openspec.yaml"
     try:
-        record = ratify(name, by=by.strip(), reason=reason.strip(), at=at)
+        updated = ratification_fields(
+            read_openspec(oy), name, by=by.strip(), reason=reason.strip(), at=at
+        )
     except SpecLifecycleError as exc:
         return False, str(exc)
-    oy = d / ".openspec.yaml"
-    updated = apply_ratification(read_openspec(oy), record)
-    updated["ratified_at"] = at
     _write_openspec(oy, updated)
     repo = _specs_root(program)
     committed, pushed, detail = _commit_push(

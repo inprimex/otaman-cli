@@ -1149,9 +1149,7 @@ def cmd_ratify(args: list[str]) -> int:
 
     from otaman_core.spec_lifecycle import (
         SpecLifecycleError,
-        apply_ratification,
         apply_spec_approved,
-        ratify,
         read_openspec,
     )
 
@@ -1192,15 +1190,17 @@ def cmd_ratify(args: list[str]) -> int:
     from datetime import datetime, timezone
 
     at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # ccha 1.1 — the ONE ratification write, shared with the console action so the
+    # two cannot drift (`ratified_at` in particular: doctor and `spec status` read it
+    # for the month count, and it is not part of core's stage floor).
+    from otaman_cli.spec_ratify import ratification_fields
+
+    data = read_openspec(d / ".openspec.yaml")
     try:
-        record = ratify(name, by=by, reason=reason, at=at)
+        updated = ratification_fields(data, name, by=by, reason=reason, at=at)
     except SpecLifecycleError as exc:
         UI.error(str(exc))
         return 1
-
-    data = read_openspec(d / ".openspec.yaml")
-    updated = apply_ratification(data, record)
-    updated["ratified_at"] = at  # the month-count marker doctor/status read
     if advance_to_spec_approved and approver is not None:
         # Compose: the ratification markers, then the approver-gated advance.
         updated = apply_spec_approved(updated, approver)

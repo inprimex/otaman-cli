@@ -692,6 +692,74 @@ class _InboxItem(ListItem):
         self.message = message
 
 
+class _AnswerAction:
+    """The decision-required answer, shared by the grouped list and the read view.
+
+    `console-complete-human-actions` 1.2. Same rule `_DecisionActions` states below:
+    the merged Messages list must act through the SAME write, not a second copy.
+
+    Two things were wrong before this. `action_answer` existed on the read view and
+    was **bound to no key on any screen** — an implementation nothing could invoke,
+    which is why the awaiting-you marker could not name a key for it. And the reply
+    carried no `in-reply-to`, so `response_contract.has_outbound_reply` — which
+    matches on exactly that field — could never see the decision as answered.
+
+    Subclasses supply `_answer_target()` (the message, or None) and may override
+    `_after_answer()`.
+    """
+
+    def _answer_target(self):  # pragma: no cover - overridden
+        return None
+
+    def _after_answer(self) -> None:
+        return None
+
+    def action_answer(self) -> None:
+        msg = self._answer_target()
+        if msg is None:
+            self.app.notify("No message selected.", severity="warning", timeout=4)
+            return
+        if not getattr(msg, "needs_answer", False):
+            self.app.notify(
+                f"Only a decision-required can be answered — this is a "
+                f"{getattr(msg, 'msg_type', 'message')}.",
+                severity="warning",
+                timeout=5,
+            )
+            return
+        self.app.push_screen(
+            ReasonModal("Your answer", msg.subject),
+            lambda text: self._send_answer_for(msg, text),
+        )
+
+    def _send_answer_for(self, msg, answer: str | None) -> None:
+        if not answer or not answer.strip():
+            return  # dismissed, or empty — an empty answer unblocks nothing
+        from otaman_cli.console.decision_required import answer_argv, answer_subject
+        from otaman_cli.console.journal import run_decision_action
+        from otaman_cli.console.setup import run_verb
+
+        recipient = msg.from_agent
+        argv = answer_argv(
+            recipient,
+            answer_subject(msg.subject),
+            answer.strip(),
+            in_reply_to=msg.stem,
+        )
+
+        def fn():
+            result = run_verb(self.program, argv)
+            return result.ok, result.output
+
+        # Journalled like every other console write: an answer that vanished would
+        # leave the agent blocked with nobody knowing why — the failure this message
+        # type exists to remove.
+        ok, _ = run_decision_action(self.app, action="answer", target=msg.stem, fn=fn)
+        if ok:
+            self.app.notify(f"Answer sent to {recipient}.", timeout=6)
+            self._after_answer()
+
+
 class _DecisionActions:
     """approve / approve-auto / reject / defer, shared by every screen that can
     decide (console-ia-consolidation 2.1).
@@ -807,7 +875,7 @@ class _DecisionActions:
         self._prompt_and_decide("defer")
 
 
-class InboxScreen(_DecisionActions, Screen):
+class InboxScreen(_AnswerAction, _DecisionActions, Screen):
     """Messages — the ONE list of everything addressed to the human (2.1).
 
     Decisions used to live on a separate screen, so an item's TYPE decided which
@@ -822,6 +890,8 @@ class InboxScreen(_DecisionActions, Screen):
         Binding("A", "approve_auto", "Approve (auto-delivery)", priority=True),
         Binding("x", "reject", "Reject", priority=True),
         Binding("d", "defer", "Defer", priority=True),
+        # ccha 1.2 — the answer, in the GROUPED view where the reader already is.
+        Binding("w", "answer", "Answer (decision-required)", priority=True),
         Binding("escape", "back", "Back", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
         Binding("q", "app.quit", "Quit", priority=True),
@@ -1146,6 +1216,13 @@ class InboxScreen(_DecisionActions, Screen):
         """The message under the cursor, or None on a group header."""
         return self._row_of(getattr(self.query_one("#inbox-tree", Tree), "cursor_node", None))
 
+    def _answer_target(self):
+        """ccha 1.2 — the same cursor row the decide keys act on."""
+        return self._highlighted_proposal()
+
+    def _after_answer(self) -> None:
+        self._load()
+
     def focus_row(self, index: int = 0):
         """Put the cursor on the *index*-th VISIBLE message row; return it (cmt 1.2).
 
@@ -1319,6 +1396,10 @@ class TreeScreen(Screen):
         Binding("p", "toggle_panel", "Read panel", priority=True),
         # 2.2 — spec review is an ACTION on an authored change row, not a screen.
         Binding("v", "review", "Spec-approve (authored)", priority=True),
+        # ccha 1.1 — the marker on these rows names `y`, so `y` has to be pressable
+        # HERE. It was bound only on LifecycleScreen, which made the tree's own
+        # "◀ you (otaman ratify)" name a CLI verb for want of a local key.
+        Binding("y", "ratify", "Ratify (complete, unarchived)", priority=True),
         # 3.1 — one key cycles value → capability → lifecycle.
         Binding("L", "cycle_lens", "Switch lens", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
@@ -1704,7 +1785,7 @@ class TreeScreen(Screen):
 
           * the lifecycle derivation's ``next_actor`` — a complete-unarchived
             change with no approval is ratify-blocked on the human, which is
-            exactly what `otaman ratify` acts on;
+            exactly what `y` on this screen (and `otaman ratify`) acts on;
           * ``list_authored_changes`` — the set awaiting spec-approval, which is
             exactly what `v` acts on.
 
@@ -1731,7 +1812,9 @@ class TreeScreen(Screen):
                         # `otaman ratify` is a human-only audited verb, so the console
                         # offers no key for it — which is exactly why the marker has to
                         # say where to go.
-                        awaiting[str(name)] = "otaman ratify"
+                        # ccha 1.1 — `y` is bound on the tree now, so the marker
+                        # names the KEY rather than the CLI verb it pointed at.
+                        awaiting[str(name)] = "y"
         except Exception:  # noqa: BLE001 - an underivable lifecycle is not an error here
             pass
         try:
@@ -1746,7 +1829,9 @@ class TreeScreen(Screen):
             # Applied LAST so it wins an overlap: an unanswered decision-required is a
             # PREREQUISITE, and sending the operator to `v` on a change whose decision
             # is still open would be sending them to the wrong act.
-            awaiting.update({name: "m: answer" for name in self._projections.blocked_by_decision()})
+            # ccha 1.2 — `w` answers a decision-required, on the Messages screen
+            # (`m`). Both keys are named because the act is not on this screen.
+            awaiting.update({name: "m then w" for name in self._projections.blocked_by_decision()})
         except Exception:  # noqa: BLE001 - unresolvable specs repo → that half is empty
             pass
         return awaiting
@@ -1829,6 +1914,63 @@ class TreeScreen(Screen):
                 self._add(branch, child, width)
         else:
             parent.add_leaf(label, data=node)
+
+    def action_ratify(self) -> None:
+        """Ratify the highlighted complete-unarchived change (ccha 1.1).
+
+        Reuses the row's `awaiting_action` — the classification #284 put on the node —
+        rather than re-deciding which human step a row needs. There is exactly one
+        place that maps a row to its act, and this reads it.
+
+        The WRITE is `console.lifecycle.ratify_change`, which shares
+        `spec_ratify.ratification_fields` with `otaman ratify` itself, so a record
+        minted here is shape-identical to a CLI-minted one by construction rather
+        than by agreement.
+        """
+        node = self._cursor_node()
+        if node is None:
+            return
+        hint = getattr(node, "awaiting_action", "") or ""
+        if node.kind != "change" or hint != "y":
+            # The dead-end rule: name the act that applies, never a bare refusal.
+            if hint:
+                self.app.notify(
+                    f"{node.id} is awaiting you, but not for ratification — "
+                    f"the action here is: {hint}",
+                    timeout=8,
+                )
+            else:
+                self.app.notify(
+                    f"{node.id} is not a complete-unarchived change awaiting "
+                    "ratification — nothing to ratify here.",
+                    timeout=6,
+                )
+            return
+
+        def _after(reason: str | None) -> None:
+            if reason is None:
+                return
+            if not reason.strip():
+                self.app.notify("Ratify needs a reason.", severity="error", timeout=5)
+                return
+            from otaman_cli.console.identity import resolve_identity
+            from otaman_cli.console.journal import run_decision_action
+            from otaman_cli.console.lifecycle import ratify_change
+
+            who = resolve_identity()
+            ok, detail = run_decision_action(
+                self.app,
+                action="ratify",
+                target=node.id,
+                fn=lambda: ratify_change(
+                    self.program, node.id, by=who or "", reason=reason.strip()
+                ),
+            )
+            if ok:
+                self.app.notify(detail or f"ratified {node.id}", timeout=6)
+                self._load()
+
+        self.app.push_screen(ReasonModal("ratify", f"change {node.id!r}"), _after)
 
     def action_review(self) -> None:
         """Spec-approve the highlighted authored change (2.2).
@@ -2185,10 +2327,13 @@ class RegistryDetailScreen(Screen):
         self.app.pop_screen()
 
 
-class InboxMessageScreen(Screen):
+class InboxMessageScreen(_AnswerAction, Screen):
     """Full read view of one inbox message (console-ux-redesign 1.2)."""
 
     BINDINGS = [
+        # ccha 1.2 — the SAME key as the grouped view. `action_answer` existed here
+        # and was bound to nothing, so it was unreachable from the keyboard.
+        Binding("w", "answer", "Answer (decision-required)", priority=True),
         Binding("escape", "back", "Back", priority=True),
         Binding("q", "app.quit", "Quit", priority=True),
     ]
@@ -2218,42 +2363,12 @@ class InboxMessageScreen(Screen):
         )
         yield Footer()
 
-    def action_answer(self) -> None:
-        """Reply to the agent blocked on this decision (dae 1.2).
+    def _answer_target(self):
+        """ccha 1.2 — the message this screen is showing."""
+        return self.message
 
-        Offered only for a `decision-required`: answering anything else would
-        send an agent a message it is not waiting for.
-        """
-        if not getattr(self.message, "needs_answer", False):
-            self.app.notify(
-                f"Only a decision-required can be answered — this is a {self.message.msg_type}.",
-                severity="warning",
-                timeout=5,
-            )
-            return
-        self.app.push_screen(ReasonModal("Your answer", self.message.subject), self._send_answer)
-
-    def _send_answer(self, answer: str | None) -> None:
-        if not answer or not answer.strip():
-            return  # dismissed, or empty — an empty answer unblocks nothing
-        from otaman_cli.console.decision_required import answer_argv, answer_subject
-        from otaman_cli.console.journal import run_decision_action
-        from otaman_cli.console.setup import run_verb
-
-        recipient = self.message.from_agent
-        argv = answer_argv(recipient, answer_subject(self.message.subject), answer.strip())
-
-        def fn():
-            result = run_verb(self.program, argv)
-            return result.ok, result.output
-
-        # Journalled like every other console write: an answer that vanished
-        # would leave the agent blocked with nobody knowing why — which is the
-        # failure this whole type exists to remove.
-        ok, _ = run_decision_action(self.app, action="answer", target=self.message.stem, fn=fn)
-        if ok:
-            self.app.notify(f"Answer sent to {recipient}.", timeout=6)
-            self.app.pop_screen()
+    def _after_answer(self) -> None:
+        self.app.pop_screen()
 
     def action_back(self) -> None:
         self.app.pop_screen()
