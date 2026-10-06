@@ -199,8 +199,11 @@ def test_the_read_view_offers_answer_only_for_a_decision_required():
     for."""
     import inspect
 
-    from otaman_cli.console.app import InboxMessageScreen
+    from otaman_cli.console.app import InboxMessageScreen, _AnswerAction
 
+    # The read view inherits the action from the shared mixin (ccha 1.2); assert the
+    # inheritance holds AND that the shared guard is the one being inherited.
+    assert issubclass(InboxMessageScreen, _AnswerAction)
     src = inspect.getsource(InboxMessageScreen.action_answer)
     assert "needs_answer" in src
     assert "Only a decision-required can be answered" in src
@@ -208,12 +211,17 @@ def test_the_read_view_offers_answer_only_for_a_decision_required():
 
 def test_the_answer_is_journalled():
     """An answer that vanished would leave the agent blocked with nobody
-    knowing why — the failure this type exists to remove."""
+    knowing why — the failure this type exists to remove.
+
+    Asserted on the SHARED `_AnswerAction` mixin since ccha 1.2: the send moved there
+    so the grouped view and the read view answer through one implementation, and this
+    now covers both screens rather than the read view alone.
+    """
     import inspect
 
-    from otaman_cli.console.app import InboxMessageScreen
+    from otaman_cli.console.app import _AnswerAction
 
-    assert "run_decision_action" in inspect.getsource(InboxMessageScreen._send_answer)
+    assert "run_decision_action" in inspect.getsource(_AnswerAction._send_answer_for)
 
 
 def test_the_awaiting_filter_reads_a_projection_not_the_bus():

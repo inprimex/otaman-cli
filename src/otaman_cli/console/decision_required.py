@@ -61,14 +61,21 @@ def blocked_refs(blocks: Any) -> set[str]:
     return refs
 
 
-def answer_argv(recipient: str, subject: str, body: str) -> list[str]:
+def answer_argv(
+    recipient: str, subject: str, body: str, *, in_reply_to: str | None = None
+) -> list[str]:
     """`otaman send` argv that routes an answer back to the emitting agent.
 
     The recipient is the message's `from:` — the agent that is blocked — not the
     human and not a broadcast. An answer sent anywhere else leaves the waiting
     agent waiting.
+
+    *in_reply_to* is the answered message's stem (ccha 1.2). Without it the reply
+    reaches the agent but is not LINKED to the question, so
+    `response_contract.has_outbound_reply` — which matches on that very key —
+    cannot see that the decision was answered.
     """
-    return [
+    argv = [
         "send",
         recipient,
         "--type",
@@ -78,6 +85,9 @@ def answer_argv(recipient: str, subject: str, body: str) -> list[str]:
         "--body",
         body,
     ]
+    if in_reply_to and in_reply_to.strip():
+        argv += ["--in-reply-to", in_reply_to.strip()]
+    return argv
 
 
 def answer_subject(original_subject: str) -> str:

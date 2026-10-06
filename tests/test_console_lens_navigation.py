@@ -592,8 +592,10 @@ def test_awaiting_ids_union_the_two_existing_sources(program, monkeypatch):
             # The mapping pins which ACTION each source contributes, which is the
             # thing the marker renders — a set could not have caught the defect
             # that `v` was offered for a ratify-blocked row (cli #284).
+            # ccha 1.1 — `y` is bound on the tree now, so the ratify-class marker
+            # names the KEY. It said "otaman ratify" while no local key existed.
             assert app.screen._awaiting_ids() == {
-                "ratify-me": "otaman ratify",
+                "ratify-me": "y",
                 "approve-me": "v",
             }
             await app.action_quit()
