@@ -19,7 +19,7 @@ jobs:
       # ce-lint-standard: ruff pinned exactly (F182 doctrine — unpinned CI
       # tooling is drift waiting to break builds). Bump via ordinary PR.
       - name: Install ruff
-        run: pipx install ruff==0.16.3
+        run: pipx install ruff==0.16.9
 
       - name: ruff check
         run: ruff check .
