@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from otaman_cli import approval_link as _approval_link
 from otaman_cli.bus_paths import _get_agent_ack_status, _resolve_bus_paths
 from otaman_cli.commands import CommandSpec, register
 from otaman_cli.commands.bus_messaging import _file_is_for_agent
@@ -173,6 +174,11 @@ def cmd_check(args: list[str]) -> int:
                     "status": status,
                     "timestamp": str(fm.get("timestamp", "")),
                     "subject": subject,
+                    # The proposal this broadcast DECIDES, parsed by the format's single
+                    # home. The detection below used to match the stem against `subject`,
+                    # which carries the change TITLE — 0 of 12 live approvals had a stem
+                    # there, so no approval was ever detected (deploy 20261006T144602).
+                    "decides_stem": _approval_link.parse_original_proposal(body_start),
                     "file": f.name,
                     "stem": f.stem,
                     # inter-agent-request-response-contract (tasks 2.1, 2.2)
@@ -399,12 +405,12 @@ def cmd_check(args: list[str]) -> int:
 
                 stem = entry.proposal
                 has_approval = any(
-                    m["type"] == "spec-change-approved" and stem and stem in m.get("subject", "")
+                    m["type"] == "spec-change-approved" and stem and m.get("decides_stem") == stem
                     for m in messages
                 )
                 has_spec_change = any(m["type"] == "spec-change" for m in messages)
                 has_rejection = any(
-                    m["type"] == "spec-change-rejected" and stem and stem in m.get("subject", "")
+                    m["type"] == "spec-change-rejected" and stem and m.get("decides_stem") == stem
                     for m in messages
                 )
                 if has_approval and has_spec_change:
