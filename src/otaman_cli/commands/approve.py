@@ -288,7 +288,7 @@ status: pending
 
 The spec-change-request from **{target["fm"].get("from", "?")}** has been **approved**.
 
-**Original proposal**: {target["stem"]}
+{_original_proposal(target)}
 {comment_section}
 ### Next steps
 1. Specs will be created/updated in the specs repo (via OpenSpec or manually)
@@ -349,6 +349,19 @@ Use `/otaman:check` to track updates.
                 f'--change "{proposal_title}"'
             )
     return 0
+
+
+def _original_proposal(target: dict) -> str:
+    """The back-link line, rendered by its single home.
+
+    `otaman check` PARSES this line to tell an approved proposal from a pending one.
+    Writer and reader lived apart and named different fields — the reader searched the
+    subject — so every decided proposal read as still awaiting the human. See
+    `otaman_cli.approval_link`.
+    """
+    from otaman_cli.approval_link import render_original_proposal
+
+    return render_original_proposal(target["stem"])
 
 
 def _resolve_approval_pending(
@@ -483,7 +496,7 @@ The spec-change-request has been **rejected**.
 
 **Reason**: {reason}
 
-**Original proposal**: {target["stem"]}
+{_original_proposal(target)}
 """
     if not record_privileged_confirmation(
         message_id=f"{now_ts}-rejected",

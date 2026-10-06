@@ -691,6 +691,30 @@ def list_human_queue(program: Program) -> list[Proposal]:
     return out
 
 
+def _decided_stems(program: Program) -> set[str]:
+    """Stems an approval/rejection broadcast on this bus already decides.
+
+    Values-free: reads only the back-link line, never a verdict's prose. Returns an
+    empty set on an unreadable bus — a missing comparand must not promote a decided
+    item to pending, and the ack check still stands on its own either way.
+    """
+    from otaman_cli.approval_link import parse_original_proposal
+
+    active_dir, _ = program.bus_paths()
+    out: set[str] = set()
+    if not active_dir.is_dir():
+        return out
+    for pattern in ("*spec-change-approved*.md", "*spec-change-rejected*.md"):
+        for f in active_dir.glob(pattern):
+            try:
+                stem = parse_original_proposal(f.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue
+            if stem:
+                out.add(stem)
+    return out
+
+
 def list_pending_proposals(program: Program) -> list[Proposal]:
     """Pending human decision items for *program* (no `<stem>.human.ack`): both
     spec-change-requests AND outcome-proposals addressed to the human (1.1).
@@ -716,10 +740,24 @@ def list_pending_proposals(program: Program) -> list[Proposal]:
     except OSError:
         acked = set()
 
+    # A decision recorded as a BROADCAST also resolves the request. 14 of the 19 items
+    # on this queue were in exactly that state — approved or rejected, with the verdict
+    # on the bus, and no `<stem>.human.ack` to show it. Roman opened the view and found
+    # 18 of 19 already decided (spec-agent 20261006T185143); a mandatory tree that is
+    # mostly ghosts trains the operator to stop reading it, defeating the review policy
+    # it exists to serve.
+    #
+    # The back-link is parsed by its single home (`approval_link`) — the same primitive
+    # `otaman check` uses to tell an approved proposal from a pending one, so the two
+    # surfaces cannot disagree about what "decided" means.
+    decided = _decided_stems(program)
+
     out: list[Proposal] = []
     for entry in active_entries(program):
         f = entry.path
         if f"{f.stem}.human.ack" in acked:
+            continue
+        if f.stem in decided:
             continue
         if entry.tag("type") not in _QUEUE_TYPES:
             continue  # cheap tier: skips ~99% without a YAML parse
