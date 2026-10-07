@@ -223,3 +223,117 @@ def test_both_surfaces_consult_the_same_primitive():
 
     assert "approval_link" in inspect.getsource(bus._decided_stems)
     assert "_approval_link" in inspect.getsource(check)
+
+
+# ---------------------------------------------------------------------------
+# dispositions (seam ruled 20261007T193507): decided, but not by approval
+
+
+def _disposition(active, decides: str, *, sender: str = "spec-agent", verdict: str = "duplicate"):
+    stem = f"20261007T200000-{sender}-to-human-disposition-x"
+    (active / f"{stem}.md").write_text(
+        f"---\nid: {stem}\nfrom: {sender}\nto: human\npriority: normal\ntype: info\n"
+        f"timestamp: 2026-10-07T20:00:00+00:00\nstatus: pending\n---\n\n"
+        f"## Subject: Dispositioned\n\n"
+        f"{render_original_proposal(decides)}\n"
+        f"**Disposition**: {verdict}\n",
+        encoding="utf-8",
+    )
+    return stem
+
+
+def test_a_disposition_from_spec_agent_decides_the_request(program):
+    """An SCR already delivered, duplicated or absorbed needs no human review."""
+    from otaman_cli.console.bus import list_pending_proposals
+
+    prog, active = program
+    _scr(active, STEM)
+    _disposition(active, STEM)
+
+    assert [p for p in list_pending_proposals(prog) if p.stem == STEM] == []
+
+
+def test_a_disposition_from_ANY_OTHER_agent_is_ignored(program):
+    """The trust boundary. Without the sender check, any agent could mint a `type:
+    info` carrying a back-link and silently clear items off the human's mandatory
+    review queue — and a vanished review is worse than a visible ghost, because
+    nothing shows it happened."""
+    from otaman_cli.console.bus import list_pending_proposals
+
+    prog, active = program
+    _scr(active, STEM)
+    _disposition(active, STEM, sender="plugin-agent")
+
+    assert [p.stem for p in list_pending_proposals(prog)] == [STEM]
+
+
+def test_a_back_link_with_no_disposition_line_is_not_a_disposition(program):
+    """`type: info` from spec-agent quoting a stem in prose is a conversation, not a
+    verdict. Both halves are required."""
+    from otaman_cli.console.bus import list_pending_proposals
+
+    prog, active = program
+    _scr(active, STEM)
+    stem = "20261007T200000-spec-agent-to-human-chat-x"
+    (active / f"{stem}.md").write_text(
+        f"---\nid: {stem}\nfrom: spec-agent\nto: human\npriority: normal\ntype: info\n"
+        f"timestamp: 2026-10-07T20:00:00+00:00\nstatus: pending\n---\n\n"
+        f"## Subject: about that request\n\n{render_original_proposal(STEM)}\n",
+        encoding="utf-8",
+    )
+
+    assert [p.stem for p in list_pending_proposals(prog)] == [STEM]
+
+
+@pytest.mark.parametrize("verdict", ["already-delivered", "duplicate", "absorbed-into omo"])
+def test_every_ruled_verdict_form_parses(verdict):
+    from otaman_cli.approval_link import parse_disposition
+
+    assert parse_disposition(f"**Disposition**: {verdict}") == verdict
+
+
+def test_a_back_link_without_a_VERDICT_is_not_a_disposition_predicate_level():
+    """Asserted on the predicate directly, because the reader's cheap
+    `DISPOSITION_LABEL not in text` pre-filter hides this at the reader level — a
+    sabotage that made a bare back-link count as a disposition passed every
+    reader-level test. The realistic leak: spec-agent writes an info message that
+    mentions "Disposition" in prose AND quotes a stem, the pre-filter admits it, and
+    the item silently clears off the human's queue.
+    """
+    from otaman_cli.approval_link import is_disposition
+
+    assert not is_disposition("spec-agent", render_original_proposal(STEM))
+    assert not is_disposition(
+        "spec-agent",
+        f"{render_original_proposal(STEM)}\n\nNo Disposition has been recorded yet.\n",
+    ), "prose mentioning the word is not a verdict line"
+
+
+def test_a_prose_mention_of_disposition_does_not_clear_the_queue(program):
+    """The same leak at the reader level, past the pre-filter."""
+    from otaman_cli.console.bus import list_pending_proposals
+
+    prog, active = program
+    _scr(active, STEM)
+    stem = "20261007T200000-spec-agent-to-human-chat-y"
+    (active / f"{stem}.md").write_text(
+        f"---\nid: {stem}\nfrom: spec-agent\nto: human\npriority: normal\ntype: info\n"
+        f"timestamp: 2026-10-07T20:00:00+00:00\nstatus: pending\n---\n\n"
+        f"## Subject: status\n\n{render_original_proposal(STEM)}\n\n"
+        f"No Disposition has been recorded for this yet.\n",
+        encoding="utf-8",
+    )
+
+    assert [p.stem for p in list_pending_proposals(prog)] == [STEM]
+
+
+def test_the_sender_rule_is_the_one_spec_agent_declared():
+    """One producer: the agent that owns dispositions.yaml. Pinned so a later reader
+    cannot widen it casually."""
+    from otaman_cli.approval_link import DISPOSITION_SENDER, is_disposition
+
+    assert DISPOSITION_SENDER == "spec-agent"
+    body = render_original_proposal(STEM) + "\n**Disposition**: duplicate\n"
+    assert is_disposition("spec-agent", body)
+    assert not is_disposition("human", body)
+    assert not is_disposition(None, body)
