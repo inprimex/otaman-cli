@@ -698,7 +698,11 @@ def _decided_stems(program: Program) -> set[str]:
     empty set on an unreadable bus — a missing comparand must not promote a decided
     item to pending, and the ack check still stands on its own either way.
     """
-    from otaman_cli.approval_link import parse_original_proposal
+    from otaman_cli.approval_link import (
+        DISPOSITION_LABEL,
+        is_disposition,
+        parse_original_proposal,
+    )
 
     active_dir, _ = program.bus_paths()
     out: set[str] = set()
@@ -712,7 +716,43 @@ def _decided_stems(program: Program) -> set[str]:
                 continue
             if stem:
                 out.add(stem)
+
+    # A DISPOSITION also decides the request (seam ruled 20261007T193507): an SCR that
+    # was already delivered, is a duplicate, or was absorbed into another change needs
+    # no human review. It arrives as a plain `type: info` from spec-agent carrying the
+    # same back-link, so it matches neither glob above — selection had to grow, not the
+    # parser. Flagged to spec-agent BEFORE they emitted, so their ledger would not look
+    # like it had failed when the gap was my glob.
+    #
+    # Narrow by sender on purpose: `is_disposition` honours it only from the one agent
+    # that owns dispositions.yaml. Any agent could otherwise mint an `info` with a
+    # back-link and silently clear items off the human's mandatory queue, and a
+    # vanished review is a worse failure than a visible ghost.
+    for f in active_dir.glob("*.md"):
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if DISPOSITION_LABEL not in text:
+            continue  # cheap tier: skips ~99% without parsing frontmatter
+        sender = _sender_of(text)
+        if is_disposition(sender, text):
+            stem = parse_original_proposal(text)
+            if stem:
+                out.add(stem)
     return out
+
+
+def _sender_of(text: str) -> str | None:
+    """The `from:` of a message, read without a full YAML parse."""
+    for line in text.splitlines():
+        if line.startswith("from:"):
+            return line.split(":", 1)[1].strip()
+        if line.startswith("---") and line.strip() == "---":
+            continue
+        if line.strip() and not line.startswith(("-", " ")) and ":" not in line:
+            break
+    return None
 
 
 def list_pending_proposals(program: Program) -> list[Proposal]:

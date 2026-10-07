@@ -26,13 +26,34 @@ import re
 
 LABEL = "Original proposal"
 
+#: The disposition verdict line, alongside the back-link, on a spec-agent disposition
+#: message (seam ruled 20261007T193507): `**Disposition**: already-delivered|duplicate|
+#: absorbed-into <target>`. A dispositioned SCR is DECIDED — the human should not
+#: re-review an absorbed duplicate — so the readers treat it like an approval.
+DISPOSITION_LABEL = "Disposition"
+
+#: Only the agent that owns `dispositions.yaml` emits them, so the ledger and the bus
+#: cannot disagree (spec-agent's one-producer rule). Enforced in the READER too: without
+#: it, any agent could mint a `type: info` carrying a back-link and silently clear items
+#: off the human's mandatory review queue — a worse failure than the ghosts this fixes,
+#: because a ghost is visible and a vanished review is not.
+DISPOSITION_SENDER = "spec-agent"
+
 #: Tolerates the backticked form, which older minted broadcasts on this bus carry
 #: (`**Original proposal**: `<stem>``) alongside the bare form the writer emits today.
 #: A parser that only accepted today's spelling would silently fail to link four months
 #: of history — and "no approval found" is indistinguishable from "not yet approved".
 _RE = re.compile(rf"\*\*{LABEL}\*\*:\s*`?([^\s`]+)`?", re.IGNORECASE)
 
-__all__ = ["LABEL", "parse_original_proposal", "render_original_proposal"]
+__all__ = [
+    "DISPOSITION_LABEL",
+    "DISPOSITION_SENDER",
+    "LABEL",
+    "is_disposition",
+    "parse_disposition",
+    "parse_original_proposal",
+    "render_original_proposal",
+]
 
 
 def render_original_proposal(stem: str) -> str:
@@ -53,3 +74,28 @@ def parse_original_proposal(body: str | None) -> str | None:
     if not m:
         return None
     return m.group(1).strip() or None
+
+
+_DISPOSITION_RE = re.compile(rf"\*\*{DISPOSITION_LABEL}\*\*:\s*(\S[^\n]*)", re.IGNORECASE)
+
+
+def parse_disposition(body: str | None) -> str | None:
+    """The disposition verdict a body records, or None when it records none."""
+    if not body:
+        return None
+    m = _DISPOSITION_RE.search(body)
+    if not m:
+        return None
+    return m.group(1).strip() or None
+
+
+def is_disposition(sender: str | None, body: str | None) -> bool:
+    """True when *body* is a disposition FROM its one authorised producer.
+
+    Both halves are required. A disposition line from anyone else is not a decision —
+    it is an agent asserting that the human need not look at something, which is the
+    one direction this reader must never take on trust.
+    """
+    if (sender or "").strip() != DISPOSITION_SENDER:
+        return False
+    return parse_disposition(body) is not None and parse_original_proposal(body) is not None
