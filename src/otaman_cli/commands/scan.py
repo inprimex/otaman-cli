@@ -18,6 +18,134 @@ from otaman_cli.commands import CommandSpec, register, wants_help
 from otaman_cli.scripts import run_script
 from otaman_cli.ui import UI, C
 
+# Runtime state that must never be versioned. Order is the order they are
+# appended in; the trailing-slash forms are deliberate (directories), and
+# `.agents/current-agent` is a file.
+_RUNTIME_EXCLUSIONS = (
+    ".agents/bus/",
+    ".agents/blocked/",
+    ".agents/queue/",
+    ".agents/sessions/",
+    ".agents/current-agent",
+)
+
+_EXCLUSIONS_HEADER = "# Runtime artifacts (not versioned)"
+
+
+def _gitignore_missing_exclusions(gitignore_path: Path) -> list[str]:
+    """Which of :data:`_RUNTIME_EXCLUSIONS` are absent from the file.
+
+    Matching ignores a trailing slash so a hand-written `.agents/bus`
+    counts as covering `.agents/bus/` — appending a near-duplicate would
+    be noise, not protection.
+    """
+    try:
+        existing = {
+            ln.strip().rstrip("/")
+            for ln in gitignore_path.read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.strip().startswith("#")
+        }
+    except OSError:
+        existing = set()
+    return [line for line in _RUNTIME_EXCLUSIONS if line.rstrip("/") not in existing]
+
+
+def _tracked_runtime_paths(maestro_path: Path) -> list[tuple[str, int]]:
+    """``(path, tracked file count)`` for every runtime path git is tracking.
+
+    An ignore line does NOT untrack what is already committed, so a program
+    that predates these entries keeps versioning its bus until someone
+    untracks it by hand. Reporting that is the whole point — see the caller
+    for why this never untracks anything itself.
+    """
+    found: list[tuple[str, int]] = []
+    for line in _RUNTIME_EXCLUSIONS:
+        rel = line.rstrip("/")
+        r = subprocess.run(
+            ["git", "ls-files", "-z", "--", rel],
+            cwd=str(maestro_path),
+            capture_output=True,
+            text=True,
+        )
+        if r.returncode != 0:
+            continue
+        count = len([x for x in r.stdout.split("\0") if x])
+        if count:
+            found.append((rel, count))
+    return found
+
+
+def ensure_runtime_exclusions(maestro_path: Path, *, dry_run: bool = False) -> None:
+    """Append any missing runtime-exclusion lines to `.gitignore`, idempotently.
+
+    This used to be `if not gitignore_path.exists(): write_text(...)` — so a
+    program that already had a `.gitignore` for any other reason never
+    received these lines, and a line added to the list later never reached an
+    existing program. otaman-dev was that case: its `.gitignore` carried only
+    three `.otaman/*` secret entries, so a `git add` sweep committed the bus,
+    the queues, the sessions and the retired `current-agent` marker
+    (deploy-agent, 20261008T113746).
+
+    Appends per missing line and never rewrites the file, so hand-written
+    rules and comments survive.
+
+    It does NOT untrack anything, deliberately. On otaman-dev the 7,936
+    committed bus files are the only durable copy of the bus that exists —
+    untracking there would turn "half the bus has no durable copy" into
+    "none of it does". Already-tracked paths are REPORTED so the drift is
+    visible, and the operator decides after taking a backup.
+    """
+    gitignore_path = maestro_path / ".gitignore"
+    existed = gitignore_path.is_file()
+    missing = (
+        _gitignore_missing_exclusions(gitignore_path) if existed else list(_RUNTIME_EXCLUSIONS)
+    )
+
+    if dry_run:
+        if not existed:
+            UI.muted(
+                "  [dry-run] would create .gitignore "
+                "(.agents/bus,blocked,queue,sessions,current-agent)"
+            )
+        elif missing:
+            UI.muted(f"  [dry-run] would append {len(missing)} missing exclusion(s) to .gitignore")
+            for line in missing:
+                UI.muted(f"              + {line}")
+        else:
+            UI.muted("  [dry-run] .gitignore already excludes every runtime path")
+    elif not existed:
+        gitignore_path.write_text(
+            _EXCLUSIONS_HEADER + "\n" + "".join(f"{line}\n" for line in _RUNTIME_EXCLUSIONS),
+            encoding="utf-8",
+        )
+        UI.ok("Created .gitignore")
+    elif missing:
+        body = gitignore_path.read_text(encoding="utf-8")
+        prefix = "" if body.endswith("\n") or not body else "\n"
+        addition = "".join(f"{line}\n" for line in missing)
+        header = "" if _EXCLUSIONS_HEADER in body else f"\n{_EXCLUSIONS_HEADER}\n"
+        gitignore_path.write_text(body + prefix + header + addition, encoding="utf-8")
+        UI.ok(f"Appended {len(missing)} missing runtime exclusion(s) to .gitignore")
+        for line in missing:
+            UI.muted(f"  + {line}")
+    else:
+        UI.ok(".gitignore already excludes every runtime path")
+
+    # Report-and-stop: an ignore line is not retroactive.
+    if (maestro_path / ".git").exists():
+        tracked = _tracked_runtime_paths(maestro_path)
+        if tracked:
+            UI.warn("Runtime paths are already TRACKED by git — the ignore lines above")
+            UI.warn("do not untrack what is already committed:")
+            for rel, count in tracked:
+                UI.muted(f"  {rel}: {count} tracked file(s)")
+            UI.muted(
+                "  Untracking is `git rm -r --cached <path>` and is NOT done for you: "
+                "on some programs these commits are the only durable copy of that "
+                "state. Verify a backup exists first, then untrack by hand."
+            )
+    print()
+
 
 def _find_existing_otaman_project(scan_root: Path) -> Path | None:
     """Detect if scan_root is already an otaman project.
@@ -155,12 +283,7 @@ def cmd_scan(args: list[str]) -> int:
                 UI.muted(f"  [dry-run] otaman folder already exists at {maestro_path}/")
             if not (maestro_path / ".git").exists():
                 UI.muted(f"  [dry-run] would `git init` in {maestro_path.name}/")
-            if not (maestro_path / ".gitignore").exists():
-                UI.muted(
-                    "  [dry-run] would create .gitignore "
-                    "(.agents/bus,blocked,queue,sessions,current-agent)"
-                )
-            print()
+            ensure_runtime_exclusions(maestro_path, dry_run=True)
         else:
             # Create otaman folder + git init
             maestro_path.mkdir(parents=True, exist_ok=True)
@@ -169,20 +292,16 @@ def cmd_scan(args: list[str]) -> int:
                 subprocess.run(["git", "init", str(maestro_path)], capture_output=True)
                 UI.ok(f"Created {maestro_path.name}/ with git init")
 
-            # Generate .gitignore
-            gitignore_path = maestro_path / ".gitignore"
-            if not gitignore_path.exists():
-                gitignore_path.write_text(
-                    "# Runtime artifacts (not versioned)\n"
-                    ".agents/bus/\n"
-                    ".agents/blocked/\n"
-                    ".agents/queue/\n"
-                    ".agents/sessions/\n"
-                    ".agents/current-agent\n",
-                    encoding="utf-8",
-                )
-                UI.ok("Created .gitignore")
-                print()
+            # Runtime exclusions — append-if-absent, never write-once (the
+            # old `if not exists` skipped every program that already had a
+            # .gitignore for any other reason).
+            ensure_runtime_exclusions(maestro_path)
+    elif maestro_path.is_dir():
+        # --update is the ONLY path an already-scanned program takes, so it is
+        # the only path that can carry the missing lines to one. Skipping it
+        # was how the write-once bug stayed invisible: every program that
+        # needed the fix re-scanned with --update and got nothing.
+        ensure_runtime_exclusions(maestro_path, dry_run=dry_run)
 
     script_args = [scan_path, "--maestro-dir", str(maestro_path)]  # legacy: plugin script arg
     if update:
