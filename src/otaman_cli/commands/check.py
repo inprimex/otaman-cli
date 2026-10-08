@@ -174,11 +174,6 @@ def cmd_check(args: list[str]) -> int:
                     "status": status,
                     "timestamp": str(fm.get("timestamp", "")),
                     "subject": subject,
-                    # The proposal this broadcast DECIDES, parsed by the format's single
-                    # home. The detection below used to match the stem against `subject`,
-                    # which carries the change TITLE — 0 of 12 live approvals had a stem
-                    # there, so no approval was ever detected (deploy 20261006T144602).
-                    "decides_stem": _approval_link.parse_original_proposal(body_start),
                     "file": f.name,
                     "stem": f.stem,
                     # inter-agent-request-response-contract (tasks 2.1, 2.2)
@@ -390,6 +385,11 @@ def cmd_check(args: list[str]) -> int:
             # dependency waits (core-agent ×2, bridge-agent), all three mislabelled.
             # The kind is already core's single-home property, inferred for legacy
             # entries that predate the field — this surface simply never asked.
+            # Once for the whole section rather than per entry: it walks the bus.
+            try:
+                _decided = _approval_link.decided_stems(active_dir, active_dir.parent / "archive")
+            except OSError:
+                _decided = {}
             for entry in live:
                 if entry.kind == mod.KIND_DEPENDENCY:
                     waiting_on = entry.get("blocked by")
@@ -404,15 +404,14 @@ def cmd_check(args: list[str]) -> int:
                     continue
 
                 stem = entry.proposal
-                has_approval = any(
-                    m["type"] == "spec-change-approved" and stem and m.get("decides_stem") == stem
-                    for m in messages
-                )
+                # The verdict for this proposal, from the single home — which scans the
+                # ARCHIVE too. Matching against `messages` (active only) missed a
+                # decision the moment cleanup archived its broadcast, and 14 are
+                # already archived.
+                verdict = _decided.get(stem) if stem else None
+                has_approval = verdict in ("approved", "dispositioned")
                 has_spec_change = any(m["type"] == "spec-change" for m in messages)
-                has_rejection = any(
-                    m["type"] == "spec-change-rejected" and stem and m.get("decides_stem") == stem
-                    for m in messages
-                )
+                has_rejection = verdict == "rejected"
                 if has_approval and has_spec_change:
                     UI.ok(f"READY TO RESUME: {entry.display_title}")
                     UI.ok("Specs updated — read them and continue implementation")
