@@ -1,8 +1,9 @@
 """Tests for `otaman project` subcommands — Phase 1 (otaman-project-command).
 
 Covers tasks 10.5–10.14 (assign / list / show / update / disable / enable / remove),
-plus _platform.py helpers. Phase 2 (10.1–10.4 / 10.15–10.17 — `add` and
-`remove --delete-remote`) lands after otaman-core 1.x ships.
+plus _platform.py helpers. `add` and `remove --delete-remote` shipped in
+project-add-and-delete-remote; their acceptance suite is
+tests/test_project_add_and_delete_remote.py.
 """
 
 from __future__ import annotations
@@ -499,11 +500,39 @@ def test_remove_delete_remote_unknown_repo_reports_unknown_not_tty(project: Path
 
 
 # ---------------------------------------------------------------------------
-# project add — gated on otaman-core 1.x
+# project add — shipped in project-add-and-delete-remote 1.1; the acceptance
+# suite with the mock git-host adapter lives in
+# tests/test_project_add_and_delete_remote.py. The one case that belongs here
+# is the gate this file used to assert, inverted: add must no longer be a stub.
 
 
-def test_add_not_yet_implemented(project: Path):
-    """Phase 1: add returns a clear gated message until core ships 1.x."""
+def test_add_is_wired_end_to_end_through_the_real_cli(project: Path):
+    """Through main.py, no mocks: the local-only path creates the repo,
+    registers it and survives `otaman init --update`.
+
+    `version:` is injected because init refuses a platform.yaml without it;
+    the rest of this file never reaches init, which is why the shared fixture
+    omits it.
+    """
+    data = load_platform_yaml(project)
+    data["version"] = "0.1.0"
+    save_platform_yaml(project, data)
+
     rc = _run(project, "project", "add", "new-svc", "--owner", "x")
+    combined = rc.stdout + rc.stderr
+    assert "not yet implemented" not in combined, "add is implemented now"
+    assert rc.returncode == 0, combined
+    assert (project.parent / "new-svc" / ".git").is_dir()
+    entry = find_repo(load_platform_yaml(project), "new-svc")
+    assert entry is not None and entry["owner"] == "x"
+    assert "remote" not in entry, "no git_host: configured → local-only"
+
+
+def test_add_init_failure_rolls_back_through_the_real_cli(project: Path):
+    """The rollback path, unmocked: the shared fixture's platform.yaml has no
+    `version:`, so `otaman init --update` genuinely fails — the entry must be
+    gone and the directory must remain."""
+    rc = _run(project, "project", "add", "doomed-svc", "--owner", "x")
     assert rc.returncode != 0
-    assert "not yet implemented" in (rc.stdout + rc.stderr)
+    assert find_repo(load_platform_yaml(project), "doomed-svc") is None
+    assert (project.parent / "doomed-svc").is_dir(), "directory left for inspection"
