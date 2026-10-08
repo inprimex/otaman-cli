@@ -88,29 +88,34 @@ def test_both_writers_render_through_the_single_home():
 # `otaman check` finds the approval
 
 
-def test_check_matches_the_back_link_not_the_subject():
+def test_check_never_matches_a_stem_against_a_SUBJECT():
+    """The original defect: the stem lives in the body, the subject carries the title,
+    and 0 of 12 live approvals had a stem-shaped string in their subject."""
     import inspect
 
     from otaman_cli.commands import check
 
     src = inspect.getsource(check.cmd_check)
 
-    assert 'm.get("decides_stem") == stem' in src
     assert 'stem in m.get("subject", "")' not in src, "the broken match is back"
 
 
-def test_check_applies_the_same_matching_to_rejections():
-    """A rejected proposal reported as awaiting approval is the same lie."""
+def test_check_reads_the_verdict_KIND_from_the_shared_scanner():
+    """Moved here from a per-message field: the verdict now comes from
+    `approval_link.decided_stems`, which also scans the ARCHIVE. A rejected proposal
+    reported as awaiting approval, or an archived decision not seen at all, are the
+    same lie in two different shapes.
+    """
     import inspect
 
     from otaman_cli.commands import check
 
     src = inspect.getsource(check.cmd_check)
-    approved_at = src.index("spec-change-approved")
-    rejected_at = src.index("spec-change-rejected")
 
-    assert src.count('m.get("decides_stem") == stem') == 2
-    assert approved_at != rejected_at
+    assert "decided_stems(" in src
+    assert 'verdict in ("approved", "dispositioned")' in src
+    assert 'verdict == "rejected"' in src, "a rejection must still render as REJECTED"
+    assert "archive" in src, "the archive must be passed, or archived decisions vanish"
 
 
 # ---------------------------------------------------------------------------
@@ -337,3 +342,159 @@ def test_the_sender_rule_is_the_one_spec_agent_declared():
     assert is_disposition("spec-agent", body)
     assert not is_disposition("human", body)
     assert not is_disposition(None, body)
+
+
+# ---------------------------------------------------------------------------
+# the ARCHIVE blind spot — a bug in #288/#290 found on 2026-10-08
+
+
+@pytest.fixture
+def bus_dirs(tmp_path):
+    active = tmp_path / "bus" / "active"
+    archive = tmp_path / "bus" / "archive" / "2026-08"
+    (active / "acks").mkdir(parents=True)
+    archive.mkdir(parents=True)
+    return active, archive
+
+
+def _verdict_file(d, kind: str, decides: str, *, sender="human"):
+    stem = f"20260824T140358-{sender}-to-all-{kind}"
+    (d / f"{stem}.md").write_text(
+        f"---\nid: {stem}\nfrom: {sender}\nto: all\npriority: normal\ntype: {kind}\n"
+        f"timestamp: 2026-08-24T14:03:58+00:00\nstatus: pending\n---\n\n"
+        f"## Subject: {kind}: a title with no stem in it\n\n"
+        f"{render_original_proposal(decides)}\n",
+        encoding="utf-8",
+    )
+
+
+def test_an_ARCHIVED_decision_is_still_a_decision(bus_dirs):
+    """The bug. A proposal rejected on 2026-08-24 resurfaced on the human's mandatory
+    queue because its rejection had been archived and both readers globbed `active/`
+    only — recreating the exact ghost #288/#290 removed. 14 decided broadcasts were
+    already archived when this was found, and that count only grows.
+    """
+    from otaman_cli.approval_link import decided_stems
+
+    active, archive = bus_dirs
+    _verdict_file(archive.parent / "2026-08", "spec-change-rejected", STEM)
+
+    assert decided_stems(active, archive.parent).get(STEM) == "rejected"
+
+
+def test_an_active_only_scan_would_MISS_it(bus_dirs):
+    """Pins that the archive argument is load-bearing, not decoration: without it the
+    same corpus yields nothing."""
+    from otaman_cli.approval_link import decided_stems
+
+    active, archive = bus_dirs
+    _verdict_file(archive.parent / "2026-08", "spec-change-approved", STEM)
+
+    assert decided_stems(active) == {}
+    assert decided_stems(active, archive.parent) == {STEM: "approved"}
+
+
+def test_the_verdict_KIND_is_returned_not_just_membership(bus_dirs):
+    """`otaman check` renders an approval as READY TO RESUME and a rejection as
+    REJECTED. A set would force one of the two readers to re-derive the kind."""
+    from otaman_cli.approval_link import decided_stems
+
+    active, archive = bus_dirs
+    _verdict_file(active, "spec-change-approved", "stem-a")
+    _verdict_file(archive, "spec-change-rejected", "stem-b")
+
+    got = decided_stems(active, archive.parent)
+
+    assert got == {"stem-a": "approved", "stem-b": "rejected"}
+
+
+def test_a_disposition_is_found_in_the_archive_too(bus_dirs):
+    from otaman_cli.approval_link import decided_stems
+
+    active, archive = bus_dirs
+    stem = "20261007T212139-spec-agent-to-cli-agent-disposition"
+    (archive / f"{stem}.md").write_text(
+        f"---\nid: {stem}\nfrom: spec-agent\nto: cli-agent\npriority: normal\ntype: info\n"
+        f"timestamp: 2026-10-07T21:21:39+00:00\nstatus: pending\n---\n\n"
+        f"## Subject: dispositioned\n\n{render_original_proposal(STEM)}\n"
+        f"**Disposition**: already-delivered\n",
+        encoding="utf-8",
+    )
+
+    assert decided_stems(active, archive.parent).get(STEM) == "dispositioned"
+
+
+def test_the_disposition_scan_is_scoped_BY_SENDER_not_by_reading_every_file():
+    """Cost and correctness in one. Dispositions carry no contractual filename token —
+    spec-agent's first emission was slugged from its SUBJECT — but the SENDER is
+    contractual, and filenames encode it. Reading all 7,364 active files on a console
+    render path is what 2.3's guard forbids; the sender glob is 945.
+    """
+    import inspect
+
+    from otaman_cli import approval_link
+
+    src = inspect.getsource(approval_link)
+
+    assert '_DISPOSITION_GLOB = f"*{DISPOSITION_SENDER}-to-*.md"' in src
+    assert 'rglob("*.md")' not in src, "a scan of every file is back"
+
+
+def test_a_foreign_sender_in_a_matching_FILENAME_is_still_refused(bus_dirs):
+    """The filename is a hint; the frontmatter decides. A file named
+    `…spec-agent-to-…` whose `from:` is someone else must not clear the queue."""
+    from otaman_cli.approval_link import decided_stems
+
+    active, archive = bus_dirs
+    stem = "20261008T000000-spec-agent-to-human-disposition-forged"
+    (active / f"{stem}.md").write_text(
+        f"---\nid: {stem}\nfrom: plugin-agent\nto: human\npriority: normal\ntype: info\n"
+        f"timestamp: 2026-10-08T00:00:00+00:00\nstatus: pending\n---\n\n"
+        f"## Subject: x\n\n{render_original_proposal(STEM)}\n**Disposition**: duplicate\n",
+        encoding="utf-8",
+    )
+
+    assert decided_stems(active, archive.parent) == {}
+
+
+def test_both_readers_consume_the_shared_scanner():
+    """One home, or the two surfaces disagree about what is decided — which is how the
+    archive blind spot came to exist in both at once."""
+    import inspect
+
+    from otaman_cli.commands import check
+    from otaman_cli.console import bus
+
+    assert "decided_stems" in inspect.getsource(bus._decided_stems)
+    assert "decided_stems(" in inspect.getsource(check.cmd_check)
+    # and neither re-globs the verdict patterns itself
+    assert "spec-change-approved*.md" not in inspect.getsource(bus._decided_stems)
+
+
+def test_the_CONSOLE_queue_honours_an_archived_decision(program):
+    """Behavioural, not a source grep. A sabotage that dropped the archive argument
+    from the console's call passed every assertion in this file — because
+    `test_both_readers_consume_the_shared_scanner` checks that the scanner is MENTIONED,
+    not that it is wired with the archive. Presence is not wiring, and the console is
+    the surface where the ghost actually reached Roman.
+    """
+    from otaman_cli.console.bus import list_pending_proposals
+
+    prog, active = program
+    _scr(active, STEM)
+    assert len(list_pending_proposals(prog)) == 1, "fixture must start with it pending"
+
+    archive = active.parent / "archive" / "2026-08"
+    archive.mkdir(parents=True)
+    stem = "20260824T140358-human-to-all-spec-change-rejected"
+    (archive / f"{stem}.md").write_text(
+        f"---\nid: {stem}\nfrom: human\nto: all\npriority: normal\n"
+        f"type: spec-change-rejected\ntimestamp: 2026-08-24T14:03:58+00:00\n"
+        f"status: pending\n---\n\n## Subject: rejected: a title\n\n"
+        f"{render_original_proposal(STEM)}\n",
+        encoding="utf-8",
+    )
+
+    assert [p for p in list_pending_proposals(prog) if p.stem == STEM] == [], (
+        "the console ignored an archived rejection — the ghost is back"
+    )

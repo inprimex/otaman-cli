@@ -692,67 +692,22 @@ def list_human_queue(program: Program) -> list[Proposal]:
 
 
 def _decided_stems(program: Program) -> set[str]:
-    """Stems an approval/rejection broadcast on this bus already decides.
+    """Stems a decision on this bus already settles — approved, rejected or
+    dispositioned, in active OR archive.
 
-    Values-free: reads only the back-link line, never a verdict's prose. Returns an
-    empty set on an unreadable bus — a missing comparand must not promote a decided
-    item to pending, and the ack check still stands on its own either way.
+    Delegates to `approval_link.decided_stems`, the single home shared with
+    `otaman check`. This function used to glob `active/` itself, which made an
+    ARCHIVED decision invisible and resurfaced its proposal on the mandatory queue —
+    the ghost #290 was meant to remove. Values-free either way: only the back-link and
+    the verdict kind are read, never a verdict's prose.
     """
-    from otaman_cli.approval_link import (
-        DISPOSITION_LABEL,
-        is_disposition,
-        parse_original_proposal,
-    )
+    from otaman_cli.approval_link import decided_stems
 
     active_dir, _ = program.bus_paths()
-    out: set[str] = set()
-    if not active_dir.is_dir():
-        return out
-    for pattern in ("*spec-change-approved*.md", "*spec-change-rejected*.md"):
-        for f in active_dir.glob(pattern):
-            try:
-                stem = parse_original_proposal(f.read_text(encoding="utf-8", errors="replace"))
-            except OSError:
-                continue
-            if stem:
-                out.add(stem)
-
-    # A DISPOSITION also decides the request (seam ruled 20261007T193507): an SCR that
-    # was already delivered, is a duplicate, or was absorbed into another change needs
-    # no human review. It arrives as a plain `type: info` from spec-agent carrying the
-    # same back-link, so it matches neither glob above — selection had to grow, not the
-    # parser. Flagged to spec-agent BEFORE they emitted, so their ledger would not look
-    # like it had failed when the gap was my glob.
-    #
-    # Narrow by sender on purpose: `is_disposition` honours it only from the one agent
-    # that owns dispositions.yaml. Any agent could otherwise mint an `info` with a
-    # back-link and silently clear items off the human's mandatory queue, and a
-    # vanished review is a worse failure than a visible ghost.
-    for f in active_dir.glob("*.md"):
-        try:
-            text = f.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        if DISPOSITION_LABEL not in text:
-            continue  # cheap tier: skips ~99% without parsing frontmatter
-        sender = _sender_of(text)
-        if is_disposition(sender, text):
-            stem = parse_original_proposal(text)
-            if stem:
-                out.add(stem)
-    return out
-
-
-def _sender_of(text: str) -> str | None:
-    """The `from:` of a message, read without a full YAML parse."""
-    for line in text.splitlines():
-        if line.startswith("from:"):
-            return line.split(":", 1)[1].strip()
-        if line.startswith("---") and line.strip() == "---":
-            continue
-        if line.strip() and not line.startswith(("-", " ")) and ":" not in line:
-            break
-    return None
+    try:
+        return set(decided_stems(active_dir, active_dir.parent / "archive"))
+    except OSError:  # an unreadable bus yields no comparand; the ack check still stands
+        return set()
 
 
 def list_pending_proposals(program: Program) -> list[Proposal]:

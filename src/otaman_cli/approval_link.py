@@ -23,6 +23,7 @@ the format is rendered and parsed here, so a change to one is a change to both.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 LABEL = "Original proposal"
 
@@ -47,6 +48,7 @@ _RE = re.compile(rf"\*\*{LABEL}\*\*:\s*`?([^\s`]+)`?", re.IGNORECASE)
 
 __all__ = [
     "DISPOSITION_LABEL",
+    "decided_stems",
     "DISPOSITION_SENDER",
     "LABEL",
     "is_disposition",
@@ -99,3 +101,72 @@ def is_disposition(sender: str | None, body: str | None) -> bool:
     if (sender or "").strip() != DISPOSITION_SENDER:
         return False
     return parse_disposition(body) is not None and parse_original_proposal(body) is not None
+
+
+#: Decided-broadcast filename patterns. Globbed rather than content-scanned: 7,364
+#: active files, and reading all of them on a console render path is the cost 2.3's
+#: guard exists to prevent.
+_VERDICT_GLOBS = (
+    ("*spec-change-approved*.md", "approved"),
+    ("*spec-change-rejected*.md", "rejected"),
+)
+
+#: Dispositions carry no contractual filename token — spec-agent's first emission was
+#: slugged "disposition-emitted-for-one-of-the-resid" from its SUBJECT, which is not a
+#: promise. The SENDER is contractual, and filenames encode it, so the scan is scoped
+#: by sender (945 active + 456 archived files instead of 7,364) and the frontmatter is
+#: still what decides.
+_DISPOSITION_GLOB = f"*{DISPOSITION_SENDER}-to-*.md"
+
+
+def _sender_from_frontmatter(text: str) -> str | None:
+    for line in text.splitlines()[:40]:
+        if line.startswith("from:"):
+            return line.split(":", 1)[1].strip()
+        if line.startswith("## "):
+            break
+    return None
+
+
+def decided_stems(active_dir: Path, archive_dir: Path | None = None) -> dict[str, str]:
+    """Proposal stem -> the verdict that settles it: approved / rejected / dispositioned.
+
+    Scans the ARCHIVE as well as active, which is the bug this function exists to fix.
+    #288 and #290 both globbed `active/` only, so a decision that had been archived
+    became invisible and its proposal RESURFACED on the human's mandatory queue — the
+    exact ghost those changes removed. Found on 2026-10-08: a proposal rejected on
+    08-24 reappeared because the rejection sits in `archive/2026-08/`, with 14 decided
+    broadcasts already archived and the count only growing.
+
+    Returns the KIND, not just membership, because `otaman check` renders an approval
+    ("READY TO RESUME") differently from a rejection ("REJECTED") and a single home must
+    serve both readers without either re-deriving it.
+    """
+    out: dict[str, str] = {}
+    dirs = [d for d in (active_dir, archive_dir) if d is not None and d.is_dir()]
+
+    for d in dirs:
+        for pattern, verdict in _VERDICT_GLOBS:
+            # rglob so an archive laid out as archive/<month>/ is covered without
+            # hard-coding its shape.
+            for f in d.rglob(pattern):
+                try:
+                    stem = parse_original_proposal(f.read_text(encoding="utf-8", errors="replace"))
+                except OSError:
+                    continue
+                if stem:
+                    out.setdefault(stem, verdict)
+
+        for f in d.rglob(_DISPOSITION_GLOB):
+            try:
+                text = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if DISPOSITION_LABEL not in text:
+                continue
+            if not is_disposition(_sender_from_frontmatter(text), text):
+                continue
+            stem = parse_original_proposal(text)
+            if stem:
+                out.setdefault(stem, "dispositioned")
+    return out
