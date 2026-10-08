@@ -1,7 +1,8 @@
 """`otaman project` command group (otaman-project-command spec).
 
 Subcommands:
-    add        — create remote repo, clone, register, init (CVS-dependent)
+    add        — create repo (remote when git_host: + token resolve), clone,
+               register, init, commit
     assign     — register an existing local git repo
     list       — show registered repos with status filter
     show       — full detail for one repo

@@ -1,11 +1,18 @@
-"""`otaman project remove <name>` (task 8.1).
+"""`otaman project remove <name>` (project-add-and-delete-remote 1.2).
 
-Without `--delete-remote`: just removes the repos[] entry, leaves local dir.
-With `--delete-remote`: requires TTY type-to-confirm; calls
-`adapter.delete_repo()` via otaman_core.git_host (CVS-dependent; needs
-core-agent's 1.x tasks shipped first).
+Without `--delete-remote`: removes the repos[] entry, leaves the local dir
+and makes no git-host API call at all.
 
-Local-only removal path works today regardless of core's state.
+With `--delete-remote`: refuses outright in non-TTY, and in a TTY requires
+type-to-confirm of the exact repo name before calling
+`adapter.delete_repo()` via `otaman_core.git_host`. A mismatch aborts with
+NOTHING changed — no deregistration either, because an operator who
+mistyped the name has not yet told us which of the two acts they wanted.
+
+Order of operations is deliberate: the remote is deleted BEFORE the entry is
+dropped, so a failed deletion leaves the repo still registered and therefore
+still findable. The reverse order can strand a live remote with no record of
+it in platform.yaml.
 """
 
 from __future__ import annotations
@@ -21,6 +28,48 @@ from otaman_cli.project._platform import (
     save_platform_yaml,
 )
 from otaman_cli.ui import UI
+
+
+def _confirm_exact_name(name: str) -> bool:
+    """Type-to-confirm: only the exact repo name proceeds."""
+    UI.warn(f"This will DELETE the remote repository for {name!r}. This cannot be undone.")
+    try:
+        typed = input(f"  Type the repo name to confirm ({name}): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return typed == name
+
+
+def _delete_remote(root, entry, name: str) -> tuple[bool, str]:
+    """``(deleted, message)``. A False with a message is a hard failure."""
+    try:
+        from otaman_core.git_host import (
+            GitHostError,
+            get_adapter,
+            load_git_host_config,
+            parse_remote_url,
+        )
+    except ImportError as exc:  # pragma: no cover - otaman-core always present in-tree
+        return False, f"otaman_core.git_host unavailable ({exc})"
+
+    cfg = load_git_host_config(root)
+    if cfg is None:
+        return False, "no `git_host:` block in platform.yaml — cannot reach the provider"
+
+    remote = (entry or {}).get("remote") or ""
+    if not remote:
+        return False, f"{name} has no `remote:` recorded — nothing to delete remotely"
+
+    info = parse_remote_url(remote, provider_hint=cfg.provider)
+    if info is None:
+        return False, f"could not parse the recorded remote URL: {remote!r}"
+
+    try:
+        adapter = get_adapter(cfg, maestro_root=root)
+        adapter.delete_repo(info.owner, info.repo)
+    except GitHostError as exc:
+        return False, str(exc)
+    return True, f"Deleted remote {info.slug}"
 
 
 def cmd_project_remove(name: str, *, delete_remote: bool = False) -> int:
@@ -42,7 +91,7 @@ def cmd_project_remove(name: str, *, delete_remote: bool = False) -> int:
         UI.error(f"Repo not found: {name}")
         return 1
 
-    # Spec Q6: --delete-remote refuses in non-TTY.  Order matters — only
+    # Spec Q6: --delete-remote refuses in non-TTY. Order matters — only
     # check TTY once we've confirmed the repo exists, so unknown-repo
     # errors report unknown-repo, not TTY (better operator UX).
     if delete_remote:
@@ -51,11 +100,16 @@ def cmd_project_remove(name: str, *, delete_remote: bool = False) -> int:
             UI.muted("  Remove the local entry first with: otaman project remove <name>")
             UI.muted("  Then delete the remote repo manually via your provider.")
             return 1
-        # CVS-dependent path — gated on core-agent 1.x tasks shipping.
-        # For now, surface a clear "not yet wired" message instead of failing
-        # mid-call. When core ships, replace this branch with the real adapter call.
-        UI.warn("--delete-remote is not yet wired up (depends on otaman-core 1.x tasks).")
-        UI.muted("  Proceeding with local-only removal. Delete the remote repo manually.")
+        if not _confirm_exact_name(name):
+            UI.error("Name did not match — aborted. Nothing was changed.")
+            return 1
+        deleted, message = _delete_remote(root, entry, name)
+        if not deleted:
+            UI.error(f"Remote deletion failed: {message}")
+            UI.muted(f"  {name} is still registered in platform.yaml (nothing was changed).")
+            UI.muted(f"  To deregister locally only: otaman project remove {name}")
+            return 1
+        UI.ok(message)
 
     if not remove_repo(data, name):
         UI.error(f"Failed to remove {name}")

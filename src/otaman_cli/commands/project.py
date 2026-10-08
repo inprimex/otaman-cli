@@ -10,7 +10,7 @@ def cmd_project(args: list[str]) -> int:
     """`otaman project <action> [...]` — project/repo registry commands.
 
     Subcommands:
-      add        — create remote repo + register (CVS, gated on otaman-core 1.x)
+      add        — create repo (remote when git_host: + token resolve) + register
       assign     — register an existing local git repo (local-only; works now)
       list       — list registered repos
       show       — show one repo's full detail
@@ -49,7 +49,10 @@ def cmd_project(args: list[str]) -> int:
     url_flag = _take("--url")
     description_flag = _take("--description")
     status_flag = _take("--status")
+    org_flag = _take("--org")
+    provider_flag = _take("--provider")
     delete_remote = _take_bool("--delete-remote")
+    public = _take_bool("--public")
 
     # Remaining positional after flag stripping
     positional = [a for a in rest if not a.startswith("-")]
@@ -90,12 +93,16 @@ def cmd_project(args: list[str]) -> int:
 
         return cmd_project_remove(primary, delete_remote=delete_remote)
     if action == "add":
-        UI.error("`otaman project add` is not yet implemented in this phase.")
-        UI.muted(
-            "Depends on otaman-core 1.x (GitHostAdapter.create_repo). "
-            "Use `otaman project assign` for existing local repos."
+        from otaman_cli.project.cmd_add import cmd_project_add
+
+        return cmd_project_add(
+            primary,
+            owner=owner,
+            org=org_flag,
+            provider=provider_flag,
+            description=description_flag or "",
+            private=not public,
         )
-        return 2
 
     UI.error(f"Unknown project action: {action}")
     UI.muted("Available: add | assign | list | show | update | disable | enable | remove")
