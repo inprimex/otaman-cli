@@ -1331,6 +1331,22 @@ def check_git_host(project_root: Path) -> dict[str, Any]:
     return result
 
 
+def _marker_is_tracked(marker: Path) -> bool:
+    """True when git tracks *marker* — i.e. a checkout, not a writer, restores it.
+
+    Unknown states answer False, which routes to the find-the-writer remedy:
+    that text is a safe default (it starts with "delete it"), whereas wrongly
+    telling someone to `git rm --cached` an untracked file is a dead end.
+    """
+    r = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", "--", marker.name],
+        cwd=str(marker.parent),
+        capture_output=True,
+        text=True,
+    )
+    return r.returncode == 0
+
+
 def check_retired_identity_marker(project_root: Path) -> dict[str, Any]:
     """`.agents/current-agent` must not exist — team-mode D3/B1 cutover.
 
@@ -1343,8 +1359,24 @@ def check_retired_identity_marker(project_root: Path) -> dict[str, Any]:
     consequence is not cosmetic. Measured 2026-10-03 — the live marker read
     `fswatch-agent` (written 10-01) and plugin's post-commit hook attributed every
     repo's commits in the fleet to them for two days (20261003T121802); fswatch-agent
-    had committed nothing. A reappearing marker means something is still WRITING it,
-    so the fix names the writer rather than just the file.
+    had committed nothing.
+
+    A reappearing marker has TWO causes and the remedy must name the right one. The
+    original text assumed the first — something is still writing it — and that is
+    correct for an untracked marker. But a marker COMMITTED to the otaman repo
+    reappears with no writer at all: `init --update` deletes it, the next checkout
+    restores it. deploy-agent root-caused exactly that on otaman-dev
+    (20261008T113746): content `romans`, added 2026-08-16 in c91f2da as collateral in
+    an unrelated commit, file mtime equal to the last `reset: moving to origin/main`.
+    They grepped otaman-cli, otaman-core, otaman-plugin, the installed venv and the
+    deployed plugin tree — no production code writes it.
+
+    So an operator following the find-the-writer remedy hunted a hook that does not
+    exist, found nothing, and watched the ERROR come back on the next pull. That is
+    the worst case for a `fail` check — permanent, loud, and unfixable by its own
+    instructions — and it teaches people to ignore doctor output, which is the
+    backstop that renders a silently-HALTED session. Hence the tracked-ness probe
+    below: same severity, correct cause, actionable fix.
     """
     result: dict[str, Any] = {
         "check": "retired_identity_marker",
@@ -1368,26 +1400,51 @@ def check_retired_identity_marker(project_root: Path) -> dict[str, Any]:
     except OSError as exc:  # unreadable is still PRESENT, which is the finding
         contained = f"<unreadable: {exc}>"
 
+    tracked = _marker_is_tracked(marker)
+
     result["status"] = "fail"
     result["details"]["marker"] = f"PRESENT (retired): {marker}"
     result["details"]["contains"] = contained or "<empty>"
-    result["issues"] = [
-        {
-            "severity": "high",
-            "message": (
-                f".agents/current-agent exists and is RETIRED — it names "
-                f"{contained or '<empty>'!r}. One shared file across N sessions is "
-                "last-writer-wins: whatever wrote it last claims every repo's identity "
-                "for anything still reading it."
-            ),
-            "fix": (
-                "Delete it, then find the writer — a hook or runbook step still "
-                "producing it is the actual defect. Identity resolves from the repo's "
-                ".otaman agent: field or platform.yaml ownership; a path's owner is "
-                "`otaman whoami --for-path <repo>`."
-            ),
-        }
-    ]
+    result["details"]["tracked"] = tracked
+
+    # The consequence is stated conditionally on purpose. A finding that
+    # overstates its own impact gets discounted, and on a host whose hook
+    # already resolves via `otaman whoami --resolve-only` nothing reads this
+    # file. The risk that keeps the severity at `fail` is a tenant whose hook
+    # has NOT been updated — which is a real tenant, not a hypothetical one.
+    shared_file_risk = (
+        "One shared file across N sessions is last-writer-wins: on any tenant whose "
+        "hook still reads it, whatever wrote it last claims every repo's identity."
+    )
+
+    if tracked:
+        message = (
+            f".agents/current-agent exists and is RETIRED — it names "
+            f"{contained or '<empty>'!r}, and it is COMMITTED to this repo. "
+            f"That is why it keeps coming back: `otaman init --update` deletes it "
+            f"and the next checkout restores it. {shared_file_risk}"
+        )
+        fix = (
+            "There is NO writer to hunt — git is the writer. Untrack it: "
+            "`git rm --cached .agents/current-agent`, add `.agents/current-agent` to "
+            "the otaman repo's .gitignore (`otaman scan --update` appends it for you), "
+            "then commit. Identity resolves from the repo's .otaman agent: field or "
+            "platform.yaml ownership; a path's owner is `otaman whoami --for-path <repo>`."
+        )
+    else:
+        message = (
+            f".agents/current-agent exists and is RETIRED — it names "
+            f"{contained or '<empty>'!r}, and it is NOT tracked by git, so something "
+            f"WROTE it. {shared_file_risk}"
+        )
+        fix = (
+            "Delete it, then find the writer — a hook or runbook step still "
+            "producing it is the actual defect. Identity resolves from the repo's "
+            ".otaman agent: field or platform.yaml ownership; a path's owner is "
+            "`otaman whoami --for-path <repo>`."
+        )
+
+    result["issues"] = [{"severity": "high", "message": message, "fix": fix}]
     return result
 
 
