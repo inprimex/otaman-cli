@@ -33,6 +33,35 @@ TYPE_DEFAULT_EFFORT: dict[str, str] = {
     "proposal": "L",
 }
 
+#: Types that do NOT expect a reply — the design's Q4 table assigns them `XS`
+#: with the rationale "No response expected; sort last" (`info` / `fyi`), or
+#: "Ack and proceed" (`spec-change-approved`, `task-complete`).
+#:
+#: This table exists because the `expects-response:` field the sort relies on is
+#: populated by NOTHING: measured 0 of 7,472 messages in this program's raw bus
+#: corpus carry the key at all. With the field always absent, tiebreak step 1 was
+#: a no-op for every message ever sent, leaving step 2 — `response-effort`
+#: ASCENDING, so `XS` first — to decide the order. That sorts the announcements
+#: the table wanted LAST to the TOP of their band, above the `task-assignment`
+#: (`M`) and `question` (`S`) items a reader has to act on.
+#:
+#: So the intent is derived from the type instead of waiting for a field senders
+#: do not write. This conforms the code to the design's stated rationale; it does
+#: not introduce a new ordering dimension (whether a `high` BROADCAST should
+#: outrank a `normal` direct message is a separate policy question, raised as
+#: 20261008T182152 and deliberately not answered here).
+NO_RESPONSE_TYPES: frozenset[str] = frozenset(
+    {
+        "info",
+        "fyi",
+        "announce",
+        "spec-change-approved",
+        "spec-change",
+        "task-complete",
+        "outcome-status-changed",
+    }
+)
+
 EFFORT_ORDER: dict[str, int] = {"XS": 0, "S": 1, "M": 2, "L": 3, "XL": 4}
 PRIORITY_ORDER: dict[str, int] = {"urgent": 4, "high": 3, "normal": 2, "low": 1}
 
@@ -52,19 +81,38 @@ def resolve_response_effort(msg_type: str, explicit_effort: str | None) -> str:
     return TYPE_DEFAULT_EFFORT.get(msg_type, "M")
 
 
+def expects_a_response(msg: dict[str, Any]) -> bool:
+    """Whether *msg* wants a reply — the explicit field, else read off the type.
+
+    An explicit `expects-response:` always wins, in both directions: a sender
+    who writes `false` on a `question` is believed. The type fallback only
+    applies when the key is absent, which — measured on this program's raw bus
+    corpus — is every message: 0 of 7,472 carry it. See NO_RESPONSE_TYPES for
+    why deriving it is conformance to the design's rationale rather than a new
+    policy.
+    """
+    if "expects_response" in msg and msg["expects_response"] is not None:
+        return bool(msg["expects_response"])
+    return str(msg.get("type") or "") not in NO_RESPONSE_TYPES
+
+
 def make_sort_key(msg: dict[str, Any]):
     """Return a sortable tuple for messages within a priority band.
 
     Sort order (ascending — lower tuples come first):
       1. Priority DESC (urgent > high > normal > low)
-      2. expects-response True before False/absent
+      2. expects-a-response before not — explicit field, else derived from type
       3. response-effort XS → XL ascending (using type-default when missing)
       4. timestamp ascending
+
+    Step 2 is where an announcement sinks below actionable work. It used to read
+    the raw field only, which no sender writes, so it never fired and step 3's
+    ascending effort put every `XS` announcement at the top of its band.
     """
     priority = str(msg.get("priority") or "normal")
     return (
         -PRIORITY_ORDER.get(priority, 0),
-        0 if msg.get("expects_response") else 1,
+        0 if expects_a_response(msg) else 1,
         EFFORT_ORDER.get(
             resolve_response_effort(
                 str(msg.get("type") or ""),
@@ -133,6 +181,8 @@ def has_outbound_reply(
 
 __all__ = [
     "TYPE_DEFAULT_EFFORT",
+    "NO_RESPONSE_TYPES",
+    "expects_a_response",
     "EFFORT_ORDER",
     "PRIORITY_ORDER",
     "DEADLINE_WINDOW",
