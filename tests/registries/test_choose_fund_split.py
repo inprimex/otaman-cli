@@ -101,6 +101,23 @@ def test_the_mode_is_read_off_the_acting_humans_hats(program, roles, expected):
     assert operating_mode(program.root) == expected
 
 
+def test_cofounder_plus_cto_is_team_mode_because_cofounder_is_not_a_fund_hat(program):
+    """`cofounder` is an equity-and-standing label, not a function — it says who
+    co-owns the company and nothing about who may commit budget (cofounder-agent
+    ruling Q1, 20261009T123257).
+
+    So `[cofounder, cto]` chooses but cannot fund, and team-mode is the system
+    saying "this program has not declared who funds". That is correct behaviour,
+    not a refusal to work around: the fix is for the program to declare a fund
+    hat. Pinned as its own case because the risk here is someone later reading
+    the refusal as a bug and adding `cofounder` to FUND_HATS — a wrong funding
+    authority is the single most expensive thing in this vocabulary to get
+    wrong, and the default must fail closed.
+    """
+    program.write_roster(["cofounder", "cto"])
+    assert operating_mode(program.root) == "team"
+
+
 def test_an_unresolved_human_is_team_mode(program, monkeypatch):
     """No identity → no hats → the cautious mode, which refuses the combined form.
 
