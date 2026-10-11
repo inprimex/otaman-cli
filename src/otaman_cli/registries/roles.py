@@ -218,6 +218,20 @@ def operating_mode(root: Path) -> str:
     that is precisely what makes the combined keystroke safe to offer them — there is
     no second party whose decision it would collapse. A program whose hats are split
     across people is team-mode for the same reason, with no setting to get wrong.
+
+    **The mode is per-HUMAN, not per-PROGRAM, and that is correct — not a bug to
+    fix later.** It follows from the derivation above, but the natural reading of
+    "this program is in team-mode" is a program-level fact, so it is stated here
+    explicitly (cofounder-agent ruling, 20261009T123257, item 4). On ONE program, a
+    maintainer holding ``[founder]`` and a contributor holding ``[cto]`` are in
+    founder-mode and team-mode respectively, at the same time: the maintainer keeps
+    their fast track, and the invited contributor cannot collapse a funding decision
+    they hold no authority for. That is the intended behaviour under
+    JTBD-149-distributed-workspaces-per-human — do not "correct" it into a
+    program-wide mode.
+
+    An unresolved human yields team-mode, because the safe default is the one that
+    cannot collapse two decisions by accident.
     """
     hats, _ = acting_hats(root)
     both = held_hat(hats, CHOOSE_HATS) and held_hat(hats, FUND_HATS)

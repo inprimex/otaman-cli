@@ -131,18 +131,28 @@ def ensure_runtime_exclusions(maestro_path: Path, *, dry_run: bool = False) -> N
     else:
         UI.ok(".gitignore already excludes every runtime path")
 
-    # Report-and-stop: an ignore line is not retroactive.
+    # Report-and-stop: an ignore line is not retroactive, and it is not inert
+    # either. Both halves are stated because the second is the one that decides
+    # whether running this was a good idea.
     if (maestro_path / ".git").exists():
         tracked = _tracked_runtime_paths(maestro_path)
         if tracked:
-            UI.warn("Runtime paths are already TRACKED by git — the ignore lines above")
-            UI.warn("do not untrack what is already committed:")
+            UI.warn("Runtime paths are already TRACKED by git. Two consequences:")
             for rel, count in tracked:
                 UI.muted(f"  {rel}: {count} tracked file(s)")
             UI.muted(
-                "  Untracking is `git rm -r --cached <path>` and is NOT done for you: "
-                "on some programs these commits are the only durable copy of that "
-                "state. Verify a backup exists first, then untrack by hand."
+                "  1. The ignore line does NOT untrack them. Those files stay in git "
+                "and their edits keep being committed. Untracking is "
+                "`git rm -r --cached <path>` and is NOT done for you: on some "
+                "programs these commits are the only durable copy of that state. "
+                "Verify a backup exists first, then untrack by hand."
+            )
+            UI.muted(
+                "  2. From now on NEW files under these paths are ignored, so they "
+                "will never enter git. If you were relying on these commits as a "
+                "backup, that backup is now FROZEN at the files above — it stops "
+                "growing, silently (an ignored file does not even show as "
+                "untracked in `git status`)."
             )
     print()
 
