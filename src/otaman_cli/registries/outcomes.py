@@ -250,6 +250,24 @@ class Outcome(BaseModel):
     chosen_solution: str | None = Field(default=None, alias="chosen-solution")
     cost_accepted: bool | None = Field(default=None, alias="cost-accepted")
     release: str | None = None
+
+    #: What shipped scope was CUT, on a `Done` record that did not deliver in full
+    #: (rac 1.3 canon; cofounder's 1.4 migrates the seven legacy `Done-Partial` rows
+    #: to `Done` + remainder). Core pins it as a string with `minLength: 1`.
+    #:
+    #: Optional here for the same reason core's schema leaves it optional rather than
+    #: required-if-Done: that rule would reject the 30 clean `Done` records that cut
+    #: nothing. The required-when-cut obligation is the migration's and the validate
+    #: flag's to enforce, not this model's.
+    #:
+    #: This field exists because `extra="forbid"` above made its ABSENCE a hard
+    #: rejection: a migrated record carrying `remainder:` made the whole
+    #: outcomes register unloadable by cli, and `load_outcomes` raises on an
+    #: unloadable register by design (the console's fallback notice and doctor's
+    #: check are both read off that failure). So the missing field here, not any
+    #: absent core delivery, was what blocked the 1.4 write — core #117 is lenient
+    #: by construction and never gated loading (core-agent, 20261011T085447).
+    remainder: str | None = None
     product_notes: str = Field(default="", alias="product-notes")
 
     @field_validator("product_notes", mode="before")

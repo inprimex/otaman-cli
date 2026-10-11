@@ -88,12 +88,33 @@ class _ProgramItem(ListItem):
 _TYPE_TAG = {"spec-change-request": "SCR", "outcome-proposal": "outcome"}
 
 
-def queue_row_label(proposal: Proposal) -> str:
+def row_citation_id(stem: str) -> str:
+    """The token agents cite a bus item by — the stem's timestamp prefix.
+
+    Agents reference items as `20261009T121501`, which is exactly the stem up to
+    the first `-`. Anything an agent can name in a bus message has to be findable
+    in the surface that displays it; before this, every row rendered no
+    identifier at all and a cited stem could not be mapped to a row (Roman via
+    deploy-agent, 20261011T093956).
+    """
+    return (stem or "").split("-", 1)[0]
+
+
+def queue_row_label(proposal: Proposal, width: int = 0) -> str:
     """One merged-queue row's text (2.1).
 
     A pure function so the row's wording is testable without mounting a widget —
     a ListItem's children do not exist until it is mounted, which made the
     rendered text unreachable from a unit test.
+
+    *width* is the row's available character width; 0 means "unknown, do not
+    truncate" (same convention as the artifact tree's clip). When given, the
+    SUBJECT is what shrinks — never the suffix. The terminal used to clip the
+    whole line after the suffix was appended, so a long title ate `— from X`
+    and `[a/A/x/d]`: the verbose proposals lost both their provenance and the
+    hint naming the keys that act on them, while short ones kept both. That
+    inverts the priority. The keys are the affordance and the sender is the
+    provenance; the title is the part a reader can afford to see less of.
     """
     tag = _TYPE_TAG.get(proposal.msg_type, proposal.msg_type or "msg")
     mark = "* " if proposal.is_decision else "  "
@@ -104,10 +125,22 @@ def queue_row_label(proposal: Proposal) -> str:
     # number either. Read off the proposal the store already holds — the score and
     # verdict are derived at ingest (crs D1: no IO on the render path).
     gate = getattr(proposal, "gate_suffix", "") or ""
-    return (
-        f"{mark}[{tag}] [{proposal.priority}] {proposal.subject}"
-        f"  —  from {proposal.from_agent}{keys}{gate}"
+    rid = row_citation_id(proposal.stem)
+    prefix = (
+        f"{mark}[{tag}] [{proposal.priority}] {rid}  "
+        if rid
+        else f"{mark}[{tag}] [{proposal.priority}] "
     )
+    suffix = f"  —  from {proposal.from_agent}{keys}{gate}"
+    subject = proposal.subject
+    if width > 0:
+        room = width - len(prefix) - len(suffix)
+        if room < len(subject):
+            # >= 2 so there is at least one real character beside the ellipsis;
+            # below that the subject goes entirely rather than rendering as a
+            # lone "…", because the suffix is the half worth keeping.
+            subject = subject[: room - 1].rstrip() + "\u2026" if room >= 2 else ""
+    return f"{prefix}{subject}{suffix}"
 
 
 class _ProposalItem(ListItem):
@@ -1129,8 +1162,14 @@ class InboxScreen(_AnswerAction, _DecisionActions, Screen):
                 node = tree.root.add(
                     Text(group.label), data=group, expand=self._group_expanded(group)
                 )
+                # Clip to the tree's content width MINUS the two indent levels a
+                # row sits at (root -> group -> row), so the reserved suffix is
+                # what actually survives on screen rather than being pushed out
+                # by indentation the label cannot see. 0 when the tree has no
+                # size yet (first paint before layout) → no truncation.
+                row_width = tree.size.width - 8 if tree.size.width else 0
                 for row in group.rows:
-                    node.add_leaf(Text(queue_row_label(row)), data=row)
+                    node.add_leaf(Text(queue_row_label(row, row_width)), data=row)
         finally:
             self._painting = False
         self._restore_cursor(keep)
