@@ -254,3 +254,64 @@ def test_dry_run_on_a_complete_gitignore_says_so(meta: Path, capsys):
     ensure_runtime_exclusions(meta, dry_run=True)
 
     assert "already excludes every runtime path" in capsys.readouterr().out
+
+
+def test_tracked_report_states_the_freeze_consequence_not_just_the_state(meta: Path, capsys):
+    """Naming the state ("they stay tracked") without the consequence ("new ones
+    never enter git") understates the decision the operator is making.
+
+    Verified git behaviour, not an assumption: a tracked file keeps committing
+    its edits, while a NEW file under a newly-ignored path is never added and
+    does not even appear as untracked in `git status`. For a program using these
+    commits as its bus backup, appending the line freezes that backup.
+    """
+    bus = meta / ".agents" / "bus"
+    bus.mkdir(parents=True)
+    (bus / "msg.md").write_text("x\n", encoding="utf-8")
+    _git("add", ".agents/bus/msg.md", cwd=meta)
+    _git("commit", "-q", "-m", "bus", cwd=meta)
+
+    ensure_runtime_exclusions(meta)
+    out = capsys.readouterr().out
+
+    assert "never enter git" in out
+    assert "FROZEN" in out
+    assert "stops" in out and "growing" in out
+
+
+def test_the_freeze_is_real_a_new_file_under_the_ignored_path_is_not_added(meta: Path):
+    """The warning's claim, asserted against git rather than trusted.
+
+    This is what makes the second consequence worth printing: the tracked file's
+    edit stages, the new file is silently absent, and `git status` shows no `??`
+    for it either.
+    """
+    bus = meta / ".agents" / "bus"
+    bus.mkdir(parents=True)
+    old_msg = bus / "msg1.md"
+    old_msg.write_text("old\n", encoding="utf-8")
+    _git("add", ".agents/bus/msg1.md", cwd=meta)
+    _git("commit", "-q", "-m", "bus", cwd=meta)
+
+    ensure_runtime_exclusions(meta)
+
+    old_msg.write_text("old\nchanged\n", encoding="utf-8")
+    (bus / "msg2.md").write_text("new\n", encoding="utf-8")
+    _git("add", "-A", cwd=meta)
+
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=str(meta),
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    assert ".agents/bus/msg1.md" in staged, "an edit to a TRACKED file still commits"
+    assert ".agents/bus/msg2.md" not in staged, "a NEW file under the path is frozen out"
+
+    status = subprocess.run(
+        ["git", "status", "--short"],
+        cwd=str(meta),
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "msg2.md" not in status, "and it is silent — not even listed as untracked"
